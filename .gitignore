@@ -1,0 +1,25 @@
+# abssctl GIT Ignored Files
+# Keep this lean and focused on things that should never be committed.
+
+# ── OS / editor cruft ──────────────────────────────────────────────────────────
+.DS_Store
+**/.DS_Store
+Thumbs.db
+*.swp
+*~
+.vscode/
+.idea/
+
+# ── Archives / bundles / build outputs ────────────────────────────────────────
+dist/
+*.zip
+*.tar.gz
+SHA256SUMS
+MANIFEST.txt
+
+# ── Node/npm noise (not used in this repo, but common in forks/tests) ─────────
+node_modules/
+npm-debug.log*
+package-lock.json
+
+# ── Local helper outputs from repo audits ─────────────────────────────────────
