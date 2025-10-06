@@ -110,6 +110,7 @@ class AppConfig:
     registry_dir: Path
     logs_dir: Path
     runtime_dir: Path
+    lock_timeout: float
     npm_package_name: str
     reverse_proxy: str
     service_user: str
@@ -127,6 +128,7 @@ class AppConfig:
             "registry_dir": str(self.registry_dir),
             "logs_dir": str(self.logs_dir),
             "runtime_dir": str(self.runtime_dir),
+            "lock_timeout": self.lock_timeout,
             "npm_package_name": self.npm_package_name,
             "reverse_proxy": self.reverse_proxy,
             "service_user": self.service_user,
@@ -144,6 +146,7 @@ DEFAULTS: dict[str, object] = {
     "registry_dir": None,  # derived from state_dir when absent
     "logs_dir": "/var/log/abssctl",
     "runtime_dir": "/run/abssctl",
+    "lock_timeout": 30.0,
     "npm_package_name": "@actual-app/sync-server",
     "reverse_proxy": "nginx",
     "service_user": "actual-sync",
@@ -229,6 +232,10 @@ def _validate_structure(raw: Mapping[str, object]) -> None:
         joined = ", ".join(sorted(unknown_keys))
         raise ConfigError(f"Unknown configuration keys: {joined}.")
 
+    lock_timeout = raw.get("lock_timeout")
+    if lock_timeout is not None:
+        _expect_positive_float(lock_timeout, "lock_timeout", default=30.0)
+
     ports = raw.get("ports")
     if ports is not None:
         ports_map = _as_dict(ports, "ports")
@@ -271,6 +278,7 @@ def _build_app_config(raw: Mapping[str, object]) -> AppConfig:
     state_dir = _to_path(raw.get("state_dir"))
     logs_dir = _to_path(raw.get("logs_dir"))
     runtime_dir = _to_path(raw.get("runtime_dir"))
+    lock_timeout = _expect_positive_float(raw.get("lock_timeout"), "lock_timeout", default=30.0)
 
     registry_dir_value = raw.get("registry_dir")
     registry_dir = _to_path(registry_dir_value) if registry_dir_value else state_dir / "registry"
@@ -305,6 +313,7 @@ def _build_app_config(raw: Mapping[str, object]) -> AppConfig:
         registry_dir=registry_dir,
         logs_dir=logs_dir,
         runtime_dir=runtime_dir,
+        lock_timeout=lock_timeout,
         npm_package_name=str(raw.get("npm_package_name", "@actual-app/sync-server")),
         reverse_proxy=str(raw.get("reverse_proxy", "nginx")),
         service_user=str(raw.get("service_user", "actual-sync")),
@@ -405,6 +414,32 @@ def _expect_str(value: object, key: str) -> str:
     if isinstance(value, str):
         return value
     raise ConfigError(f"Expected {key} to resolve to a string. Got {value!r}.")
+
+
+def _expect_positive_float(
+    value: object | None,
+    label: str,
+    *,
+    default: float,
+) -> float:
+    if value is None:
+        return float(default)
+    if isinstance(value, bool):
+        raise ConfigError(f"Expected {label} to be a number. Got boolean {value!r}.")
+    if isinstance(value, (int, float)):
+        numeric = float(value)
+    elif isinstance(value, str):
+        try:
+            numeric = float(value)
+        except ValueError as exc:
+            raise ConfigError(f"Invalid number for {label}: {value!r}.") from exc
+    else:
+        raise ConfigError(
+            f"Expected {label} to be numeric. Got {type(value).__name__}."
+        )
+    if numeric <= 0:
+        raise ConfigError(f"{label} must be greater than zero. Got {numeric}.")
+    return numeric
 
 
 def _as_dict(value: object | None, label: str) -> dict[str, object]:

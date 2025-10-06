@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import yaml
@@ -24,7 +25,12 @@ def _prepare_environment(
 ) -> tuple[dict[str, str], Path]:
     state_dir = tmp_path / "state"
     logs_dir = tmp_path / "logs"
-    config = {"state_dir": str(state_dir), "logs_dir": str(logs_dir)}
+    runtime_dir = tmp_path / "run"
+    config = {
+        "state_dir": str(state_dir),
+        "logs_dir": str(logs_dir),
+        "runtime_dir": str(runtime_dir),
+    }
     if config_overrides:
         config.update(config_overrides)
 
@@ -50,17 +56,19 @@ def _prepare_environment(
     return env, state_dir
 
 
-def test_version_option_outputs_package_version() -> None:
+def test_version_option_outputs_package_version(tmp_path: Path) -> None:
     """CLI ``--version`` flag emits the package version."""
-    result = runner.invoke(app, ["--version"])
+    env, _ = _prepare_environment(tmp_path)
+    result = runner.invoke(app, ["--version"], env=env)
 
     assert result.exit_code == 0
     assert __version__ in result.stdout
 
 
-def test_invocation_without_subcommand_shows_help() -> None:
+def test_invocation_without_subcommand_shows_help(tmp_path: Path) -> None:
     """Calling the CLI without a subcommand shows help output."""
-    result = runner.invoke(app)
+    env, _ = _prepare_environment(tmp_path)
+    result = runner.invoke(app, env=env)
 
     assert result.exit_code == 0
     assert "Actual Budget Multi-Instance Sync Server Admin CLI" in result.stdout
@@ -75,6 +83,7 @@ def test_config_show_renders_table(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert "state_dir" in result.stdout
     assert state_dir.name in result.stdout
+    assert "lock_timeout" in result.stdout
 
 
 def test_config_show_json(tmp_path: Path) -> None:
@@ -89,6 +98,7 @@ def test_config_show_json(tmp_path: Path) -> None:
     payload = json.loads(result.stdout)
     assert payload["install_root"] == "/opt/abssctl"
     assert payload["state_dir"] == str(state_dir)
+    assert payload["lock_timeout"] == 30.0
 
 
 def test_version_list_uses_registry(tmp_path: Path) -> None:
@@ -215,6 +225,28 @@ def test_instance_show_missing(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert "not found" in result.stdout
+
+
+def test_instance_create_acquires_lock(tmp_path: Path) -> None:
+    """`instance create` acquires the expected lock and logs wait duration."""
+    env, state_dir = _prepare_environment(tmp_path)
+
+    result = runner.invoke(app, ["instance", "create", "alpha"], env=env)
+
+    assert result.exit_code == 0
+
+    runtime_dir = tmp_path / "run"
+    lock_path = runtime_dir / "alpha.lock"
+    assert lock_path.exists()
+    lock_metadata = json.loads(lock_path.read_text(encoding="utf-8"))
+    assert lock_metadata["pid"] == os.getpid()
+
+    logs_dir = state_dir.parent / "logs"
+    operations_log = logs_dir / "operations.jsonl"
+    log_lines = operations_log.read_text(encoding="utf-8").splitlines()
+    record = json.loads(log_lines[-1])
+    assert record["command"] == "instance create"
+    assert record.get("lock_wait_ms") is not None
 
 
 def test_operations_logging_creates_records(tmp_path: Path) -> None:

@@ -25,7 +25,7 @@ Alpha Builds — Foundations
 
 - [x] Implement the structured logging subsystem per ADR-014/ADR-028 (human
   logs + ``operations.jsonl``) and integrate it with existing CLI commands.
-- [ ] Implement global and per-instance locking primitives per ADR-027 and
+- [x] Implement global and per-instance locking primitives per ADR-027 and
   ensure mutating commands acquire/release locks safely (with tests).
 - [ ] Introduce the template rendering engine for systemd and nginx assets
   (e.g., Jinja-based templates under ``src/abssctl/templates/``) per

@@ -20,6 +20,7 @@ from rich.table import Table
 
 from . import __version__
 from .config import AppConfig, load_config
+from .locking import LockManager
 from .logging import StructuredLogger
 from .providers import InstanceStatusProvider, VersionProvider
 from .state import StateRegistry
@@ -55,25 +56,36 @@ class RuntimeContext:
     registry: StateRegistry
     version_provider: VersionProvider
     instance_status_provider: InstanceStatusProvider
+    locks: LockManager
     logger: StructuredLogger
 
 
-def _ensure_runtime(ctx: typer.Context, config_file: Path | None) -> RuntimeContext:
+def _ensure_runtime(
+    ctx: typer.Context,
+    config_file: Path | None,
+    lock_timeout_override: float | None = None,
+) -> RuntimeContext:
     runtime = ctx.obj
     if isinstance(runtime, RuntimeContext):
         return runtime
 
-    config = load_config(config_file=config_file)
+    overrides: dict[str, object] = {}
+    if lock_timeout_override is not None:
+        overrides["lock_timeout"] = lock_timeout_override
+
+    config = load_config(config_file=config_file, overrides=overrides)
     registry = StateRegistry(config.registry_dir)
     version_cache = registry.root / "remote-versions.json"
     version_provider = VersionProvider(cache_path=version_cache)
     instance_status_provider = InstanceStatusProvider()
+    locks = LockManager(config.runtime_dir, config.lock_timeout)
     logger = StructuredLogger(config.logs_dir)
     runtime = RuntimeContext(
         config=config,
         registry=registry,
         version_provider=version_provider,
         instance_status_provider=instance_status_provider,
+        locks=locks,
         logger=logger,
     )
     ctx.obj = runtime
@@ -84,7 +96,7 @@ def _get_runtime(ctx: typer.Context) -> RuntimeContext:
     runtime = ctx.obj
     if isinstance(runtime, RuntimeContext):
         return runtime
-    return _ensure_runtime(ctx, None)
+    return _ensure_runtime(ctx, None, None)
 
 
 @app.callback(invoke_without_command=True)
@@ -97,10 +109,15 @@ def _root(  # noqa: D401 - Typer displays help for us, docstring optional.
         help="Show the abssctl version and exit.",
     ),
     config_file: Path | None = CONFIG_FILE_OPTION,
+    lock_timeout: float | None = typer.Option(
+        None,
+        "--lock-timeout",
+        help="Override lock acquisition timeout in seconds.",
+    ),
 ) -> None:
     """Entry point callback invoked for every CLI execution."""
     if version:
-        runtime = _ensure_runtime(ctx, config_file)
+        runtime = _ensure_runtime(ctx, config_file, lock_timeout)
         with runtime.logger.operation(
             "root --version",
             args={"version": True},
@@ -110,7 +127,7 @@ def _root(  # noqa: D401 - Typer displays help for us, docstring optional.
             op.success("Reported CLI version.", changed=0)
         raise typer.Exit(code=0)
 
-    _ensure_runtime(ctx, config_file)
+    _ensure_runtime(ctx, config_file, lock_timeout)
 
     if ctx.invoked_subcommand is None:
         console.print(ctx.get_help())
@@ -457,11 +474,13 @@ def instance_create(
         args={"name": name},
         target={"kind": "instance", "name": name},
     ) as op:
-        _placeholder(message)
-        op.warning(
-            "Instance creation placeholder executed.",
-            warnings=["unimplemented"],
-        )
+        with runtime.locks.mutate_instances([name]) as bundle:
+            op.set_lock_wait_ms(bundle.wait_ms)
+            _placeholder(message)
+            op.warning(
+                "Instance creation placeholder executed.",
+                warnings=["unimplemented"],
+            )
 
 
 @versions_app.command("list")
@@ -581,11 +600,13 @@ def backup_create(
         args={"instance": instance},
         target={"kind": "backup", "instance": instance},
     ) as op:
-        _placeholder(message)
-        op.warning(
-            "Backup creation placeholder executed.",
-            warnings=["unimplemented"],
-        )
+        with runtime.locks.mutate_instances([instance]) as bundle:
+            op.set_lock_wait_ms(bundle.wait_ms)
+            _placeholder(message)
+            op.warning(
+                "Backup creation placeholder executed.",
+                warnings=["unimplemented"],
+            )
 
 
 def main() -> None:

@@ -44,6 +44,7 @@ def test_env_overrides_take_precedence(tmp_path: Path) -> None:
         "ABSSCTL_PORTS__BASE": "6500",
         "ABSSCTL_TLS__ENABLED": "false",
         "ABSSCTL_STATE_DIR": str(state_dir),
+        "ABSSCTL_LOCK_TIMEOUT": "45",
     }
 
     config = load_config(env=env)
@@ -52,6 +53,7 @@ def test_env_overrides_take_precedence(tmp_path: Path) -> None:
     assert config.tls.enabled is False
     assert config.state_dir == state_dir
     assert config.registry_dir == state_dir / "registry"
+    assert config.lock_timeout == 45.0
 
 
 def test_env_can_select_config_file(tmp_path: Path) -> None:
