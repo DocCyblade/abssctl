@@ -97,6 +97,7 @@ Roadmap & Specifications
 ========================
 
 - Requirements & project plan: ``docs/requirements/abssctl-app-specs.txt``
+- Milestone roadmap tracker: ``docs/roadmap.rst``
 - Architecture Decision Records: ``docs/adrs``
 - Support matrix source: ``docs/support/actual-support-matrix.yml``
 

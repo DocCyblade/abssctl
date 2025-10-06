@@ -75,6 +75,7 @@ test: $(TEST_VENV)/.installed
 ## docs: Build Sphinx docs via .venv (dev env)
 .PHONY: docs
 docs: $(DEV_VENV)/.installed
+	rm -rf docs/_build/html
 	$(DEV_VENV)/bin/python -m sphinx.cmd.build -b html docs/source docs/_build/html
 
 ## build: Build distributions via .venv-build (build env)

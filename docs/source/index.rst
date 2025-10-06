@@ -18,6 +18,7 @@ will be expanded as functionality lands.
    guides/developer-guide
    reference/cli-commands
    requirements/abssctl-app-specs
+   roadmap
    support/actual-support-matrix
 
 

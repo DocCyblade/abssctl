@@ -1,0 +1,29 @@
+# Session Log
+
+# How to use:
+This session log shall log all work performed in a work session. Work sesson will start with date/time. Then list out items performed. When session is done write a Wrap up summary, a next steps section for quick next steps, and a AI prompt if working with with AI tools.
+
+## 2025-10-06 Alpha3 Session
+- Session continuing on branch dev-alpha3; prior session notes unavailable.
+- Reviewed docs/requirements/abssctl-app-specs.txt (v1.0-draft-5) for v1 goals, scope, and roadmap.
+- Summarised ADR-001 through ADR-032 decisions (Typer CLI, packaging to PyPI, TKL focus, filesystem layout, locking, TLS defaults, backup policy, doctor/CI strategy).
+- Surveyed current Pre-Alpha code: Typer CLI scaffold with config/instance/version/backup groups, config loader merging defaults+YAML+env, state registry with atomic writes, npm version provider (cache-aware), placeholder instance status, and pytest coverage for these foundations.
+- Renamed session log to `session-log.txt` per workflow update and introduced ROADMAP.md for milestone-aligned TODO tracking.
+- Compiled ROADMAP.md capturing outstanding Alpha, Beta, RC, Release tasks plus optional future enhancements; added docs/roadmap.rst to expose the roadmap in the documentation set and left a pointer from ROADMAP.md.
+- Linked docs/roadmap.rst into the Sphinx toctree (`docs/source/index.rst`), added a Sphinx-friendly wrapper at `docs/source/roadmap.rst`, and surfaced the document in README for easy discovery.
+- Updated `make docs` to remove the previous `docs/_build/html` output before rebuilding to keep generated docs fresh.
+- Ready for next implementation or review task.
+
+### Wrap Summary
+- Built shared understanding of v1 scope by reviewing requirements and ADRs.
+- Catalogued current Pre-Alpha implementation (CLI scaffold, config/state utilities, pytest coverage).
+- Established roadmap tracking in `docs/roadmap.rst` and linked it across README and Sphinx docs.
+- Improved `make docs` workflow to clean out old HTML artifacts before rebuilds.
+
+### Next Steps / TODO
+- Start delivering Alpha milestone work (e.g., structured logging and lock primitives).
+- Draft design/implementation plan for systemd/nginx providers in advance of Beta tasks.
+- Evaluate test strategy expansion to cover upcoming mutating commands.
+
+### Next Session Primer
+Prompt: "We're on branch dev-alpha3. Please review `session-log.txt` and `docs/roadmap.rst` to continue Alpha milestone work—let's tackle the structured logging subsystem next."
