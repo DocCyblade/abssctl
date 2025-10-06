@@ -24,7 +24,9 @@ Coding Workflow
       python3.11 -m venv .venv --prompt dev
       source .venv/bin/activate
 
-3. Run ``pip install -e .[dev]`` to install dependencies.
+3. Run ``pip install -e .[dev]`` to install dependencies. This editable install
+   ensures ``abssctl`` is importable in tests and CLI executions without
+   tweaking ``PYTHONPATH``.
 4. Implement your changes following the roadmap priorities.
 5. Run linting, typing, tests, and Sphinx builds::
 
@@ -34,6 +36,19 @@ Coding Workflow
       sphinx-build -b html docs/source docs/_build/html
 
 6. Open a pull request targeting ``dev`` and request review.
+
+Testing Registry Data
+---------------------
+
+- Commands such as ``version list`` and ``instance list`` read from
+  ``<state_dir>/registry/versions.yml`` and ``instances.yml``. During testing,
+  create these files under a temporary ``state_dir`` (see the CLI tests for an
+  example helper) to simulate installed versions or provisioned instances.
+- JSON flags (``--json``) make assertions easier when validating command
+  output in automated tests.
+- ``version list --remote`` uses the npm CLI when available. During testing you
+  can avoid network access by setting ``ABSSCTL_VERSIONS_CACHE`` to a JSON file
+  containing an array of version strings or by exporting ``ABSSCTL_SKIP_NPM=1``.
 
 Open Questions
 --------------

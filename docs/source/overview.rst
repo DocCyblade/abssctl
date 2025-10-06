@@ -26,3 +26,7 @@ Next Steps
 The Pre-Alpha milestone focuses solely on repository infrastructure. Alpha
 builds will deliver functional commands for version management, instance
 provisioning, and state inspection.
+
+The first Alpha deliverable is ``abssctl config show``, which exposes the
+effective configuration after merging defaults, ``/etc`` settings, and
+environment overrides.

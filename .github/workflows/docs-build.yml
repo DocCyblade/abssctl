@@ -1,0 +1,79 @@
+name: docs
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure tag points at main
+        if: github.event_name == 'push'
+        run: |
+          TAG_COMMIT=$(git rev-parse $GITHUB_SHA)
+          MAIN_COMMIT=$(git rev-parse origin/main)
+          if ! git merge-base --is-ancestor $MAIN_COMMIT $TAG_COMMIT; then
+            echo "Tag is not on main. Exiting."
+            exit 1
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install doc dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f docs/requirements.txt ]; then
+            pip install -r docs/requirements.txt
+          else
+            pip install sphinx
+            pip install sphinx-rtd-theme
+          fi
+          pip install pyyaml
+
+      - name: Generate support matrix files
+        run: |
+          python ./tools/gen_support_matrix.py
+          test -f ./docs/support/actual-support-matrix.rst
+          test -f ./docs/support/actual-support-matrix.md
+
+      - name: Build Sphinx HTML
+        run: |
+          sphinx-build -b html docs/source _site
+          touch _site/.nojekyll
+
+      - name: Upload artifact for Pages
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

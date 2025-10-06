@@ -51,6 +51,9 @@ Quick Start (Alpha Foundations)
 
       pip install -e .[dev]
 
+   This registers ``abssctl`` with your virtualenv so commands and tests import
+   without needing to tweak ``PYTHONPATH``.
+
 3. Run the basic quality checks::
 
       ruff check src tests
@@ -61,6 +64,9 @@ Quick Start (Alpha Foundations)
 
       abssctl --help
       abssctl --version
+      abssctl config show
+      abssctl version list --json
+      abssctl instance list --json
 
 Repository Layout
 =================
@@ -69,6 +75,22 @@ Repository Layout
 - ``tests`` — Pytest suite covering CLI entry points and future modules.
 - ``docs`` — Requirements, ADRs, Sphinx sources, and generated support matrix.
 - ``tools`` — Utility scripts used during development (e.g., support matrix generator).
+
+Configuration Basics
+====================
+
+The configuration loader follows ADR-023 precedence: built-in defaults,
+``/etc/abssctl/config.yml``, environment variables prefixed with
+``ABSSCTL_``, and finally CLI overrides such as ``--config-file``. Use
+``abssctl config show`` (or ``--json``) to inspect the merged values and
+confirm environment overrides are applied as expected.
+
+Read-only registry commands are now wired up: ``abssctl version list`` and
+``abssctl instance list`` surface the contents of ``versions.yml`` and
+``instances.yml`` respectively, while ``abssctl instance show <name>`` displays
+details for a single instance. Use ``--remote`` with ``version list`` to pull
+published versions from npm when the CLI is available (falls back gracefully if
+``npm`` is missing).
 
 Roadmap & Specifications
 ========================

@@ -11,10 +11,10 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 project = "abssctl"
-author = "Ken Robinson"
+author = "Ken Robinson (DocCyblade)"
 copyright = f"{datetime.now(UTC):%Y}, Ken Robinson"
 
-release = "0.1.0a0"
+release = "0.1.0a1"
 version = release
 
 extensions = [
@@ -35,8 +35,7 @@ exclude_patterns: list[str] = ["_build", "Thumbs.db", ".DS_Store"]
 
 html_theme = "sphinx_rtd_theme"
 html_static_path = ["_static"]
-html_css_files = getattr(globals(), "html_css_files", [])
-html_css_files += ["wrap.css"]
+html_css_files = ["wrap.css"]
 
 napoleon_google_docstring = False
 napoleon_numpy_docstring = True
