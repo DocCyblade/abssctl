@@ -1,9 +1,9 @@
-========================================
+======================================
 abssctl — Actual Sync Server Admin CLI
-========================================
+======================================
 
-.. image:: https://img.shields.io/badge/status-pre--alpha-orange
-   :alt: Project maturity badge showing Pre-Alpha status
+.. image:: https://img.shields.io/badge/status-alpha-blue
+   :alt: Project maturity badge showing Alpha status
 
 ``abssctl`` is a planned, batteries-included command line tool that installs and
 manages multiple Actual Budget Sync Server instances on the TurnKey Linux
@@ -17,9 +17,10 @@ Project Facts
 - **Project name:** Actual Budget Multi-Instance Sync Server Admin CLI.
 - **CLI executable:** ``abssctl`` (Actual Budget Sync Server ConTroL).
 
-The project is currently in the **Pre-Alpha (repository bootstrap)** phase. This
-repository intentionally ships skeletal code, documentation, and automation so
-that later milestones can focus on feature delivery instead of setup chores.
+The project is currently in the **Alpha (foundations)** phase. The repository
+builds on the bootstrap work from Pre-Alpha and now focuses on wiring core
+services: configuration, state management, and read-only workflows that unlock
+future instance operations.
 
 Key Objectives
 ==============
@@ -33,12 +34,13 @@ Key Objectives
 - Capture all architectural decisions in ``docs/adrs`` and maintain living
   requirements under ``docs/requirements``.
 
-Quick Start (Pre-Alpha)
-=======================
+Quick Start (Alpha Foundations)
+===============================
 
 .. note::
-   The CLI currently exposes only scaffolding commands that surface the version
-   and help text. Functional subcommands are introduced during the Alpha phase.
+   The CLI is still stabilising APIs during Alpha. Initial commands focus on
+   configuration and read-only inspection; mutating workflows arrive once the
+   providers and state engine solidify.
 
 1. Create a Python 3.11 virtual environment stored in ``.venv`` with a prompt label ``dev`` and activate it::
 
@@ -87,14 +89,14 @@ Branch Strategy
 
 - ``main`` — production-ready releases tagged for PyPI.
 - ``dev`` — integration branch for upcoming development builds.
-- ``dev-prealpha`` — working branch for repository bootstrap tasks.
+- ``dev-alpha`` — working branch for the foundations milestone and experimental CLI work.
 - Short-lived feature branches support focused working sessions.
 
 Roadmap Snapshot
 ================
 
-- **Pre-Alpha — Repo Bootstrap:** scaffold layout, ``pyproject.toml``, docs
-  skeleton, CI with lint/test (this milestone).
+- **Pre-Alpha — Repo Bootstrap (complete):** scaffold layout, ``pyproject.toml``, docs
+  skeleton, CI with lint/test.
 - **Alpha Builds — Foundations:** CLI skeleton beyond placeholders, config
   loader, logging, state/lock primitives, template engine, read-only commands,
   JSON output plumbing. Publish dev builds to PyPI from tags on ``dev``.
