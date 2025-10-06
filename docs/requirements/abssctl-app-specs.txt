@@ -1,0 +1,468 @@
+Actual Budget Multi‑Instance Sync Server Admin CLI (abssctl)
+
+Document: Requirements & Project Plan
+File Name: abssctl-app-specs.txt
+Doc Version: v1.0‑draft‑5
+Date: 2025‑10‑05
+Maintainer(s): Ken Robinson ("DocCyblade") + collaborators
+License: MIT
+Canonical Runtime Target: TurnKey Linux Node.js v18 appliance (Debian base) — https://www.turnkeylinux.org/nodejs
+
+
+Naming
+Project: Actual Budget Multi‑Instance Sync Server Admin CLI
+CLI executable: abssctl (Actual Budget Sync Server ConTroL)
+
+-----------------------------------------------------------------------
+0) Executive Summary
+Deliver a single Python‑based CLI, abssctl, that installs, configures, and manages multiple instances of the Actual Budget Sync Server on TurnKey Linux (Node.js v18). The CLI will be idempotent, auditable, and packaged for easy installation (PyPI/pipx), with first‑class docs (man pages + --help) and shell autocompletion.
+
+v1.0 Goals
+- One cohesive CLI to create → run → upgrade/rollback multi‑instance Actual Budget Sync server instances
+- Predictable filesystem layout, systemd service management, and nginx reverse‑proxy wiring per instance.
+- Per‑instance domain & port overrides; **HTTPS by default** using TurnKey’s system cert/key (or Let’s Encrypt if present); per‑instance/custom TLS supported.
+- Version manager for Actual Budget Sync Server (via npm) with list-versions and check-for-updates.
+- Doctor/health checks and support bundle for troubleshooting.
+- Robust documentation: README.rst, CHANGELOG.rst in project root for GitHub, detailed docs and developer doc source under /docs. Man pages are generated from source via Sphinx (build location finalized in ADR-002).
+
+Non‑Goals for v1.0
+- Migration importers from older tooling (explicitly not required).
+- Cross‑OS support; v1 targets TurnKey Linux Node.js appliance only.
+- Let’s Encrypt automation; other reverse proxies; web GUI; container images.
+
+-----------------------------------------------------------------------
+1) Scope
+
+1.1 In‑Scope (v1.0)
+1. Language & Tooling: Python 3.11+ (type‑hinted), packaged for PyPI and pipx; dev on macOS (Visual Studio Code), runtime on TKL Node.js v18.
+2. Actual Server lifecycle: install specific versions under /srv/app/vX.Y.Z, manage /srv/app/current symlink.
+3. Instance lifecycle: create/list/show/env/start/stop/restart/enable/disable/status/logs/delete/rename/set‑fqdn/set‑port/set‑version.
+4. System integration: generate/manage systemd unit per instance and nginx vhost per instance.
+5. Version operations: list-versions (npm), check-for-updates (stable), install-version, switch-version, uninstall-version (safety checks).
+6. Health & Support: doctor (validates environment/ports/services/nginx), support-bundle (configs + logs + checks).
+7. Docs & UX: comprehensive --help, man pages, reStructuredText docs, and shell completion (Bash/Zsh/Fish/PowerShell); document sources are in reStructuredText.
+8. Security model: dedicated service user (default actual-sync) with least privileges; strict file perms.
+9. Global behaviors: --dry-run for all mutating commands, --quiet/--verbose logging levels, stable exit codes (0 success; 2 validation; 3 environment; 4 systemd/nginx errors), and --json for read‑only listings.
+
+1.2 Out‑of‑Scope (v1.0)
+- Automated certificate issuance, non‑nginx proxies, clustering/HA, backup scheduling, Windows/macOS support.
+
+-----------------------------------------------------------------------
+2) Success Criteria & KPIs
+- Fresh‑start TTV: From clean TKL Node.js v18 to one running instance behind nginx in ≤ 5 minutes using three commands: install-version, instance create, instance start.
+- Idempotency: Re‑running commands yields no destructive side‑effects; safe for automation.
+- Reliability: Verified upgrade & rollback across the current + 10 prior stable releases using the Manual Integration Test Protocol (ADR-030).
+- Docs: man abssctl renders, and abssctl --help covers basic commands/options with reference to man abssctl for full detail and examples; autocomplete works on Bash & Zsh.
+- Observability: doctor produces a clear pass/fail summary; support-bundle is complete and redacted.
+
+-----------------------------------------------------------------------
+3) Personas
+- Admin‑Operator (primary): Installs and manages instances on TKL; prefers clear, safe, auditable operations.
+- Contributor (secondary): Adds features; maintains tests and docs.
+
+-----------------------------------------------------------------------
+4) Architecture Overview
+
+4.1 Components
+- CLI Core (abssctl) — command parsing, validation, logging, dry‑run engine, error taxonomy.
+- Providers — pluggable modules for:
+  - Version provider (npm registry lookup & installer).
+  - Service provider (systemd unit templating & control).
+  - Proxy provider (nginx vhost templating & control).
+- State Store — registry under /var/lib/abssctl/registry/{instances.yml,ports.yml}; global config at /etc/abssctl/config.yml; locks at /run/abssctl.lock and /run/abssctl/<instance>.lock.
+
+4.2 Filesystem Layout (authoritative)
+/srv/backups/             # Backups root (owned by actual-sync:root 0750)
+  <instance>/             # Per-instance backup dir
+    YYYYMMDD-HHMMSS-<instance>-<shortid>.tar.{zst|gz}   # backup archive (algorithm auto per ADR-021)
+    YYYYMMDD-HHMMSS-<instance>-<shortid>.sha256    # checksum file
+    manifest-<instance>.json                        # optional per-instance cache (derived from global)
+  backups.json            # Global index of all backups (authoritative metadata)
+/srv/app/                 # Actual server versions
+  v25.7.1/
+  v25.8.0/
+  current -> v25.8.0      # symlink to version of choice
+/srv/<instance>/          # Instance home
+  data/                   # Actual config.json + data
+/etc/abssctl/
+  config.yml              # Global defaults (config-only)
+/var/lib/abssctl/registry/
+  instances.yml           # Instance registry (name, domain, port, version_binding, data_dir,...)
+  ports.yml               # (optional) Reserved/allocated port registry to avoid collisions
+/etc/systemd/system/
+  <instance>-actual.service
+/etc/nginx/sites-available/
+  <instance>.conf
+/etc/nginx/sites-enabled/
+  <instance>.conf -> ../sites-available/<instance>.conf
+/var/log/abssctl/
+  abssctl.log, doctor.log, operations.jsonl
+/usr/share/abssctl/
+  VERSION                 # PKG_VERSION/PKG_COMPAT metadata
+/usr/local/bin/abssctl    # CLI entrypoint (pipx installs here typically)
+
+
+4.3 Users & Permissions
+- Dedicated service user: actual-sync owns /srv/* trees; systemd units run as this user.
+- CLI requires root/sudo for mutating system changes; read‑only commands may run unprivileged.
+
+4.4 External Dependencies
+- Node.js v18 environment via TKL Node.js appliance.
+- npm available for Actual Budget Sync Server installation.
+- systemd & nginx present and enabled.
+
+
+-----------------------------------------------------------------------
+5) Detailed Functional Requirements
+
+5.1 Global Commands
+- abssctl version
+  Prints CLI Script-Version and package PKG_VERSION/PKG_COMPAT, and copyright notices.
+- abssctl doctor [--fix] [--verbose]
+  Validates: python/env, node/npm versions, npm reachability, presence of required tools (tar, zstd), service user & directory perms, free port scan, systemd unit status, nginx site syntax (no reload), instance TCP health checks. --fix performs non‑destructive remediation (create user, dirs, perms) where safe. Outputs summary to stdout and a JSON report with --json; exit code non‑zero on failures.
+- abssctl support-bundle [--no-redact] [--out PATH]
+  Collects configs, logs, versions, doctor output into a tarball; redacts sensitive paths by default can include if requested. Supports --json to print bundle metadata (path, size, redaction status).
+- abssctl backup create <instance> [--message|-m <text>] [--label <str>] [--data-only] [--out-dir PATH] [--compression {auto,zstd,gzip,none}] [--compression-level N] [--json]
+  Creates a point-in-time backup archive for the specified instance, recording a free‑text message and metadata into the global index. Default contents include the instance data dir, systemd unit, and nginx vhost. Writes a checksum alongside the archive.
+- abssctl backup list [<instance>] [--json]
+  Lists known backups from the metadata index; optionally filtered to a single instance. Shows id, timestamp, size, reason, and message.
+- abssctl backup verify [<backup-id>|--all]
+  Verifies archive presence and checksum; marks missing/corrupted entries in the index.
+- abssctl backup reconcile [--instance <name>|--all] [--dry-run]
+  Scans the filesystem under /srv/backups/ to detect archives not in the index (add) or index entries whose files are missing (mark as missing); can write changes or show a dry‑run.
+- abssctl backup prune [--keep N|--older-than <DURATION>] [--dry-run] - Removes old archives per simple policies; always updates the index. Disabled unless flags are provided.
+- abssctl list-versions [--latest N] [--include-prerelease=false]
+  Lists 10 recent versions from npm; clearly marks versions already installed locally. Supports --json for automation; clearly marks installed vs available.
+- abssctl check-for-updates
+  Compares installed vs available stable releases; suggests upgrades.
+- abssctl tls verify [--instance X] [--cert PATH --key PATH --chain PATH]
+  Validates TLS paths, key↔cert match, expiry (<30d warn), and permissions; never prints PEM bodies.
+- abssctl tls install --instance X --cert PATH --key PATH [--chain PATH]
+  Copies cert/key into standard locations with correct perms, updates vhost, tests with nginx -t, and reloads on success; prompts unless --yes.
+- abssctl tls use-system --instance X
+  Switches the instance back to system defaults (prefers Let’s Encrypt live certs if present, else TKL defaults).
+- abssctl install-version <X.Y.Z>
+  Installs Actual into /srv/app/vX.Y.Z; verifies integrity; does not switch running instances unless --set-current.
+- abssctl switch-version <X.Y.Z> [--restart=rolling|all|none]
+  Moves /srv/app/current and optionally restarts instances bound to current.
+- abssctl uninstall-version <X.Y.Z> [--force]
+  Removes version if no instance depends on it (or --force with warning).
+- Safety prompts: For sensitive operations (install-version, switch-version, uninstall-version, instance rename, instance delete, instance set-version), the CLI prompts to run backup create first. Use --no-backup to skip, or --backup-message <text> to annotate the backup.
+
+5.2 Instance Management
+- Note: On version changes, renames, or deletions, abssctl will offer to create a backup via backup create and annotate it with an auto‑generated reason (e.g., pre-switch-version) plus any user --message provided. Use --no-backup to bypass.
+- abssctl instance create <name> [--port <p>] [--domain <fqdn>] [--version <X.Y.Z>|current] [--data-dir /path] [--no-start] [--ssl-cert ssl.pem] [--ssl-key ssl.key]
+  Creates instance dir structure, writes minimal config.json, generates systemd & nginx, reserves port, starts service. Enforces <name> to match [a-z0-9-]+ and be unique. Optionally specify SSL cert/key otherwise default will be used
+- abssctl instance list [--long]
+  Shows instances with version binding (e.g., current->v25.8.0 or pinned), service state, domain & port. Supports --json for scripts.
+- abssctl instance show <name>
+  Displays resolved settings: paths, env, version binding, service & proxy locations, health summary, next steps.
+- abssctl instance env <name>
+  Prints environment variables (e.g., ACTUAL_DATA_DIR, config path) suitable for export.
+- abssctl instance set-fqdn <name> <fqdn>
+  Idempotently updates nginx vhost (syntax check + reload); zero‑downtime where possible.
+- abssctl instance set-port <name> <p>
+  Validates port availability; rewrites service & config; safe restart.
+- abssctl instance set-version <name> <X.Y.Z|current>
+  Binds instance to a specific version or current; safe restart.
+- abssctl instance rename <old> <new>
+  Atomically renames directories, units, vhosts, and registry entries; validates name/port collisions.
+- abssctl instance delete <name> [--purge-data]
+  Stops and disables service, removes system files; preserves data unless --purge-data.
+- abssctl start|stop|restart|enable|disable|status|logs <name>
+  Thin, friendly wrappers for systemd/journalctl with clear output.
+
+
+5.3 Reverse Proxy (nginx)
+- One vhost per instance; **HTTPS enabled by default** using system cert (or Let’s Encrypt if present); can be disabled or overridden per instance.
+- Sensible defaults: upstream 127.0.0.1:<port>, proxy headers, timeouts, gzip, body size (configurable).
+- On set-domain, re‑render (or rename) vhost safely, run nginx -t, then reload.
+- Graceful reload policy: prefer nginx reload over restart; on syntax failure, do not change symlinks and surface a clear error (exit code 4).
+- All changes follow ADR-032: write temp → atomic rename, validate with nginx -t, only then reload; rollback on failure.
+- TLS defaults: /etc/ssl/private/cert.pem and /etc/ssl/private/cert.key on TKL; if Let’s Encrypt live certs exist for the server_name, prefer those. Manage via 
+  abssctl tls {verify,install,use-system}.
+
+5.4 Version Management (npm)
+- Default npm package name is configurable (default: @actual-app/sync-server); registry URL override supported.
+- Verify integrity (npm shasum) and record installs in a local manifest under /srv/app/.
+- list-versions annotates installed entries; optional --json output for scripting.
+
+5.5 Configuration & State
+- Global config /etc/abssctl/config.yml keys:
+  npm_package_name, install_root: /srv/app, instance_root: /srv, service_user: actual-sync, reverse_proxy: nginx,
+  tls: {enabled: true, system: {cert: /etc/ssl/private/cert.pem, key: /etc/ssl/private/cert.key}, lets_encrypt: {live_dir: /etc/letsencrypt/live}},
+  ports: {base: 5000, strategy: sequential}, state_dir: /var/lib/abssctl, default_version: current.
+- Config precedence: CLI flags > environment variables > /etc/abssctl/config.yml > built-in defaults. Environment variables use the ABSSCTL_* namespace (documented in --help).
+- Registry /var/lib/abssctl/registry/instances.yml: name, domain, port, version_binding (current|X.Y.Z), data_dir, created_at, last_changed, notes.
+- Optional port registry /var/lib/abssctl/registry/ports.yml: records reserved ports with owner instance and timestamp.
+- All writes are atomic (temp file then rename); files created with 0640 perms.
+- Locking via /run/abssctl.lock (global) and /run/abssctl/<instance>.lock (per-instance) to prevent concurrent mutations.
+
+5.6 Observability & Diagnostics
+- Structured logs (human + JSONL) with operation IDs to /var/log/abssctl/ (rc mapping per ADR-013/029).
+- Log rotation: rely on journald for CLI; recommend logrotate for /var/log/abssctl/*.log with sane defaults (weekly, rotate 4).
+- doctor report is machine‑readable and summarized for humans.
+- support-bundle redacts sensitive values (paths, TLS keys) by default.
+- doctor checks the backup index for drift vs on‑disk archives and suggests backup reconcile; backup verify performs checksum validation.
+
+5.7 UX, Help, Man Pages & Autocomplete
+- abssctl --help and per‑subcommand help include synopsis, options, examples, and exit codes.
+- Man pages are built in CI (Sphinx), shipped inside the wheel/sdist, and installed via 
+  
+  abssctl docs man install [--system|--user|--prefix PATH].
+- Implementation options (finalized via ADR):
+  - CLI framework: Typer (Click‑based) with built‑in completion by default
+  - Man page generation: Built in CI with Sphinx; installed via `abssctl docs man install`
+- Shell completion support for Bash, Zsh, Fish, and PowerShell via `abssctl completion {show,install,uninstall}`.
+
+
+5.8 Backup Operations
+Purpose: Provide a built‑in, auditable way to capture and track instance backups, annotate them with a message, and keep metadata consistent with on‑disk archives.
+
+Archive contents (default):
+- /srv/<instance>/data/ (Actual config.json + data)
+- /etc/systemd/system/<instance>-actual.service
+- /etc/nginx/sites-available/<instance>.conf
+- resolved symlink target of /srv/app/current (recorded as metadata only, not archived)
+
+Index & schema: The authoritative index lives at /srv/backups/backups.json (owned actual-sync:root, mode 0640). Each entry records who/when/why, where the archive is, and integrity details.
+Note: Archive extension reflects the algorithm used — ".tar.zst" for zstd or ".tar.gz" for gzip (see ADR-021).
+
+Example (abbreviated):
+{
+  "backups": [
+    {
+      "id": "20250929-154500-prod-abc123",
+      "instance": "prod",
+      "created_at": "2025-09-29T15:45:00Z",
+      "created_by": "root",
+      "reason": "pre-switch-version",
+      "message": "Before upgrading to v25.8.0",
+      "type": "full",
+      "archive_path": "/srv/backups/prod/20250929-154500-prod-abc123.tar.zst",
+      "size_bytes": 12345678,
+      "checksum_sha256": "<sha256>",
+      "instance_version": "v25.7.1",
+      "domain": "example.tld",
+      "port": 5000,
+      "includes": ["/srv/prod/data", "/etc/systemd/system/prod-actual.service", "/etc/nginx/sites-available/prod.conf"],
+      "status": "present"
+    }
+  ]
+}
+
+IDs & naming: Backups are named YYYYMMDD-HHMMSS-<instance>-<shortid> to ensure sortable, unique IDs. The same value is recorded as id in the index.
+
+Reconciliation: backup reconcile scans /srv/backups/ and updates backups.json to:
+- Add archives found on disk but missing from the index (with minimal metadata inferred).
+- Mark index entries whose files are missing as status: missing.
+- Optionally compute/repair checksums when absent or invalid.
+
+Integration with other commands: On sensitive ops (see §5.1 Safety prompts), the CLI offers to run backup create and auto‑populate the reason field (e.g., pre-delete, pre-rename, pre-switch-version). Users can append a --message.
+
+Retention: Simple pruning is provided via backup prune flags; no automatic scheduling in v1.0.
+
+Permissions: Archives and indexes are created with secure defaults (dirs 0750, files 0640).
+
+-----------------------------------------------------------------------
+6) Non‑Functional Requirements
+- Idempotent operations; atomic writes with rollbacks on provisioning failures.
+- Performance: list/show < 300 ms typical; create < 5 s.
+- CLI UX: all mutating commands accept --dry-run and print planned actions without making changes.
+- Security: least privilege, validated inputs (domains/ports/paths), perms: dirs 0750, files 0640, TLS keys 0600.
+- Compatibility: verify Actual/Node constraints at install time (parse npm metadata where available).
+- No telemetry; local logs only.
+- Backups integrity: archives accompanied by SHA‑256 checksum; index updates are atomic (write‑to‑temp then rename).
+- Backups performance: creating a default backup for a typical instance (< 200 MB data) completes within a reasonable time on TKL; operations are streamed to avoid excessive temp space.
+
+-----------------------------------------------------------------------
+7) Documentation & Repository Standards
+
+7.1 Documentation (Restructured Text first)
+- README.rst: What it is, quickstart for fresh TKL Node.js, install options (pipx/pip), post‑install checks (doctor), health URLs.
+- CHANGELOG.rst: Project‑wide history; reverse‑chronological; keepers note each release.
+- ADMIN‑GUIDE.rst: Operations, backup targets, TLS configuration.
+- SUDOERS‑EXAMPLES.rst: Optional minimal sudoers entries to allow specific abssctl subcommands for operators.
+- DEVELOPER‑GUIDE.rst: Dev setup (macOS), style, tests, release flow.
+- abssctl-app-specs.txt (this file): stored under docs/ requirements/.
+- Architecture Decision Records (ADRs) under docs/adrs/ (e.g., ADR‑001 Language/Framework [Python], ADR‑002 Docs/Man page pipeline, ADR‑003 Packaging).
+- Support Matrix: actual-support-matrix.rst (AUTO‑GENERATED from YAML via tools/gen_support_matrix.py).
+
+7.2 Python Doc Standards
+- Type hints everywhere; docstrings in Google or NumPy style; module headers include brief change log (last 10 entries) and link to global CHANGELOG.
+- Inline comments explaining system interactions (systemd/nginx/npm) and safety/rollback behavior.
+
+7.3 Proposed Repository Layout (new GitHub repo, name TBD)
+abssctl/
+├── pyproject.toml                 # PEP 621 metadata; console_scripts entry point
+├── src/
+│   └── abssctl/
+│       ├── __init__.py
+│       ├── cli.py                 # argparse/typer entrypoint
+│       ├── commands/              # subcommand implementations
+│       ├── providers/
+│       │   ├── versions.py        # npm interactions
+│       │   ├── systemd.py
+│       │   └── nginx.py
+│       ├── config.py              # load/save config.yml & registry
+│       ├── state.py               # locking, operations log
+│       ├── logging.py
+│       ├── templates/             # jinja2 or string.Template systemd/nginx files
+│       └── utils.py
+├── docs/
+│   ├── README.rst
+│   ├── CHANGELOG.rst
+│   ├── ADMIN-GUIDE.rst
+│   ├── SUDOERS-EXAMPLES.rst
+│   ├── DEVELOPER-GUIDE.rst
+│   ├── requirements/
+│   │   └── abssctl-app-specs.txt
+│   ├── adrs/
+│   ├── support/
+│   │   ├── actual-support-matrix.yml
+│   │   └── actual-support-matrix.rst
+│   └── man/                       # built man pages artifacts (release attachments; wheel includes abssctl/_man)
+├── tests/
+│   ├── unit/
+│   └── integration/
+├── .github/
+│   └── workflows/
+│       └── ci.yml                 # lint, test, package, build man pages
+├── MANIFEST.in
+├── .gitignore                     # Python, PyCharm, build artifacts, venv, dist
+└── LICENSE
+
+
+7.4 .gitignore (high‑level)
+- __pycache__/, *.pyc, .pytest_cache/, .mypy_cache/, .ruff_cache/
+- .venv/, .env, dist/, build/, *.egg-info/
+- .DS_Store
+
+-----------------------------------------------------------------------
+8) Packaging & Distribution
+- PyPI package name: abssctl (subject to availability).
+- Recommended install: pip install abssctl (system or venv) on servers.
+- Wheels built for Linux (manylinux where possible); no compiled extensions.
+- Post‑install hook or command to install shell completions (Bash/Zsh)
+- Man page generation in CI (Sphinx); `*.1` files embedded as package data (e.g., abssctl/_man/) and installable via `abssctl docs man install`. Downstream packagers may install into /usr/share/man/man1/.
+- Possible CI with GitHub to auto-package and upload to PyPI on tag on dev (dev build) and prod release on main/master tag
+
+-----------------------------------------------------------------------
+9) Testing Strategy
+- Unit tests: command parsing, validators, renderers, state transitions.
+- Integration (on TKL VM): install → create → start → health → switch version → rollback → delete.
+- Golden‑file tests: systemd & nginx templates.
+- Static checks: Ruff (lint), MyPy (types), Black (format).
+- Performance checks: simple timing asserts for list/show.
+
+-----------------------------------------------------------------------
+10) Security & Compliance
+- Run services as actual-sync; CLI mutating ops gated behind sudo/root.
+- Validate inputs (domains/ports/paths); sanitize shell invocation; avoid shell=True.
+- File permissions: enforce secure defaults; never write private keys world‑readable.
+- Redact secrets/keys from logs and support bundles.
+- Enforce secure process umask (027) at CLI start for file/dir creation defaults.
+
+-----------------------------------------------------------------------
+11) Risks & Mitigations
+- Registry drift (instances.yml ≠ disk reality): doctor detects & offers --fix.
+- npm upstream change/outage: support registry override & local caching; meaningful errors.
+- User data safety: deletions default to preserve data; --purge-data required for irreversible actions.
+- Backup index drift (files deleted/added manually): provide backup reconcile + doctor warnings; index entries can be marked missing instead of silently disappearing.
+- Nginx reload failure leaves site disabled: mitigate by validating with nginx -t before changing symlinks; roll back on error.
+- Port collisions during concurrent provisioning: mitigate by using ports.yml registry with file lock.
+
+-----------------------------------------------------------------------
+12) Removed
+
+-----------------------------------------------------------------------
+13) Roadmap & Milestones
+Planning — Finalize abssctl-app-specs.txt spec document
+
+Pre-Alpha — Repo Bootstrap (Pre-Alpha)
+- Create scaffold layout, add pyproject.toml, .gitignore, docs skeleton, CI with lint/test.
+
+Alpha Builds — Foundations
+- CLI skeleton, config loader, logging, state/lock, template engine, read‑only commands, JSON output plumbing. Setup PiPy project, Github CI auto publish to PyPi via tags to dev
+
+Beta Releases — Core Features
+- Version ops (list/install/switch), instance lifecycle, systemd/nginx providers, doctor basics. Once Beta builds are pushed to PyPi all updates need to be non-distructive or have hooks to update existing installs.
+
+Release Candidate — Quality & Docs (RC)
+- Support bundle, robust errors, man pages & completion, full docs & examples, Manual Integration Test Protocol (MITP) on a TKL VM. Setup githib CI auto publish to PyPi
+
+Release — v1.0.0 (RC → GA)
+- RC burn‑in on a clean TKL image across the support window (current + 10 prior); GA on green pipeline + docs sign‑off.
+
+-----------------------------------------------------------------------
+14) Acceptance Criteria (v1.0)
+- Installability: pipx install abssctl works; abssctl --help shows commands; manpages available after running 
+  
+  abssctl docs man install.
+- Functionality: From clean TKL node to running instance (HTTPS by default using system cert) in ≤ 5 minutes; custom certs work when supplied.
+- Versioning: list-versions shows the latest 10 from npm, marking installed ones; check-for-updates suggests newer stable.
+- Instance ops: set-domain and set-port are idempotent and safe; switch-version restarts bound instances as requested.
+- Health/Support: doctor is green on healthy systems; support-bundle includes all artifacts with redaction.
+- JSON: --json flags produce valid, documented JSON for list/show/doctor without breaking changes.
+- Backups: backup create persists an archive and metadata (including user message) and appears in backup list.
+- Safety prompts: Running a version change (e.g., switch-version) prompts for a backup; opting in creates a properly annotated backup.
+- Reconciliation: Removing an archive from disk and running backup reconcile marks the entry as missing; adding an orphaned archive adds it to the index.
+
+-----------------------------------------------------------------------
+17) Assumptions
+- The target platform is the TurnKey Linux Node.js v18 appliance; Debian services (systemd, nginx) are available.
+- Admins can use sudo/root for provisioning actions.
+- Internet access exists for npm installs, or an internal registry is configured.
+
+-----------------------------------------------------------------------
+18) Links
+- Github Repo: https://github.com/DocCyblade/abssctl
+- Github Repo Prod Releases : https://github.com/DocCyblade/abssctl/tree/main
+- Github Repo Dev Releases : https://github.com/DocCyblade/abssctl/tree/dev
+- Turnkey Linux: https://www.turnkeylinux.org
+- Turnkey Linux Node.js App: https://www.turnkeylinux.org/nodejs
+- Actual Budget: https://actualbudget.org
+- Actual Budget Docs: https://actualbudget.org/docs/
+- Actual Budget Sync Server CLI Docs: https://actualbudget.org/docs/install/cli-tool/
+- Actual Budget Sync Server (npm): https://www.npmjs.com/package/@actual-app/sync-server
+
+-----------------------------------------------------------------------
+
+19) ADR Template in Markdown Format
+- - - - Start of ADR Template in Markdown Format - - - -
+# ADR XXXX: <Short decision title>
+
+- **Date:** YYYY-MM-DD
+- **Status:** Proposed
+- **Authors:** <name(s)>
+- **Deciders:** <who approves>
+- **Consulted:** <who was consulted>
+- **Tags:** <e.g., licensing, docs, packaging>
+
+## Context
+<What problem are we solving? Include constraints, requirements, and relevant background.>
+
+## Options Considered
+- <Option A> — <one-sentence summary>
+- <Option B> — <one-sentence summary>
+- <Option C> — <one-sentence summary>
+
+## Decision
+<What did we decide and why? Point to the key drivers and trade-offs.>
+
+## Consequences
+- Positive: <benefit 1>
+- Positive: <benefit 2>
+- Negative / Risk: <risk 1 and how we’ll mitigate it>
+
+## Alternatives Considered (Details)
+<Briefly expand on why each major alternative wasn’t picked.>
+
+## Related
+- Supersedes: <ADR #> (if any)
+- Superseded by: <ADR #> (if any)
+- References: <links to issues/PRs/docs>
+- - - - End of ADR Template in Markdown Format - - - -
+
+
+End of Requirements & Project Plan for abssctl.
