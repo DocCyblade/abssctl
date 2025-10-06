@@ -23,7 +23,7 @@ Pre-Alpha — Repo Bootstrap
 Alpha Builds — Foundations
 ==========================
 
-- [ ] Implement the structured logging subsystem per ADR-014/ADR-028 (human
+- [x] Implement the structured logging subsystem per ADR-014/ADR-028 (human
   logs + ``operations.jsonl``) and integrate it with existing CLI commands.
 - [ ] Implement global and per-instance locking primitives per ADR-027 and
   ensure mutating commands acquire/release locks safely (with tests).

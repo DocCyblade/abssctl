@@ -17,15 +17,18 @@ help:
 	/^\.PHONY/ {next} \
 	/^[a-zA-Z_.-]+:/ {if (desc){printf "%-20s %s\n", $$1, desc; desc=""}}' $(MAKEFILE_LIST)
 
-$(DEV_VENV)/.installed:
-	@echo "[dev] Creating virtual environment $(DEV_VENV)"
-	rm -rf $(DEV_VENV)
-	$(PYTHON) -m venv $(DEV_VENV) --prompt dev
+$(DEV_VENV)/.installed: pyproject.toml Makefile
+	@if [ ! -d "$(DEV_VENV)" ]; then \
+		echo "[dev] Creating virtual environment $(DEV_VENV)"; \
+		$(PYTHON) -m venv $(DEV_VENV) --prompt dev; \
+	else \
+		echo "[dev] Reusing existing virtual environment $(DEV_VENV)"; \
+	fi
 	$(DEV_VENV)/bin/python -m pip install --upgrade pip
 	$(DEV_VENV)/bin/python -m pip install -e .[dev]
 	touch $@
 
-$(BUILD_VENV)/.installed:
+$(BUILD_VENV)/.installed: pyproject.toml Makefile
 	@echo "[build] Creating virtual environment $(BUILD_VENV)"
 	rm -rf $(BUILD_VENV)
 	$(PYTHON) -m venv $(BUILD_VENV) --prompt build
@@ -33,15 +36,15 @@ $(BUILD_VENV)/.installed:
 	$(BUILD_VENV)/bin/python -m pip install build twine
 	touch $@
 
-$(TEST_VENV)/.installed:
+$(TEST_VENV)/.installed: pyproject.toml Makefile
 	@echo "[test] Creating virtual environment $(TEST_VENV)"
 	rm -rf $(TEST_VENV)
 	$(PYTHON) -m venv $(TEST_VENV) --prompt test
 	$(TEST_VENV)/bin/python -m pip install --upgrade pip
-	$(TEST_VENV)/bin/python -m pip install ruff mypy pytest pytest-cov
+	$(TEST_VENV)/bin/python -m pip install -e .[dev]
 	touch $@
 
-$(PIP_TEST_VENV)/.installed:
+$(PIP_TEST_VENV)/.installed: Makefile
 	@echo "[pkg-test] Creating virtual environment $(PIP_TEST_VENV)"
 	rm -rf $(PIP_TEST_VENV)
 	$(PYTHON) -m venv $(PIP_TEST_VENV) --prompt pkgtest
@@ -56,6 +59,13 @@ ensure-test-venv: $(TEST_VENV)/.installed
 
 .PHONY: ensure-build-venv
 ensure-build-venv: $(BUILD_VENV)/.installed
+
+## Quick Tests on dev: Run Ruff/mypy/pytest
+.PHONY: quick-tests
+quick-tests: $(DEV_VENV)/.installed
+	$(DEV_VENV)/bin/python -m ruff check src tests
+	$(DEV_VENV)/bin/python -m mypy src
+	$(DEV_VENV)/bin/python -m pytest
 
 ## lint: Run Ruff via .venv-test (test env)
 .PHONY: lint
@@ -134,10 +144,31 @@ clean-cache:
 	find . -type f -name "*.py[co]" -delete
 	rm -rf .pytest_cache .mypy_cache .ruff_cache .coverage htmlcov
 
-## clean-venv: Remove managed virtual environments
+## clean-venv-dev: Remove managed dev virtual environment
+.PHONY: clean-venv-dev
+clean-venv-dev:
+	rm -rf $(DEV_VENV)
+
+## clean-venv-build: Remove managed build virtual environment
+.PHONY: clean-venv-build
+clean-venv-build:
+	rm -rf $(BUILD_VENV)
+
+## clean-venv-test: Remove managed test virtual environment
+.PHONY: clean-venv-test
+clean-venv-test:
+	rm -rf $(TEST_VENV)
+
+## clean-venv-piptest: Remove managed piptest virtual environment
+.PHONY: clean-venv-piptest
+clean-venv-piptest:
+	rm -rf $(PIP_TEST_VENV)
+
+## clean-venv: Remove all managed virtual environments
 .PHONY: clean-venv
 clean-venv:
 	rm -rf $(DEV_VENV) $(BUILD_VENV) $(TEST_VENV) $(PIP_TEST_VENV)
+
 
 ## clean-all: Remove build artifacts, caches, and virtual environments
 .PHONY: clean-all

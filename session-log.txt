@@ -13,17 +13,23 @@ This session log shall log all work performed in a work session. Work sesson wil
 - Linked docs/roadmap.rst into the Sphinx toctree (`docs/source/index.rst`), added a Sphinx-friendly wrapper at `docs/source/roadmap.rst`, and surfaced the document in README for easy discovery.
 - Updated `make docs` to remove the previous `docs/_build/html` output before rebuilding to keep generated docs fresh.
 - Ready for next implementation or review task.
+- Implemented structured logging subsystem: introduced `StructuredLogger`, wired every CLI command (including `--version`) to emit human-readable and JSONL entries, ensured logs respect config `logs_dir`, and added pytest coverage for operations log creation.
+- Hardened structured logging to degrade gracefully when log directories are read-only and resolved Sphinx/Ruff lint in support of the new subsystem.
+- Relaxed structured logging type annotations to satisfy mypy (Literal return on `__exit__`, dictionary-based JSON types) and verified clean mypy/ruff/pytest runs from the project venv.
+- Updated `make dist` pipeline: ensure `.venv-test` installs `.[dev]` and rebuilds when `pyproject.toml` or `Makefile` changes so mypy finds typer/rich stubs during CI-style builds.
+- Adjusted `make quick-tests` to reuse the developer venv instead of deleting it, still re-running `pip install -e .[dev]` only when dependencies change.
 
 ### Wrap Summary
 - Built shared understanding of v1 scope by reviewing requirements and ADRs.
 - Catalogued current Pre-Alpha implementation (CLI scaffold, config/state utilities, pytest coverage).
 - Established roadmap tracking in `docs/roadmap.rst` and linked it across README and Sphinx docs.
 - Improved `make docs` workflow to clean out old HTML artifacts before rebuilds.
+- Delivered structured logging foundation with operations.jsonl + human logs and verified coverage.
 
 ### Next Steps / TODO
-- Start delivering Alpha milestone work (e.g., structured logging and lock primitives).
+- Continue Alpha milestone work (e.g., lock primitives implementation and templating engine).
 - Draft design/implementation plan for systemd/nginx providers in advance of Beta tasks.
 - Evaluate test strategy expansion to cover upcoming mutating commands.
 
 ### Next Session Primer
-Prompt: "We're on branch dev-alpha3. Please review `session-log.txt` and `docs/roadmap.rst` to continue Alpha milestone work—let's tackle the structured logging subsystem next."
+Prompt: "We're on branch dev-alpha3. Structured logging is in place; let's focus on designing and implementing the locking primitives per ADR-027."

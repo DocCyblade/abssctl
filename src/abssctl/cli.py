@@ -20,6 +20,7 @@ from rich.table import Table
 
 from . import __version__
 from .config import AppConfig, load_config
+from .logging import StructuredLogger
 from .providers import InstanceStatusProvider, VersionProvider
 from .state import StateRegistry
 
@@ -54,6 +55,7 @@ class RuntimeContext:
     registry: StateRegistry
     version_provider: VersionProvider
     instance_status_provider: InstanceStatusProvider
+    logger: StructuredLogger
 
 
 def _ensure_runtime(ctx: typer.Context, config_file: Path | None) -> RuntimeContext:
@@ -66,11 +68,13 @@ def _ensure_runtime(ctx: typer.Context, config_file: Path | None) -> RuntimeCont
     version_cache = registry.root / "remote-versions.json"
     version_provider = VersionProvider(cache_path=version_cache)
     instance_status_provider = InstanceStatusProvider()
+    logger = StructuredLogger(config.logs_dir)
     runtime = RuntimeContext(
         config=config,
         registry=registry,
         version_provider=version_provider,
         instance_status_provider=instance_status_provider,
+        logger=logger,
     )
     ctx.obj = runtime
     return runtime
@@ -96,7 +100,14 @@ def _root(  # noqa: D401 - Typer displays help for us, docstring optional.
 ) -> None:
     """Entry point callback invoked for every CLI execution."""
     if version:
-        console.print(f"abssctl {__version__}")
+        runtime = _ensure_runtime(ctx, config_file)
+        with runtime.logger.operation(
+            "root --version",
+            args={"version": True},
+            target={"kind": "meta", "scope": "version"},
+        ) as op:
+            console.print(f"abssctl {__version__}")
+            op.success("Reported CLI version.", changed=0)
         raise typer.Exit(code=0)
 
     _ensure_runtime(ctx, config_file)
@@ -241,15 +252,33 @@ def _merge_versions(
 @app.command()
 def doctor(ctx: typer.Context) -> None:
     """Run environment and service health checks (coming soon)."""
-    _get_runtime(ctx)
-    _placeholder("Doctor checks will be introduced in the Alpha milestone.")
+    runtime = _get_runtime(ctx)
+    message = "Doctor checks will be introduced in the Alpha milestone."
+    with runtime.logger.operation(
+        "doctor",
+        target={"kind": "system", "scope": "health"},
+    ) as op:
+        _placeholder(message)
+        op.warning(
+            "Doctor placeholder executed.",
+            warnings=["unimplemented"],
+        )
 
 
 @app.command()
 def support_bundle(ctx: typer.Context) -> None:
     """Create a diagnostic bundle for support cases (coming soon)."""
-    _get_runtime(ctx)
-    _placeholder("Support bundle generation is planned for the Beta milestone.")
+    runtime = _get_runtime(ctx)
+    message = "Support bundle generation is planned for the Beta milestone."
+    with runtime.logger.operation(
+        "support-bundle",
+        target={"kind": "system", "scope": "support-bundle"},
+    ) as op:
+        _placeholder(message)
+        op.warning(
+            "Support-bundle placeholder executed.",
+            warnings=["unimplemented"],
+        )
 
 
 instances_app = typer.Typer(help="Manage Actual Budget Sync Server instances.")
@@ -276,22 +305,29 @@ def config_show(
     runtime = _get_runtime(ctx)
     data = runtime.config.to_dict()
 
-    if json_output:
-        console.print_json(data=data)
-        return
+    with runtime.logger.operation(
+        "config show",
+        args={"json": json_output},
+        target={"kind": "config"},
+    ) as op:
+        if json_output:
+            console.print_json(data=data)
+            op.success("Rendered configuration as JSON.", changed=0)
+            return
 
-    table = Table(show_header=True, header_style="bold magenta")
-    table.add_column("Key", style="bold")
-    table.add_column("Value")
+        table = Table(show_header=True, header_style="bold magenta")
+        table.add_column("Key", style="bold")
+        table.add_column("Value")
 
-    for key, value in data.items():
-        if isinstance(value, dict):
-            rendered = json.dumps(value, indent=2, sort_keys=True)
-        else:
-            rendered = str(value)
-        table.add_row(key, rendered)
+        for key, value in data.items():
+            if isinstance(value, dict):
+                rendered = json.dumps(value, indent=2, sort_keys=True)
+            else:
+                rendered = str(value)
+            table.add_row(key, rendered)
 
-    console.print(table)
+        console.print(table)
+        op.success("Rendered configuration table.", changed=0)
 
 
 @instances_app.command("list")
@@ -308,38 +344,45 @@ def instance_list(
     raw = runtime.registry.read_instances()
     entries = _normalize_instances(raw.get("instances", []))
 
-    if json_output:
-        console.print_json(data={"instances": entries})
-        return
+    with runtime.logger.operation(
+        "instance list",
+        args={"json": json_output},
+        target={"kind": "instance", "scope": "registry"},
+    ) as op:
+        if json_output:
+            console.print_json(data={"instances": entries})
+            op.success("Reported instance list as JSON.", changed=0)
+            return
 
-    table = Table(show_header=True, header_style="bold magenta")
-    table.add_column("Name", style="bold")
-    table.add_column("Version")
-    table.add_column("Domain")
-    table.add_column("Port")
-    table.add_column("Status")
+        table = Table(show_header=True, header_style="bold magenta")
+        table.add_column("Name", style="bold")
+        table.add_column("Version")
+        table.add_column("Domain")
+        table.add_column("Port")
+        table.add_column("Status")
 
-    if not entries:
-        table.add_row("(none)", "", "", "", "")
-    else:
-        for entry in entries:
-            metadata = entry.setdefault("metadata", {})
-            status_info = runtime.instance_status_provider.status(entry["name"], entry)
-            if not entry.get("status") or entry.get("status") == "unknown":
-                entry["status"] = status_info.state
-            metadata.setdefault("status_detail", status_info.detail)
-            metadata.setdefault("source", "registry")
-            port_val = entry.get("port", "")
-            port_rendered = "" if port_val in ("", None) else str(port_val)
-            table.add_row(
-                entry["name"],
-                str(entry.get("version", "") or ""),
-                str(entry.get("domain", "") or ""),
-                port_rendered,
-                str(entry.get("status", "") or ""),
-            )
+        if not entries:
+            table.add_row("(none)", "", "", "", "")
+        else:
+            for entry in entries:
+                metadata = entry.setdefault("metadata", {})
+                status_info = runtime.instance_status_provider.status(entry["name"], entry)
+                if not entry.get("status") or entry.get("status") == "unknown":
+                    entry["status"] = status_info.state
+                metadata.setdefault("status_detail", status_info.detail)
+                metadata.setdefault("source", "registry")
+                port_val = entry.get("port", "")
+                port_rendered = "" if port_val in ("", None) else str(port_val)
+                table.add_row(
+                    entry["name"],
+                    str(entry.get("version", "") or ""),
+                    str(entry.get("domain", "") or ""),
+                    port_rendered,
+                    str(entry.get("status", "") or ""),
+                )
 
-    console.print(table)
+        console.print(table)
+        op.success("Reported instance list.", changed=0)
 
 
 @instances_app.command("show")
@@ -356,36 +399,46 @@ def instance_show(
     runtime = _get_runtime(ctx)
     raw = runtime.registry.read_instances()
     entries = _normalize_instances(raw.get("instances", []))
-    target = next((entry for entry in entries if entry["name"] == name), None)
 
-    if target is None:
-        console.print(f"[red]Instance '{name}' not found in registry.[/red]")
-        raise typer.Exit(code=1)
+    with runtime.logger.operation(
+        "instance show",
+        args={"name": name, "json": json_output},
+        target={"kind": "instance", "name": name},
+    ) as op:
+        target = next((entry for entry in entries if entry["name"] == name), None)
 
-    metadata = target.setdefault("metadata", {})
-    status_info = runtime.instance_status_provider.status(target["name"], target)
-    if not target.get("status") or target.get("status") == "unknown":
-        target["status"] = status_info.state
-    metadata.setdefault("status_detail", status_info.detail)
-    metadata.setdefault("source", "registry")
+        if target is None:
+            console.print(f"[red]Instance '{name}' not found in registry.[/red]")
+            message = f"Instance '{name}' not found."
+            op.error(message, errors=[message], rc=1)
+            raise typer.Exit(code=1)
 
-    if json_output:
-        console.print_json(data=target)
-        return
+        metadata = target.setdefault("metadata", {})
+        status_info = runtime.instance_status_provider.status(target["name"], target)
+        if not target.get("status") or target.get("status") == "unknown":
+            target["status"] = status_info.state
+        metadata.setdefault("status_detail", status_info.detail)
+        metadata.setdefault("source", "registry")
 
-    table = Table(show_header=False)
-    for key, value in target.items():
-        if key == "metadata":
-            continue
-        if value in (None, ""):
-            continue
-        table.add_row(key.title(), str(value))
+        if json_output:
+            console.print_json(data=target)
+            op.success("Displayed instance details as JSON.", changed=0)
+            return
 
-    status_detail = metadata.get("status_detail")
-    if status_detail:
-        table.add_row("Status Detail", str(status_detail))
+        table = Table(show_header=False)
+        for key, value in target.items():
+            if key == "metadata":
+                continue
+            if value in (None, ""):
+                continue
+            table.add_row(key.title(), str(value))
 
-    console.print(table)
+        status_detail = metadata.get("status_detail")
+        if status_detail:
+            table.add_row("Status Detail", str(status_detail))
+
+        console.print(table)
+        op.success("Displayed instance details.", changed=0)
 
 
 @instances_app.command("create")
@@ -394,11 +447,21 @@ def instance_create(
     name: str = typer.Argument(..., help="Name of the instance to create."),
 ) -> None:
     """Provision a new Actual Budget instance (coming soon)."""
-    _get_runtime(ctx)
-    _placeholder(
+    runtime = _get_runtime(ctx)
+    message = (
         f"Instance '{name}' creation requires system provisioning hooks "
         "that ship in the Alpha milestone."
     )
+    with runtime.logger.operation(
+        "instance create",
+        args={"name": name},
+        target={"kind": "instance", "name": name},
+    ) as op:
+        _placeholder(message)
+        op.warning(
+            "Instance creation placeholder executed.",
+            warnings=["unimplemented"],
+        )
 
 
 @versions_app.command("list")
@@ -428,27 +491,34 @@ def version_list(
 
     entries = _merge_versions(local_entries, remote_versions)
 
-    if json_output:
-        console.print_json(data={"versions": entries})
-        return
+    with runtime.logger.operation(
+        "version list",
+        args={"json": json_output, "remote": remote},
+        target={"kind": "version", "scope": "registry"},
+    ) as op:
+        if json_output:
+            console.print_json(data={"versions": entries})
+            op.success("Reported version list as JSON.", changed=0)
+            return
 
-    table = Table(show_header=True, header_style="bold magenta")
-    table.add_column("Version", style="bold")
-    table.add_column("Installed")
-    table.add_column("Source")
+        table = Table(show_header=True, header_style="bold magenta")
+        table.add_column("Version", style="bold")
+        table.add_column("Installed")
+        table.add_column("Source")
 
-    if not entries:
-        table.add_row("(none)", "", "")
-    else:
-        for entry in entries:
-            metadata = entry.get("metadata", {})
-            table.add_row(
-                entry["version"],
-                "yes" if metadata.get("installed") else "no",
-                str(metadata.get("source", "registry")),
-            )
+        if not entries:
+            table.add_row("(none)", "", "")
+        else:
+            for entry in entries:
+                metadata = entry.get("metadata", {})
+                table.add_row(
+                    entry["version"],
+                    "yes" if metadata.get("installed") else "no",
+                    str(metadata.get("source", "registry")),
+                )
 
-    console.print(table)
+        console.print(table)
+        op.success("Reported version list.", changed=0)
 
 
 @versions_app.command("check-updates")
@@ -471,13 +541,28 @@ def version_check_updates(
         ),
     }
 
-    if json_output:
-        console.print_json(data=payload)
-        return
+    with runtime.logger.operation(
+        "version check-updates",
+        args={"json": json_output},
+        target={"kind": "version", "scope": "update-check"},
+    ) as op:
+        if json_output:
+            console.print_json(data=payload)
+            op.warning(
+                "Version check placeholder executed (JSON).",
+                warnings=["unimplemented"],
+            )
+            return
 
-    console.print(
-        "[yellow]Check-updates placeholder[/yellow]: {package}\n{message}".format(**payload)
-    )
+        console.print(
+            "[yellow]Check-updates placeholder[/yellow]: {package}\n{message}".format(
+                **payload
+            )
+        )
+        op.warning(
+            "Version check placeholder executed.",
+            warnings=["unimplemented"],
+        )
 
 
 @backups_app.command("create")
@@ -486,11 +571,21 @@ def backup_create(
     instance: str = typer.Argument(..., help="Instance name to back up."),
 ) -> None:
     """Create a backup archive for an instance (coming soon)."""
-    _get_runtime(ctx)
-    _placeholder(
+    runtime = _get_runtime(ctx)
+    message = (
         f"Backups for instance '{instance}' will be available after storage "
         "primitives stabilize."
     )
+    with runtime.logger.operation(
+        "backup create",
+        args={"instance": instance},
+        target={"kind": "backup", "instance": instance},
+    ) as op:
+        _placeholder(message)
+        op.warning(
+            "Backup creation placeholder executed.",
+            warnings=["unimplemented"],
+        )
 
 
 def main() -> None:

@@ -23,7 +23,8 @@ def _prepare_environment(
     remote_versions: list[str] | None = None,
 ) -> tuple[dict[str, str], Path]:
     state_dir = tmp_path / "state"
-    config = {"state_dir": str(state_dir)}
+    logs_dir = tmp_path / "logs"
+    config = {"state_dir": str(state_dir), "logs_dir": str(logs_dir)}
     if config_overrides:
         config.update(config_overrides)
 
@@ -214,3 +215,28 @@ def test_instance_show_missing(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert "not found" in result.stdout
+
+
+def test_operations_logging_creates_records(tmp_path: Path) -> None:
+    """Commands emit structured logging records in the configured logs directory."""
+    env, state_dir = _prepare_environment(tmp_path)
+
+    result = runner.invoke(app, ["config", "show", "--json"], env=env)
+
+    assert result.exit_code == 0
+
+    logs_dir = state_dir.parent / "logs"
+    operations_log = logs_dir / "operations.jsonl"
+    human_log = logs_dir / "abssctl.log"
+
+    assert operations_log.exists()
+    assert human_log.exists()
+
+    record = json.loads(operations_log.read_text(encoding="utf-8").splitlines()[-1])
+    assert record["command"] == "config show"
+    assert record["args"] == {"json": True}
+    assert record["result"]["status"] == "success"
+    assert record["context"]["abssctl_version"] == __version__
+
+    human_content = human_log.read_text(encoding="utf-8")
+    assert "config show" in human_content
