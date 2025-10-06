@@ -1,0 +1,108 @@
+========================================
+abssctl — Actual Sync Server Admin CLI
+========================================
+
+.. image:: https://img.shields.io/badge/status-pre--alpha-orange
+   :alt: Project maturity badge showing Pre-Alpha status
+
+``abssctl`` is a planned, batteries-included command line tool that installs and
+manages multiple Actual Budget Sync Server instances on the TurnKey Linux
+Node.js appliance. The CLI will own the full lifecycle: provisioning new
+instances, performing upgrades or rollbacks, managing nginx and systemd
+integrations, and producing support bundles for operators.
+
+Project Facts
+=============
+
+- **Project name:** Actual Budget Multi-Instance Sync Server Admin CLI.
+- **CLI executable:** ``abssctl`` (Actual Budget Sync Server ConTroL).
+
+The project is currently in the **Pre-Alpha (repository bootstrap)** phase. This
+repository intentionally ships skeletal code, documentation, and automation so
+that later milestones can focus on feature delivery instead of setup chores.
+
+Key Objectives
+==============
+
+- Provide a predictable Python package that can be installed with ``pip`` or
+  ``pipx`` and exposes an ``abssctl`` executable.
+- Establish documentation sources in reStructuredText with Sphinx as the build
+  system (see ``docs/source``).
+- Enforce quality gates via linting, type checking, and tests in continuous
+  integration.
+- Capture all architectural decisions in ``docs/adrs`` and maintain living
+  requirements under ``docs/requirements``.
+
+Quick Start (Pre-Alpha)
+=======================
+
+.. note::
+   The CLI currently exposes only scaffolding commands that surface the version
+   and help text. Functional subcommands are introduced during the Alpha phase.
+
+1. Create a Python 3.11 virtual environment stored in ``.venv`` with a prompt label ``dev`` and activate it::
+
+      python3.11 -m venv .venv --prompt dev
+      source .venv/bin/activate
+
+2. Install the package in editable mode together with developer dependencies::
+
+      pip install -e .[dev]
+
+3. Run the basic quality checks::
+
+      ruff check src tests
+      mypy src
+      pytest
+
+4. Invoke the CLI skeleton::
+
+      abssctl --help
+      abssctl --version
+
+Repository Layout
+=================
+
+- ``src/abssctl`` — Python package containing the Typer-based CLI scaffold.
+- ``tests`` — Pytest suite covering CLI entry points and future modules.
+- ``docs`` — Requirements, ADRs, Sphinx sources, and generated support matrix.
+- ``tools`` — Utility scripts used during development (e.g., support matrix generator).
+
+Roadmap & Specifications
+========================
+
+- Requirements & project plan: ``docs/requirements/abssctl-app-specs.txt``
+- Architecture Decision Records: ``docs/adrs``
+- Support matrix source: ``docs/support/actual-support-matrix.yml``
+
+Community & Licensing
+=====================
+
+The project is released under the MIT License (``LICENSE``). Contributions are
+welcome—please review the developer guide skeleton under ``docs/source`` for the
+expected workflow and coding standards as they evolve.
+
+Branch Strategy
+===============
+
+- ``main`` — production-ready releases tagged for PyPI.
+- ``dev`` — integration branch for upcoming development builds.
+- ``dev-prealpha`` — working branch for repository bootstrap tasks.
+- Short-lived feature branches support focused working sessions.
+
+Roadmap Snapshot
+================
+
+- **Pre-Alpha — Repo Bootstrap:** scaffold layout, ``pyproject.toml``, docs
+  skeleton, CI with lint/test (this milestone).
+- **Alpha Builds — Foundations:** CLI skeleton beyond placeholders, config
+  loader, logging, state/lock primitives, template engine, read-only commands,
+  JSON output plumbing. Publish dev builds to PyPI from tags on ``dev``.
+- **Beta Releases — Core Features:** Version operations, instance lifecycle,
+  systemd/nginx providers, doctor basics. All updates become non-destructive or
+  ship with migration hooks.
+- **Release Candidate — Quality & Docs:** Support bundle, robust errors, man
+  pages & completion, full docs & examples, CI integration tests on TurnKey
+  Linux VMs. Automate PyPI release from GitHub actions.
+- **Release — v1.0.0:** Burn-in testing across supported Actual versions,
+  release on a green pipeline with documentation sign-off.

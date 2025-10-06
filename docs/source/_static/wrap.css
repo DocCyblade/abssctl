@@ -1,0 +1,11 @@
+/* Only affect literal blocks inside our softwrap container */
+.softwrap pre,
+.softwrap pre.literal-block,
+.softwrap div.literal-block pre,
+.softwrap .highlight pre {
+  white-space: pre-wrap !important;  /* allow wraps but keep spacing */
+  word-break: break-word;            /* break long tokens if needed */
+  overflow-wrap: anywhere;           /* be flexible */
+  overflow-x: visible !important;    /* kill horizontal scrollbars */
+  max-width: 80ch;                   /* ~80 characters soft-wrap */
+}
