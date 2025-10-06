@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "abssctl"
-version = "0.1.0a1"
+dynamic = ["version"]
 description = "Actual Budget Multi-Instance Sync Server Admin CLI"
 readme = "README.rst"
 requires-python = ">=3.11"
@@ -50,6 +50,7 @@ dev = [
   "pyyaml>=6.0.3",
   "sphinx-autobuild>=2024.4",
   "sphinx-rtd-theme",
+  "hatch>=1.14.2",
 ]
 
 [project.scripts]

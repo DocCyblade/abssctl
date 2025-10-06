@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -88,6 +88,14 @@ class StateRegistry:
         """Return the contents of ``versions.yml`` (empty mapping if missing)."""
         value = self.read("versions.yml", default={"versions": []})
         return value if isinstance(value, Mapping) else {"versions": []}
+
+    def write_instances(self, instances: Iterable[object]) -> None:
+        """Persist instance entries to ``instances.yml``."""
+        self.write("instances.yml", {"instances": list(instances)})
+
+    def write_versions(self, versions: Iterable[object]) -> None:
+        """Persist version entries to ``versions.yml``."""
+        self.write("versions.yml", {"versions": list(versions)})
 
 
 __all__ = ["StateRegistry", "StateRegistryError"]

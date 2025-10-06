@@ -73,3 +73,37 @@ def test_invalid_config_file_raises(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigError):
         load_config(config_file=cfg, env={})
+
+
+def test_unknown_top_level_key_raises(tmp_path: Path) -> None:
+    """Unexpected top-level keys trigger ConfigError."""
+    cfg = tmp_path / "config.yml"
+    cfg.write_text("unknown: value\n")
+
+    with pytest.raises(ConfigError, match="Unknown configuration keys"):
+        load_config(config_file=cfg, env={})
+
+
+def test_invalid_port_strategy_raises(tmp_path: Path) -> None:
+    """Unsupported port strategies raise ConfigError."""
+    cfg = tmp_path / "config.yml"
+    cfg.write_text(
+        "ports:\n"
+        "  strategy: dynamic\n"
+    )
+
+    with pytest.raises(ConfigError, match="Unsupported port allocation strategy"):
+        load_config(config_file=cfg, env={})
+
+
+def test_unknown_tls_nested_keys_raise(tmp_path: Path) -> None:
+    """Extra TLS keys produce ConfigError for clarity."""
+    cfg = tmp_path / "config.yml"
+    cfg.write_text(
+        "tls:\n"
+        "  enabled: true\n"
+        "  extra: true\n"
+    )
+
+    with pytest.raises(ConfigError, match="Unknown TLS configuration keys"):
+        load_config(config_file=cfg, env={})

@@ -20,7 +20,7 @@ from rich.table import Table
 
 from . import __version__
 from .config import AppConfig, load_config
-from .providers import VersionProvider
+from .providers import InstanceStatusProvider, VersionProvider
 from .state import StateRegistry
 
 console = Console()
@@ -53,6 +53,7 @@ class RuntimeContext:
     config: AppConfig
     registry: StateRegistry
     version_provider: VersionProvider
+    instance_status_provider: InstanceStatusProvider
 
 
 def _ensure_runtime(ctx: typer.Context, config_file: Path | None) -> RuntimeContext:
@@ -62,11 +63,14 @@ def _ensure_runtime(ctx: typer.Context, config_file: Path | None) -> RuntimeCont
 
     config = load_config(config_file=config_file)
     registry = StateRegistry(config.registry_dir)
-    version_provider = VersionProvider()
+    version_cache = registry.root / "remote-versions.json"
+    version_provider = VersionProvider(cache_path=version_cache)
+    instance_status_provider = InstanceStatusProvider()
     runtime = RuntimeContext(
         config=config,
         registry=registry,
         version_provider=version_provider,
+        instance_status_provider=instance_status_provider,
     )
     ctx.obj = runtime
     return runtime
@@ -235,14 +239,16 @@ def _merge_versions(
 
 
 @app.command()
-def doctor() -> None:
+def doctor(ctx: typer.Context) -> None:
     """Run environment and service health checks (coming soon)."""
+    _get_runtime(ctx)
     _placeholder("Doctor checks will be introduced in the Alpha milestone.")
 
 
 @app.command()
-def support_bundle() -> None:
+def support_bundle(ctx: typer.Context) -> None:
     """Create a diagnostic bundle for support cases (coming soon)."""
+    _get_runtime(ctx)
     _placeholder("Support bundle generation is planned for the Beta milestone.")
 
 
@@ -317,6 +323,12 @@ def instance_list(
         table.add_row("(none)", "", "", "", "")
     else:
         for entry in entries:
+            metadata = entry.setdefault("metadata", {})
+            status_info = runtime.instance_status_provider.status(entry["name"], entry)
+            if not entry.get("status") or entry.get("status") == "unknown":
+                entry["status"] = status_info.state
+            metadata.setdefault("status_detail", status_info.detail)
+            metadata.setdefault("source", "registry")
             port_val = entry.get("port", "")
             port_rendered = "" if port_val in ("", None) else str(port_val)
             table.add_row(
@@ -350,6 +362,13 @@ def instance_show(
         console.print(f"[red]Instance '{name}' not found in registry.[/red]")
         raise typer.Exit(code=1)
 
+    metadata = target.setdefault("metadata", {})
+    status_info = runtime.instance_status_provider.status(target["name"], target)
+    if not target.get("status") or target.get("status") == "unknown":
+        target["status"] = status_info.state
+    metadata.setdefault("status_detail", status_info.detail)
+    metadata.setdefault("source", "registry")
+
     if json_output:
         console.print_json(data=target)
         return
@@ -362,14 +381,20 @@ def instance_show(
             continue
         table.add_row(key.title(), str(value))
 
+    status_detail = metadata.get("status_detail")
+    if status_detail:
+        table.add_row("Status Detail", str(status_detail))
+
     console.print(table)
 
 
 @instances_app.command("create")
 def instance_create(
+    ctx: typer.Context,
     name: str = typer.Argument(..., help="Name of the instance to create."),
 ) -> None:
     """Provision a new Actual Budget instance (coming soon)."""
+    _get_runtime(ctx)
     _placeholder(
         f"Instance '{name}' creation requires system provisioning hooks "
         "that ship in the Alpha milestone."
@@ -457,9 +482,11 @@ def version_check_updates(
 
 @backups_app.command("create")
 def backup_create(
+    ctx: typer.Context,
     instance: str = typer.Argument(..., help="Instance name to back up."),
 ) -> None:
     """Create a backup archive for an instance (coming soon)."""
+    _get_runtime(ctx)
     _placeholder(
         f"Backups for instance '{instance}' will be available after storage "
         "primitives stabilize."

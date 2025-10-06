@@ -36,6 +36,11 @@ except Exception as exc:  # pragma: no cover - import failure covered in tests
 
 ENV_PREFIX = "ABSSCTL_"
 CONFIG_ENV_VAR = f"{ENV_PREFIX}CONFIG_FILE"
+RESERVED_ENV_KEYS = {
+    CONFIG_ENV_VAR,
+    f"{ENV_PREFIX}SKIP_NPM",
+    f"{ENV_PREFIX}VERSIONS_CACHE",
+}
 
 
 class ConfigError(RuntimeError):
@@ -159,6 +164,9 @@ DEFAULTS: dict[str, object] = {
     },
 }
 
+ALLOWED_TOP_LEVEL_KEYS = set(DEFAULTS.keys())
+ALLOWED_PORT_STRATEGIES = {"sequential"}
+
 
 def load_config(
     config_file: str | os.PathLike[str] | None = None,
@@ -186,6 +194,8 @@ def load_config(
 
     merged["config_file"] = str(config_path)
 
+    _validate_structure(merged)
+
     return _build_app_config(merged)
 
 
@@ -211,6 +221,47 @@ def _load_yaml_file(path: Path) -> dict[str, object]:
     if not isinstance(data, Mapping):
         raise ConfigError(f"Config file {path} must contain a mapping at the top level.")
     return _as_dict(data, f"file:{path}")
+
+
+def _validate_structure(raw: Mapping[str, object]) -> None:
+    unknown_keys = set(raw.keys()) - ALLOWED_TOP_LEVEL_KEYS
+    if unknown_keys:
+        joined = ", ".join(sorted(unknown_keys))
+        raise ConfigError(f"Unknown configuration keys: {joined}.")
+
+    ports = raw.get("ports")
+    if ports is not None:
+        ports_map = _as_dict(ports, "ports")
+        unknown = set(ports_map.keys()) - {"base", "strategy"}
+        if unknown:
+            joined = ", ".join(sorted(unknown))
+            raise ConfigError(f"Unknown ports configuration keys: {joined}.")
+        strategy = ports_map.get("strategy")
+        if strategy is not None and str(strategy) not in ALLOWED_PORT_STRATEGIES:
+            allowed = ", ".join(sorted(ALLOWED_PORT_STRATEGIES))
+            raise ConfigError(
+                f"Unsupported port allocation strategy '{strategy}'. Allowed: {allowed}."
+            )
+
+    tls = raw.get("tls")
+    if tls is not None:
+        tls_map = _as_dict(tls, "tls")
+        unknown = set(tls_map.keys()) - {"enabled", "system", "lets_encrypt"}
+        if unknown:
+            joined = ", ".join(sorted(unknown))
+            raise ConfigError(f"Unknown TLS configuration keys: {joined}.")
+
+        system_map = _as_dict(tls_map.get("system"), "tls.system")
+        unknown_system = set(system_map.keys()) - {"cert", "key"}
+        if unknown_system:
+            joined = ", ".join(sorted(unknown_system))
+            raise ConfigError(f"Unknown TLS system keys: {joined}.")
+
+        lets_map = _as_dict(tls_map.get("lets_encrypt"), "tls.lets_encrypt")
+        unknown_lets = set(lets_map.keys()) - {"live_dir"}
+        if unknown_lets:
+            joined = ", ".join(sorted(unknown_lets))
+            raise ConfigError(f"Unknown TLS lets_encrypt keys: {joined}.")
 
 
 def _build_app_config(raw: Mapping[str, object]) -> AppConfig:
@@ -266,6 +317,8 @@ def _build_app_config(raw: Mapping[str, object]) -> AppConfig:
 def _build_env_overrides(env: Mapping[str, str]) -> dict[str, object]:
     overrides: dict[str, object] = {}
     for key, value in env.items():
+        if key in RESERVED_ENV_KEYS:
+            continue
         if not key.startswith(ENV_PREFIX):
             continue
         suffix = key[len(ENV_PREFIX) :]

@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 
 from abssctl import __version__
 from abssctl.cli import app
+from abssctl.state import StateRegistry
 
 runner = CliRunner()
 
@@ -22,9 +23,6 @@ def _prepare_environment(
     remote_versions: list[str] | None = None,
 ) -> tuple[dict[str, str], Path]:
     state_dir = tmp_path / "state"
-    registry_dir = state_dir / "registry"
-    registry_dir.mkdir(parents=True, exist_ok=True)
-
     config = {"state_dir": str(state_dir)}
     if config_overrides:
         config.update(config_overrides)
@@ -32,15 +30,13 @@ def _prepare_environment(
     config_file = tmp_path / "config.yml"
     config_file.write_text(yaml.safe_dump(config), encoding="utf-8")
 
+    registry = StateRegistry(state_dir / "registry")
+
     if versions is not None:
-        (registry_dir / "versions.yml").write_text(
-            yaml.safe_dump({"versions": versions}), encoding="utf-8"
-        )
+        registry.write_versions(versions)
 
     if instances is not None:
-        (registry_dir / "instances.yml").write_text(
-            yaml.safe_dump({"instances": instances}), encoding="utf-8"
-        )
+        registry.write_instances(instances)
 
     env = {"ABSSCTL_CONFIG_FILE": str(config_file)}
     if remote_versions is not None:

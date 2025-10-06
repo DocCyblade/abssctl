@@ -90,7 +90,8 @@ Read-only registry commands are now wired up: ``abssctl version list`` and
 ``instances.yml`` respectively, while ``abssctl instance show <name>`` displays
 details for a single instance. Use ``--remote`` with ``version list`` to pull
 published versions from npm when the CLI is available (falls back gracefully if
-``npm`` is missing).
+``npm`` is missing). All commands accept ``--config-file`` so you can point at
+alternate configuration sources when testing or operating multiple environments.
 
 Roadmap & Specifications
 ========================

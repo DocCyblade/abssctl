@@ -16,10 +16,12 @@ class VersionProvider:
         *,
         cache_env: str = "ABSSCTL_VERSIONS_CACHE",
         skip_env: str = "ABSSCTL_SKIP_NPM",
+        cache_path: Path | None = None,
     ) -> None:
         """Initialise the provider with optional environment overrides."""
         self.cache_env = cache_env
         self.skip_env = skip_env
+        self.cache_path = cache_path
 
     def list_remote_versions(self, package: str) -> list[str]:
         """Return versions published to npm for *package*.
@@ -31,11 +33,26 @@ class VersionProvider:
         if os.getenv(self.skip_env) == "1":
             return []
 
+        if self.cache_path and self.cache_path.exists():
+            cached = self._from_cache(self.cache_path)
+            if cached:
+                return cached
+
         cache_path = os.getenv(self.cache_env)
         if cache_path:
             return self._from_cache(Path(cache_path))
 
-        return self._from_npm(package)
+        versions = self._from_npm(package)
+        if versions and self.cache_path:
+            self._write_cache(self.cache_path, versions)
+        return versions
+
+    def refresh_cache(self, package: str) -> list[str]:
+        """Fetch versions from npm and write them to the configured cache path."""
+        versions = self._from_npm(package)
+        if versions and self.cache_path:
+            self._write_cache(self.cache_path, versions)
+        return versions
 
     def _from_cache(self, path: Path) -> list[str]:
         try:
@@ -47,6 +64,14 @@ class VersionProvider:
         except json.JSONDecodeError:
             return []
         return _normalise_versions(data)
+
+    def _write_cache(self, path: Path, versions: list[str]) -> None:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(versions, indent=2), encoding="utf-8")
+        except OSError:
+            # Non-fatal; cache updates are opportunistic.
+            pass
 
     def _from_npm(self, package: str) -> list[str]:
         try:

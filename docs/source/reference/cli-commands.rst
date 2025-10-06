@@ -46,7 +46,9 @@ Read-only commands:
 - ``version list`` reads ``versions.yml`` from the configured state directory
   and prints the entries in a table or JSON. Supply ``--remote`` to include
   versions reported by ``npm view`` (when available) alongside local entries.
-- ``instance list`` and ``instance show`` expose ``instances.yml`` contents; the
-  latter exits with code 1 if the requested instance is missing.
+- ``instance list`` and ``instance show`` expose ``instances.yml`` contents;
+  the latter exits with code 1 if the requested instance is missing and
+  displays placeholder status/detail information while system probes are
+  implemented.
 - ``version check-updates`` is a placeholder that confirms configuration
   plumbing and will be replaced with real npm lookups later in Alpha.
