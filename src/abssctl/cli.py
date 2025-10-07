@@ -321,6 +321,28 @@ def _build_nginx_context(config: AppConfig, instance: str) -> dict[str, object]:
     }
 
 
+def _register_instance(runtime: RuntimeContext, name: str) -> None:
+    registry_data = runtime.registry.read_instances()
+    raw_instances = registry_data.get("instances", [])
+    if isinstance(raw_instances, list):
+        existing: list[object] = list(raw_instances)
+    else:
+        existing = []
+    for entry in existing:
+        if isinstance(entry, Mapping) and entry.get("name") == name:
+            raise ValueError(f"Instance '{name}' already registered")
+
+    new_entry = {
+        "name": name,
+        "domain": f"{name}.local",
+        "port": runtime.config.ports.base,
+        "version": runtime.config.default_version,
+        "status": "disabled",
+    }
+    existing.append(new_entry)
+    runtime.registry.write_instances(existing)
+
+
 @app.command()
 def doctor(ctx: typer.Context) -> None:
     """Run environment and service health checks (coming soon)."""
@@ -520,10 +542,6 @@ def instance_create(
 ) -> None:
     """Provision a new Actual Budget instance (coming soon)."""
     runtime = _get_runtime(ctx)
-    message = (
-        f"Instance '{name}' creation requires system provisioning hooks "
-        "that ship in the Alpha milestone."
-    )
     with runtime.logger.operation(
         "instance create",
         args={"name": name},
@@ -531,8 +549,6 @@ def instance_create(
     ) as op:
         with runtime.locks.mutate_instances([name]) as bundle:
             op.set_lock_wait_ms(bundle.wait_ms)
-            _placeholder(message)
-
             systemd_context = _build_systemd_context(runtime.config, name)
             systemd_changed = runtime.systemd_provider.render_unit(name, systemd_context)
             if systemd_changed:
@@ -551,9 +567,25 @@ def instance_create(
                     detail=str(runtime.nginx_provider.site_path(name)),
                 )
 
-            op.warning(
-                "Instance creation placeholder executed.",
-                warnings=["unimplemented"],
+            try:
+                _register_instance(runtime, name)
+                op.add_step(
+                    "registry.write_instances",
+                    status="success",
+                    detail=f"registered:{name}",
+                )
+            except ValueError as exc:
+                console.print(f"[red]{exc}[/red]")
+                op.error(str(exc), errors=[str(exc)], rc=1)
+                raise typer.Exit(code=1) from exc
+
+            changed_count = int(systemd_changed) + int(nginx_changed) + 1
+            console.print(
+                f"[green]Rendered systemd/nginx scaffolding for instance '{name}'.[/green]"
+            )
+            op.success(
+                "Instance scaffolding rendered.",
+                changed=changed_count,
             )
 
 

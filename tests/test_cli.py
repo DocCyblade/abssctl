@@ -259,7 +259,16 @@ def test_instance_create_acquires_lock(tmp_path: Path) -> None:
     record = json.loads(log_lines[-1])
     assert record["command"] == "instance create"
     assert record.get("lock_wait_ms") is not None
-    assert any(step.get("name") == "systemd.render_unit" for step in record.get("steps", []))
+    assert record["result"]["status"] == "success"
+    steps = record.get("steps", [])
+    assert any(step.get("name") == "systemd.render_unit" for step in steps)
+    assert any(step.get("name") == "nginx.render_site" for step in steps)
+    assert any(step.get("name") == "registry.write_instances" for step in steps)
+
+    registry_file = state_dir / "registry" / "instances.yml"
+    registry_data = yaml.safe_load(registry_file.read_text(encoding="utf-8"))
+    instances = registry_data.get("instances", [])
+    assert any(item.get("name") == "alpha" for item in instances)
 
 
 def test_operations_logging_creates_records(tmp_path: Path) -> None:
