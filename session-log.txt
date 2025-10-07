@@ -1,9 +1,27 @@
 # Session Log
 
-# How to use:
-This session log shall log all work performed in a work session. Work sesson will start with date/time. Then list out items performed. When session is done write a Wrap up summary, a next steps section for quick next steps, and a AI prompt if working with with AI tools.
+#### How to use:
+- This session log shall log all work performed in a work session.
 
-## 2025-10-06 Alpha3 Session
+- Work sessions will start with date/time then name for this the session followed by session status in (OPEN/CLOSED)
+- New sessions are appended to file unless session is marked (OPEN) then we append to that session block
+
+- Each session block has it's own header and sub sections defined below
+    - Starts with "## Date - [Session name] (OPEN/CLOSED)"
+       - Session can be OPEN appended too, or CLOSED a new session needs to be started
+       - All work will be detailed, one or two items per line
+    - "### Wrap up: "
+        - Wrap section is a summary of all lines lines logged. Can be written to on going or when we close the session
+    - "### Next Steps / TODO:"
+        - This section is used to keep track in real time of whats to do next or if something is tabled for later, it's written here for follow up. This should be written in real time
+    - "### Next Session Primer"
+        - Used for our AI chat friends to prime a new chat to get the chat up to speed on the poject
+
+
+
+-  Then list out items performed. When session is done write a Wrap up summary, a next steps section for quick next steps, and a AI prompt if working with with AI tools. Always append new sessions (do not edit prior sections).
+
+## 2025-10-06 Alpha3 Session (CLOSED)
 - Session continuing on branch dev-alpha3; prior session notes unavailable.
 - Reviewed docs/requirements/abssctl-app-specs.txt (v1.0-draft-5) for v1 goals, scope, and roadmap.
 - Summarised ADR-001 through ADR-032 decisions (Typer CLI, packaging to PyPI, TKL focus, filesystem layout, locking, TLS defaults, backup policy, doctor/CI strategy).
@@ -37,8 +55,23 @@ This session log shall log all work performed in a work session. Work sesson wil
 
 ### Next Steps / TODO
 - Draft design/implementation plan for systemd/nginx providers in advance of Beta tasks.
-- Hook the new providers into upcoming CLI subcommands and expand coverage as they gain functionality.
 - Evaluate test strategy expansion to cover upcoming mutating commands.
 
 ### Next Session Primer
 Prompt: "We're on branch dev-alpha3 with logging, locking, and templating in place. Next step: prototype the systemd provider rendering pipeline using the new engine."
+
+## 2025-10-07 Alpha CI Session (OPEN)
+- Drafted a GitHub Actions workflow for publishing dev tags (``dev-*``) to TestPyPI and reviewed trusted publisher requirements for final rollout.
+- Noted the need to append new session entries without altering previous logs.
+
+### Wrap Summary
+- CI publishing work remains pending trusted publisher configuration and validation.
+- Logging discipline updated to ensure future sessions are appended.
+
+### Next Steps / TODO
+- Finalise TestPyPI trusted publishing setup (configure trusted publisher or secure token usage) and validate with a dev tag push.
+- Draft design/implementation plan for systemd/nginx providers in advance of Beta tasks.
+- Evaluate test strategy expansion to cover upcoming mutating commands.
+
+### Next Session Primer
+Prompt: "We're on branch dev-alpha3. Let's finish configuring TestPyPI trusted publishing, run a dev tag dry-run, and prep the repo for the Beta milestone kickoff."
