@@ -63,15 +63,20 @@ Prompt: "We're on branch dev-alpha3 with logging, locking, and templating in pla
 ## 2025-10-07 Alpha CI Session (OPEN)
 - Drafted a GitHub Actions workflow for publishing dev tags (``dev-*``) to TestPyPI and reviewed trusted publisher requirements for final rollout.
 - Noted the need to append new session entries without altering previous logs.
+- Converted ``publish-dev`` workflow to use PyPI trusted publishing (OIDC) for TestPyPI dev tags, removing the dependency on stored credentials and updating ``docs/roadmap.rst`` to mark the roadmap item complete.
+- Ran ``make dist`` locally to mirror the workflow steps and confirm lint/type/test/build all pass on the current branch.
+- Recorded the protected GitHub environment ``publish-dev`` with its approval gate (15 min timeout) and the new tag convention ``v*.*.*-dev``.
+- Confirmed TestPyPI trusted publisher registration for ``DocCyblade/abssctl`` → ``publish-dev.yml`` bound to the ``publish-dev`` environment.
 
 ### Wrap Summary
-- CI publishing work remains pending trusted publisher configuration and validation.
-- Logging discipline updated to ensure future sessions are appended.
+- Dev-tag publishing now uses TestPyPI trusted publishing with the ``publish-dev`` environment guarding releases.
+- Verified the CI workflow path locally via ``make dist`` to ensure build artifacts are healthy and recorded the new tag pattern.
+- Logging discipline reminder stands so we continue appending to open sessions only.
 
 ### Next Steps / TODO
-- Finalise TestPyPI trusted publishing setup (configure trusted publisher or secure token usage) and validate with a dev tag push.
+- Trigger a ``v*.*.*-dev`` tag dry-run once environment approval is ready and observe the trusted publishing flow end-to-end.
 - Draft design/implementation plan for systemd/nginx providers in advance of Beta tasks.
 - Evaluate test strategy expansion to cover upcoming mutating commands.
 
 ### Next Session Primer
-Prompt: "We're on branch dev-alpha3. Let's finish configuring TestPyPI trusted publishing, run a dev tag dry-run, and prep the repo for the Beta milestone kickoff."
+Prompt: "Trusted publishing + environment protections are in place. Next up: run a ``v*.*.*-dev`` tag dry-run through the approval gate, then shift focus to the systemd/nginx provider implementation plan for Beta."
