@@ -245,12 +245,21 @@ def test_instance_create_acquires_lock(tmp_path: Path) -> None:
     lock_metadata = json.loads(lock_path.read_text(encoding="utf-8"))
     assert lock_metadata["pid"] == os.getpid()
 
+    systemd_unit = runtime_dir / "systemd" / "abssctl-alpha.service"
+    assert systemd_unit.exists()
+    assert "Actual Budget Sync Server" in systemd_unit.read_text(encoding="utf-8")
+
+    nginx_site = runtime_dir / "nginx" / "sites-available" / "abssctl-alpha.conf"
+    assert nginx_site.exists()
+    assert "server_name alpha.local" in nginx_site.read_text(encoding="utf-8")
+
     logs_dir = state_dir.parent / "logs"
     operations_log = logs_dir / "operations.jsonl"
     log_lines = operations_log.read_text(encoding="utf-8").splitlines()
     record = json.loads(log_lines[-1])
     assert record["command"] == "instance create"
     assert record.get("lock_wait_ms") is not None
+    assert any(step.get("name") == "systemd.render_unit" for step in record.get("steps", []))
 
 
 def test_operations_logging_creates_records(tmp_path: Path) -> None:

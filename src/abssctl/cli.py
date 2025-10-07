@@ -94,9 +94,12 @@ def _ensure_runtime(
         templates=templates,
         logger=logger,
         locks=locks,
+        systemd_dir=config.runtime_dir / "systemd",
     )
     nginx_provider = NginxProvider(
         templates=templates,
+        sites_available=config.runtime_dir / "nginx" / "sites-available",
+        sites_enabled=config.runtime_dir / "nginx" / "sites-enabled",
     )
     runtime = RuntimeContext(
         config=config,
@@ -285,6 +288,37 @@ def _merge_versions(
 
     combined.sort(key=lambda item: item["version"], reverse=True)
     return combined
+
+
+def _build_systemd_context(config: AppConfig, instance: str) -> dict[str, object]:
+    install_dir = config.install_root / "current"
+    working_directory = config.instance_root / instance
+    exec_start = install_dir / "server.js"
+    environment = [
+        "NODE_ENV=production",
+        f"ABSSCTL_INSTANCE={instance}",
+    ]
+    return {
+        "instance_name": instance,
+        "service_user": config.service_user,
+        "working_directory": str(working_directory),
+        "exec_start": str(exec_start),
+        "environment": environment,
+    }
+
+
+def _build_nginx_context(config: AppConfig, instance: str) -> dict[str, object]:
+    listen_port = config.ports.base
+    upstream = f"127.0.0.1:{config.ports.base}"
+    server_name = f"{instance}.local"
+    log_prefix = config.logs_dir / instance
+    return {
+        "listen_port": listen_port,
+        "server_name": server_name,
+        "access_log": str(log_prefix.with_suffix(".nginx.access.log")),
+        "error_log": str(log_prefix.with_suffix(".nginx.error.log")),
+        "upstream": upstream,
+    }
 
 
 @app.command()
@@ -498,6 +532,25 @@ def instance_create(
         with runtime.locks.mutate_instances([name]) as bundle:
             op.set_lock_wait_ms(bundle.wait_ms)
             _placeholder(message)
+
+            systemd_context = _build_systemd_context(runtime.config, name)
+            systemd_changed = runtime.systemd_provider.render_unit(name, systemd_context)
+            if systemd_changed:
+                op.add_step(
+                    "systemd.render_unit",
+                    status="success",
+                    detail=str(runtime.systemd_provider.unit_path(name)),
+                )
+
+            nginx_context = _build_nginx_context(runtime.config, name)
+            nginx_changed = runtime.nginx_provider.render_site(name, nginx_context)
+            if nginx_changed:
+                op.add_step(
+                    "nginx.render_site",
+                    status="success",
+                    detail=str(runtime.nginx_provider.site_path(name)),
+                )
+
             op.warning(
                 "Instance creation placeholder executed.",
                 warnings=["unimplemented"],

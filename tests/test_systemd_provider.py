@@ -83,10 +83,9 @@ def test_render_unit_writes_file_and_reload(
     assert "Actual Budget Sync Server (alpha)" in contents
     assert "NODE_ENV=production" in contents
 
-    assert calls == [("daemon-reload", None, True)]
+    assert calls == []
 
-    # Second render with identical context should not trigger reload.
-    calls.clear()
+    # Second render with identical context should remain a no-op.
     changed_again = provider.render_unit("alpha", _context("alpha"))
     assert changed_again is False
     assert calls == []

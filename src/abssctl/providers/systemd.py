@@ -35,8 +35,6 @@ class SystemdProvider:
         template_name = "systemd/service.j2"
         path = self.unit_path(instance)
         changed = self.templates.render_to_path(template_name, path, context, mode=0o644)
-        if changed:
-            self._reload_daemon()
         return changed
 
     def enable(self, instance: str) -> None:
