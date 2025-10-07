@@ -68,6 +68,7 @@ include = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/abssctl"]
+core-metadata-version = "2.3"
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -77,6 +78,7 @@ include = [
   "docs/support/actual-support-matrix.rst",
   "docs/requirements/abssctl-app-specs.txt",
 ]
+core-metadata-version = "2.3"
 
 [tool.hatch.version]
 path = "src/abssctl/__init__.py"

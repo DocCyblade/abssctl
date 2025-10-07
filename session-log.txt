@@ -67,10 +67,11 @@ Prompt: "We're on branch dev-alpha3 with logging, locking, and templating in pla
 - Ran ``make dist`` locally to mirror the workflow steps and confirm lint/type/test/build all pass on the current branch.
 - Recorded the protected GitHub environment ``publish-dev`` with its approval gate (15 min timeout) and the new tag convention ``v*.*.*-dev``.
 - Confirmed TestPyPI trusted publisher registration for ``DocCyblade/abssctl`` → ``publish-dev.yml`` bound to the ``publish-dev`` environment.
+- Addressed the CI failure caused by Metadata-Version 2.4 by pinning Hatch build targets to emit Core Metadata 2.3 (``pyproject.toml``) and rebuilding artifacts via ``make dist`` to verify.
 
 ### Wrap Summary
 - Dev-tag publishing now uses TestPyPI trusted publishing with the ``publish-dev`` environment guarding releases.
-- Verified the CI workflow path locally via ``make dist`` to ensure build artifacts are healthy and recorded the new tag pattern.
+- Verified the CI workflow path locally via ``make dist`` to ensure build artifacts are healthy, recorded the new tag pattern, and confirmed metadata compatibility with PyPI tooling.
 - Logging discipline reminder stands so we continue appending to open sessions only.
 
 ### Next Steps / TODO
