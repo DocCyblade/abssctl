@@ -11,7 +11,7 @@ from .config import AppConfig, load_config
 __all__ = ["__version__", "get_version", "AppConfig", "load_config"]
 
 # NOTE: Hatch reads this value via ``tool.hatch.version`` to manage the project version.
-__version__ = "0.1.0a3"
+__version__ = "0.1.0a4"
 
 
 def get_version() -> str:
