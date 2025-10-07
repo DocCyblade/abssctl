@@ -68,16 +68,22 @@ Prompt: "We're on branch dev-alpha3 with logging, locking, and templating in pla
 - Recorded the protected GitHub environment ``publish-dev`` with its approval gate (15 min timeout) and the new tag convention ``v*.*.*-dev``.
 - Confirmed TestPyPI trusted publisher registration for ``DocCyblade/abssctl`` → ``publish-dev.yml`` bound to the ``publish-dev`` environment.
 - Addressed the CI failure caused by Metadata-Version 2.4 by pinning Hatch build targets to emit Core Metadata 2.3 (``pyproject.toml``) and rebuilding artifacts via ``make dist`` to verify.
+- Authored ADR-033 defining the unified versioning/tagging strategy (PEP 440 package versions, ``v<version>`` release tags, ``v<version>-dev`` TestPyPI tags, and ``docs-v<version>`` documentation tags).
+- Added explicit PEP 440 reference links to ADR-033 for clarity.
+- Realigned GitHub Actions workflows with ADR-033: CI now reacts to ``v*``/``v*.*.*-dev``/``docs-v*`` tags, docs publishing validates ``docs-v`` tags against ``__version__``, dev publishes enforce version alignment + concurrency, and a new ``publish-release.yml`` promotes ``v<version>`` tags to PyPI via the ``publish-release`` environment.
 
 ### Wrap Summary
 - Dev-tag publishing now uses TestPyPI trusted publishing with the ``publish-dev`` environment guarding releases.
 - Verified the CI workflow path locally via ``make dist`` to ensure build artifacts are healthy, recorded the new tag pattern, and confirmed metadata compatibility with PyPI tooling.
+- GitHub workflows now enforce the standardized tag/version policy across CI, docs, dev, and release pipelines with environment approvals in the loop.
 - Logging discipline reminder stands so we continue appending to open sessions only.
 
 ### Next Steps / TODO
 - Trigger a ``v*.*.*-dev`` tag dry-run once environment approval is ready and observe the trusted publishing flow end-to-end.
 - Draft design/implementation plan for systemd/nginx providers in advance of Beta tasks.
 - Evaluate test strategy expansion to cover upcoming mutating commands.
+- Socialize ADR-033 with maintainers and update CI/environment patterns as needed after approval.
+- Coordinate with maintainers on configuring PyPI/TestPyPI trusted publishers for the new ``publish-release`` environment ahead of the first GA/RC tag.
 
 ### Next Session Primer
-Prompt: "Trusted publishing + environment protections are in place. Next up: run a ``v*.*.*-dev`` tag dry-run through the approval gate, then shift focus to the systemd/nginx provider implementation plan for Beta."
+Prompt: "Trusted publishing + environment protections are in place. Next up: run a ``v*.*.*-dev`` tag dry-run through the approval gate, collect feedback/approval on ADR-033, and shift focus to the systemd/nginx provider implementation plan for Beta."

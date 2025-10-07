@@ -1,8 +1,12 @@
-name: CI
+name: abssctl CI
 
 on:
   push:
     branches: [main, dev, "dev-*"]
+    tags:
+      - "v*"
+      - "v*.*.*-dev"
+      - "docs-v*"
   pull_request:
     branches: [main, dev, "dev-*"]
 

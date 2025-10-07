@@ -1,47 +1,63 @@
-name: Publish Dev Release
+name: Publish Release
 
 on:
   push:
     tags:
-      - "v*.*.*-dev"
+      - "v*"
 
 permissions:
   contents: read
   id-token: write
 
 concurrency:
-  group: publish-dev-${{ github.ref_name }}
+  group: publish-release-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
-  publish-dev:
+  publish-release:
+    if: "!endsWith(github.ref_name, '-dev')"
     runs-on: ubuntu-latest
-    environment: publish-dev
+    environment: publish-release
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure tag points at main
+        run: |
+          TAG_COMMIT=$(git rev-parse $GITHUB_SHA)
+          MAIN_COMMIT=$(git rev-parse origin/main)
+          if ! git merge-base --is-ancestor $MAIN_COMMIT $TAG_COMMIT; then
+            echo "Tag is not on main. Exiting."
+            exit 1
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Validate dev tag version
+      - name: Validate release tag version
         run: |
           TAG="${GITHUB_REF_NAME}"
-          if [[ "${TAG}" != v*-dev ]]; then
-            echo "Dev publish workflow triggered for unexpected tag: ${TAG}"
+          if [[ "${TAG}" != v* ]]; then
+            echo "Release workflow triggered for unexpected ref: ${TAG}"
             exit 1
           fi
-          BASE_VERSION="${TAG%-dev}"
-          export BASE_VERSION
+          if [[ "${TAG}" == *-dev ]]; then
+            echo "Release workflow should not run for dev tag: ${TAG}"
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          export VERSION
           python3 - <<'PY'
 import importlib.util
 import os
 import pathlib
 import sys
 
-tag_version = os.environ["BASE_VERSION"]
+tag_version = os.environ["VERSION"]
 init_path = pathlib.Path("src/abssctl/__init__.py")
 spec = importlib.util.spec_from_file_location("abssctl", init_path)
 module = importlib.util.module_from_spec(spec)
@@ -56,8 +72,5 @@ PY
         run: |
           make dist
 
-      - name: Publish to TestPyPI
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@v1.12.2
-        with:
-          repository-url: https://test.pypi.org/legacy/
-          skip-existing: true
