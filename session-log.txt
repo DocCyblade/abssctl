@@ -21,6 +21,7 @@ This session log shall log all work performed in a work session. Work sesson wil
 - Designed and delivered the global + per-instance locking subsystem per ADR-027 (configurable timeout, flock metadata), integrated it with CLI placeholders, logging, and new tests validating timeouts and metadata.
 - Introduced the templating engine per ADR-009/ADR-010: added configurable template directory, Jinja2-based renderer with override support, bundled systemd/nginx templates, and accompanying unit/CLI coverage.
 - Prototyped the systemd provider: wired it to the template engine, added unit/management helpers, and captured behavior in dedicated tests to prepare for real instance lifecycle commands.
+- Added the nginx provider scaffold with templated vhost rendering, symlink management, validation helpers, and focused tests.
 
 ### Wrap Summary
 - Built shared understanding of v1 scope by reviewing requirements and ADRs.
@@ -30,11 +31,11 @@ This session log shall log all work performed in a work session. Work sesson wil
 - Delivered structured logging foundation with operations.jsonl + human logs and verified coverage.
 - Implemented locking primitives and wired them into the CLI/runtime for future mutating commands.
 - Shipped a templating engine foundation with built-in systemd/nginx templates and override support.
-- Established the systemd provider scaffold ready for CLI integration.
+- Established the systemd and nginx provider scaffolds ready for CLI integration.
 
 ### Next Steps / TODO
 - Draft design/implementation plan for systemd/nginx providers in advance of Beta tasks.
-- Hook the new systemd provider into upcoming CLI subcommands and expand coverage for nginx provider rendering.
+- Hook the new providers into upcoming CLI subcommands and expand coverage as they gain functionality.
 - Evaluate test strategy expansion to cover upcoming mutating commands.
 
 ### Next Session Primer

@@ -22,7 +22,12 @@ from . import __version__
 from .config import AppConfig, load_config
 from .locking import LockManager
 from .logging import StructuredLogger
-from .providers import InstanceStatusProvider, VersionProvider
+from .providers import (
+    InstanceStatusProvider,
+    NginxProvider,
+    SystemdProvider,
+    VersionProvider,
+)
 from .state import StateRegistry
 from .templates import TemplateEngine
 
@@ -60,6 +65,8 @@ class RuntimeContext:
     locks: LockManager
     logger: StructuredLogger
     templates: TemplateEngine
+    systemd_provider: SystemdProvider
+    nginx_provider: NginxProvider
 
 
 def _ensure_runtime(
@@ -83,6 +90,14 @@ def _ensure_runtime(
     locks = LockManager(config.runtime_dir, config.lock_timeout)
     logger = StructuredLogger(config.logs_dir)
     templates = TemplateEngine.with_overrides(config.templates_dir)
+    systemd_provider = SystemdProvider(
+        templates=templates,
+        logger=logger,
+        locks=locks,
+    )
+    nginx_provider = NginxProvider(
+        templates=templates,
+    )
     runtime = RuntimeContext(
         config=config,
         registry=registry,
@@ -91,6 +106,8 @@ def _ensure_runtime(
         locks=locks,
         logger=logger,
         templates=templates,
+        systemd_provider=systemd_provider,
+        nginx_provider=nginx_provider,
     )
     ctx.obj = runtime
     return runtime
