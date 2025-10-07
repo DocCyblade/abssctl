@@ -22,4 +22,4 @@ Implement providers: versions (npm), systemd, nginx. Define clear contracts and 
 - Slightly more wiring in CLI core
 
 ## Open Questions
-- None
+- Define templating contracts: template contexts, fallback paths, and validation hooks to share between systemd/nginx providers.
