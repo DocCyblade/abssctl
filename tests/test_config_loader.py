@@ -16,6 +16,7 @@ def test_load_config_defaults_when_file_missing(tmp_path: Path) -> None:
     assert config.install_root == Path("/srv/app")
     assert config.registry_dir == Path("/var/lib/abssctl/registry")
     assert config.tls.enabled is True
+    assert config.templates_dir == Path("/etc/abssctl/templates")
 
 
 def test_load_config_reads_yaml_file(tmp_path: Path) -> None:
@@ -45,6 +46,7 @@ def test_env_overrides_take_precedence(tmp_path: Path) -> None:
         "ABSSCTL_TLS__ENABLED": "false",
         "ABSSCTL_STATE_DIR": str(state_dir),
         "ABSSCTL_LOCK_TIMEOUT": "45",
+        "ABSSCTL_TEMPLATES_DIR": str(tmp_path / "templates"),
     }
 
     config = load_config(env=env)
@@ -54,6 +56,7 @@ def test_env_overrides_take_precedence(tmp_path: Path) -> None:
     assert config.state_dir == state_dir
     assert config.registry_dir == state_dir / "registry"
     assert config.lock_timeout == 45.0
+    assert config.templates_dir == tmp_path / "templates"
 
 
 def test_env_can_select_config_file(tmp_path: Path) -> None:

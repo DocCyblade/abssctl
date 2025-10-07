@@ -19,6 +19,7 @@ This session log shall log all work performed in a work session. Work sesson wil
 - Updated `make dist` pipeline: ensure `.venv-test` installs `.[dev]` and rebuilds when `pyproject.toml` or `Makefile` changes so mypy finds typer/rich stubs during CI-style builds.
 - Adjusted `make quick-tests` to reuse the developer venv instead of deleting it, still re-running `pip install -e .[dev]` only when dependencies change.
 - Designed and delivered the global + per-instance locking subsystem per ADR-027 (configurable timeout, flock metadata), integrated it with CLI placeholders, logging, and new tests validating timeouts and metadata.
+- Introduced the templating engine per ADR-009/ADR-010: added configurable template directory, Jinja2-based renderer with override support, bundled systemd/nginx templates, and accompanying unit/CLI coverage.
 
 ### Wrap Summary
 - Built shared understanding of v1 scope by reviewing requirements and ADRs.
@@ -27,11 +28,11 @@ This session log shall log all work performed in a work session. Work sesson wil
 - Improved `make docs` workflow to clean out old HTML artifacts before rebuilds.
 - Delivered structured logging foundation with operations.jsonl + human logs and verified coverage.
 - Implemented locking primitives and wired them into the CLI/runtime for future mutating commands.
+- Shipped a templating engine foundation with built-in systemd/nginx templates and override support.
 
 ### Next Steps / TODO
-- Continue Alpha milestone work (e.g., introduce the templating engine for systemd/nginx assets).
 - Draft design/implementation plan for systemd/nginx providers in advance of Beta tasks.
 - Evaluate test strategy expansion to cover upcoming mutating commands.
 
 ### Next Session Primer
-Prompt: "We're on branch dev-alpha3 with locking completed. Let's tackle the templating engine for systemd/nginx assets."
+Prompt: "We're on branch dev-alpha3 with logging, locking, and templating in place. Next step: prototype the systemd provider rendering pipeline using the new engine."

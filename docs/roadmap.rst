@@ -27,7 +27,7 @@ Alpha Builds — Foundations
   logs + ``operations.jsonl``) and integrate it with existing CLI commands.
 - [x] Implement global and per-instance locking primitives per ADR-027 and
   ensure mutating commands acquire/release locks safely (with tests).
-- [ ] Introduce the template rendering engine for systemd and nginx assets
+- [x] Introduce the template rendering engine for systemd and nginx assets
   (e.g., Jinja-based templates under ``src/abssctl/templates/``) per
   ADR-009/ADR-010.
 - [ ] Extend CI to publish dev builds to PyPI when tags land on ``dev`` (aligns

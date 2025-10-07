@@ -110,6 +110,7 @@ class AppConfig:
     registry_dir: Path
     logs_dir: Path
     runtime_dir: Path
+    templates_dir: Path
     lock_timeout: float
     npm_package_name: str
     reverse_proxy: str
@@ -128,6 +129,7 @@ class AppConfig:
             "registry_dir": str(self.registry_dir),
             "logs_dir": str(self.logs_dir),
             "runtime_dir": str(self.runtime_dir),
+            "templates_dir": str(self.templates_dir),
             "lock_timeout": self.lock_timeout,
             "npm_package_name": self.npm_package_name,
             "reverse_proxy": self.reverse_proxy,
@@ -146,6 +148,7 @@ DEFAULTS: dict[str, object] = {
     "registry_dir": None,  # derived from state_dir when absent
     "logs_dir": "/var/log/abssctl",
     "runtime_dir": "/run/abssctl",
+    "templates_dir": "/etc/abssctl/templates",
     "lock_timeout": 30.0,
     "npm_package_name": "@actual-app/sync-server",
     "reverse_proxy": "nginx",
@@ -278,6 +281,7 @@ def _build_app_config(raw: Mapping[str, object]) -> AppConfig:
     state_dir = _to_path(raw.get("state_dir"))
     logs_dir = _to_path(raw.get("logs_dir"))
     runtime_dir = _to_path(raw.get("runtime_dir"))
+    templates_dir = _to_path(raw.get("templates_dir"))
     lock_timeout = _expect_positive_float(raw.get("lock_timeout"), "lock_timeout", default=30.0)
 
     registry_dir_value = raw.get("registry_dir")
@@ -313,6 +317,7 @@ def _build_app_config(raw: Mapping[str, object]) -> AppConfig:
         registry_dir=registry_dir,
         logs_dir=logs_dir,
         runtime_dir=runtime_dir,
+        templates_dir=templates_dir,
         lock_timeout=lock_timeout,
         npm_package_name=str(raw.get("npm_package_name", "@actual-app/sync-server")),
         reverse_proxy=str(raw.get("reverse_proxy", "nginx")),

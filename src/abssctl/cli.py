@@ -24,6 +24,7 @@ from .locking import LockManager
 from .logging import StructuredLogger
 from .providers import InstanceStatusProvider, VersionProvider
 from .state import StateRegistry
+from .templates import TemplateEngine
 
 console = Console()
 
@@ -58,6 +59,7 @@ class RuntimeContext:
     instance_status_provider: InstanceStatusProvider
     locks: LockManager
     logger: StructuredLogger
+    templates: TemplateEngine
 
 
 def _ensure_runtime(
@@ -80,6 +82,7 @@ def _ensure_runtime(
     instance_status_provider = InstanceStatusProvider()
     locks = LockManager(config.runtime_dir, config.lock_timeout)
     logger = StructuredLogger(config.logs_dir)
+    templates = TemplateEngine.with_overrides(config.templates_dir)
     runtime = RuntimeContext(
         config=config,
         registry=registry,
@@ -87,6 +90,7 @@ def _ensure_runtime(
         instance_status_provider=instance_status_provider,
         locks=locks,
         logger=logger,
+        templates=templates,
     )
     ctx.obj = runtime
     return runtime

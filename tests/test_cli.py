@@ -26,10 +26,12 @@ def _prepare_environment(
     state_dir = tmp_path / "state"
     logs_dir = tmp_path / "logs"
     runtime_dir = tmp_path / "run"
+    templates_dir = tmp_path / "templates"
     config = {
         "state_dir": str(state_dir),
         "logs_dir": str(logs_dir),
         "runtime_dir": str(runtime_dir),
+        "templates_dir": str(templates_dir),
     }
     if config_overrides:
         config.update(config_overrides)
@@ -84,6 +86,7 @@ def test_config_show_renders_table(tmp_path: Path) -> None:
     assert "state_dir" in result.stdout
     assert state_dir.name in result.stdout
     assert "lock_timeout" in result.stdout
+    assert "templates_dir" in result.stdout
 
 
 def test_config_show_json(tmp_path: Path) -> None:
@@ -99,6 +102,7 @@ def test_config_show_json(tmp_path: Path) -> None:
     assert payload["install_root"] == "/opt/abssctl"
     assert payload["state_dir"] == str(state_dir)
     assert payload["lock_timeout"] == 30.0
+    assert Path(payload["templates_dir"]).name == "templates"
 
 
 def test_version_list_uses_registry(tmp_path: Path) -> None:
