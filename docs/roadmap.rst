@@ -30,7 +30,7 @@ Alpha Builds — Foundations
 - [x] Introduce the template rendering engine for systemd and nginx assets
   (e.g., Jinja-based templates under ``src/abssctl/templates/``) per
   ADR-009/ADR-010.
-- [ ] Extend CI to publish dev builds to PyPI when tags land on ``dev`` (aligns
+- [ ] Extend CI to publish dev builds to Test PyPI when tags land on ``dev`` (aligns
   with the "Alpha Builds" release engineering goal).
 
 Beta Releases — Core Features
