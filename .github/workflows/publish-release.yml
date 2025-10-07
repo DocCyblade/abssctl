@@ -51,22 +51,7 @@ jobs:
           fi
           VERSION="${TAG#v}"
           export VERSION
-          python3 - <<'PY'
-import importlib.util
-import os
-import pathlib
-import sys
-
-tag_version = os.environ["VERSION"]
-init_path = pathlib.Path("src/abssctl/__init__.py")
-spec = importlib.util.spec_from_file_location("abssctl", init_path)
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-package_version = module.__version__
-if package_version != tag_version:
-    print(f"Tag version {tag_version} does not match package version {package_version}")
-    sys.exit(1)
-PY
+          python3 -c "import importlib.util, os, pathlib, sys; tag_version = os.environ['VERSION']; init_path = pathlib.Path('src/abssctl/__init__.py'); spec = importlib.util.spec_from_file_location('abssctl', init_path); module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module); package_version = module.__version__; sys.exit(0 if package_version == tag_version else f'Tag version {tag_version} does not match package version {package_version}')"
 
       - name: Build distributions
         run: |
