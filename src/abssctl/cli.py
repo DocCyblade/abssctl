@@ -21,10 +21,12 @@ from rich.table import Table
 from . import __version__
 from .config import AppConfig, load_config
 from .locking import LockManager
-from .logging import StructuredLogger
+from .logging import OperationScope, StructuredLogger
 from .providers import (
     InstanceStatusProvider,
+    NginxError,
     NginxProvider,
+    SystemdError,
     SystemdProvider,
     VersionProvider,
 )
@@ -343,6 +345,26 @@ def _register_instance(runtime: RuntimeContext, name: str) -> None:
     runtime.registry.write_instances(existing)
 
 
+def _require_instance(
+    runtime: RuntimeContext,
+    name: str,
+    op: OperationScope,
+) -> dict[str, object]:
+    instance = runtime.registry.get_instance(name)
+    if instance is None:
+        message = f"Instance '{name}' not found in registry."
+        console.print(f"[red]{message}[/red]")
+        op.error(message, errors=[message], rc=1)
+        raise typer.Exit(code=1)
+    return instance
+
+
+def _provider_error(op: OperationScope, message: str) -> None:
+    console.print(f"[red]{message}[/red]")
+    op.error(message, errors=[message], rc=1)
+    raise typer.Exit(code=1)
+
+
 @app.command()
 def doctor(ctx: typer.Context) -> None:
     """Run environment and service health checks (coming soon)."""
@@ -589,6 +611,187 @@ def instance_create(
             )
 
 
+@instances_app.command("enable")
+def instance_enable(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="Name of the instance to enable."),
+) -> None:
+    """Enable an instance's systemd unit and nginx site."""
+    runtime = _get_runtime(ctx)
+    with runtime.logger.operation(
+        "instance enable",
+        args={"name": name},
+        target={"kind": "instance", "name": name},
+    ) as op:
+        with runtime.locks.mutate_instances([name]) as bundle:
+            op.set_lock_wait_ms(bundle.wait_ms)
+            _require_instance(runtime, name, op)
+            try:
+                runtime.systemd_provider.enable(name)
+                op.add_step("systemd.enable", status="success")
+            except SystemdError as exc:
+                _provider_error(op, f"systemd enable failed: {exc}")
+            try:
+                runtime.nginx_provider.enable(name)
+                op.add_step("nginx.enable", status="success")
+            except NginxError as exc:
+                _provider_error(op, f"nginx enable failed: {exc}")
+            runtime.registry.update_instance(name, {"status": "enabled"})
+            op.add_step("registry.update", status="success", detail="status=enabled")
+            console.print(f"[green]Instance '{name}' enabled.[/green]")
+            op.success("Instance enabled.", changed=3)
+
+
+@instances_app.command("disable")
+def instance_disable(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="Name of the instance to disable."),
+) -> None:
+    """Disable an instance's systemd unit and nginx site."""
+    runtime = _get_runtime(ctx)
+    with runtime.logger.operation(
+        "instance disable",
+        args={"name": name},
+        target={"kind": "instance", "name": name},
+    ) as op:
+        with runtime.locks.mutate_instances([name]) as bundle:
+            op.set_lock_wait_ms(bundle.wait_ms)
+            _require_instance(runtime, name, op)
+            try:
+                runtime.systemd_provider.disable(name)
+                op.add_step("systemd.disable", status="success")
+            except SystemdError as exc:
+                _provider_error(op, f"systemd disable failed: {exc}")
+            try:
+                runtime.nginx_provider.disable(name)
+                op.add_step("nginx.disable", status="success")
+            except NginxError as exc:
+                _provider_error(op, f"nginx disable failed: {exc}")
+            runtime.registry.update_instance(name, {"status": "disabled"})
+            op.add_step("registry.update", status="success", detail="status=disabled")
+            console.print(f"[yellow]Instance '{name}' disabled.[/yellow]")
+            op.success("Instance disabled.", changed=3)
+
+
+@instances_app.command("start")
+def instance_start(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="Name of the instance to start."),
+) -> None:
+    """Start the systemd unit for an instance."""
+    runtime = _get_runtime(ctx)
+    with runtime.logger.operation(
+        "instance start",
+        args={"name": name},
+        target={"kind": "instance", "name": name},
+    ) as op:
+        with runtime.locks.mutate_instances([name]) as bundle:
+            op.set_lock_wait_ms(bundle.wait_ms)
+            _require_instance(runtime, name, op)
+            try:
+                runtime.systemd_provider.start(name)
+                op.add_step("systemd.start", status="success")
+            except SystemdError as exc:
+                _provider_error(op, f"systemd start failed: {exc}")
+            runtime.registry.update_instance(name, {"status": "running"})
+            op.add_step("registry.update", status="success", detail="status=running")
+            console.print(f"[green]Instance '{name}' started.[/green]")
+            op.success("Instance started.", changed=2)
+
+
+@instances_app.command("stop")
+def instance_stop(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="Name of the instance to stop."),
+) -> None:
+    """Stop the systemd unit for an instance."""
+    runtime = _get_runtime(ctx)
+    with runtime.logger.operation(
+        "instance stop",
+        args={"name": name},
+        target={"kind": "instance", "name": name},
+    ) as op:
+        with runtime.locks.mutate_instances([name]) as bundle:
+            op.set_lock_wait_ms(bundle.wait_ms)
+            _require_instance(runtime, name, op)
+            try:
+                runtime.systemd_provider.stop(name)
+                op.add_step("systemd.stop", status="success")
+            except SystemdError as exc:
+                _provider_error(op, f"systemd stop failed: {exc}")
+            runtime.registry.update_instance(name, {"status": "stopped"})
+            op.add_step("registry.update", status="success", detail="status=stopped")
+            console.print(f"[yellow]Instance '{name}' stopped.[/yellow]")
+            op.success("Instance stopped.", changed=2)
+
+
+@instances_app.command("restart")
+def instance_restart(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="Name of the instance to restart."),
+) -> None:
+    """Restart the systemd unit for an instance."""
+    runtime = _get_runtime(ctx)
+    with runtime.logger.operation(
+        "instance restart",
+        args={"name": name},
+        target={"kind": "instance", "name": name},
+    ) as op:
+        with runtime.locks.mutate_instances([name]) as bundle:
+            op.set_lock_wait_ms(bundle.wait_ms)
+            _require_instance(runtime, name, op)
+            try:
+                runtime.systemd_provider.stop(name)
+                op.add_step("systemd.stop", status="success")
+                runtime.systemd_provider.start(name)
+                op.add_step("systemd.start", status="success")
+            except SystemdError as exc:
+                _provider_error(op, f"systemd restart failed: {exc}")
+            runtime.registry.update_instance(name, {"status": "running"})
+            op.add_step("registry.update", status="success", detail="status=running")
+            console.print(f"[green]Instance '{name}' restarted.[/green]")
+            op.success("Instance restarted.", changed=3)
+
+
+@instances_app.command("delete")
+def instance_delete(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="Name of the instance to delete."),
+) -> None:
+    """Remove instance scaffolding and unregister it."""
+    runtime = _get_runtime(ctx)
+    with runtime.logger.operation(
+        "instance delete",
+        args={"name": name},
+        target={"kind": "instance", "name": name},
+    ) as op:
+        with runtime.locks.mutate_instances([name]) as bundle:
+            op.set_lock_wait_ms(bundle.wait_ms)
+            _require_instance(runtime, name, op)
+            try:
+                runtime.systemd_provider.stop(name)
+                op.add_step("systemd.stop", status="success")
+            except SystemdError:
+                # Non-fatal if service isn't running.
+                op.add_step("systemd.stop", status="warning", detail="service-not-running")
+            try:
+                runtime.systemd_provider.disable(name)
+                op.add_step("systemd.disable", status="success")
+            except SystemdError as exc:
+                _provider_error(op, f"systemd disable failed: {exc}")
+            try:
+                runtime.nginx_provider.disable(name)
+                op.add_step("nginx.disable", status="success")
+            except NginxError as exc:
+                _provider_error(op, f"nginx disable failed: {exc}")
+            runtime.systemd_provider.remove(name)
+            op.add_step("systemd.remove", status="success")
+            runtime.nginx_provider.remove(name)
+            op.add_step("nginx.remove", status="success")
+            runtime.registry.remove_instance(name)
+            op.add_step("registry.remove", status="success")
+            console.print(f"[yellow]Instance '{name}' removed.[/yellow]")
+            op.success("Instance deleted.", changed=6)
 @versions_app.command("list")
 def version_list(
     ctx: typer.Context,

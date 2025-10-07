@@ -5,11 +5,14 @@ import json
 import os
 from pathlib import Path
 
+import pytest
 import yaml
 from typer.testing import CliRunner
 
 from abssctl import __version__
 from abssctl.cli import app
+from abssctl.providers.nginx import NginxProvider
+from abssctl.providers.systemd import SystemdProvider
 from abssctl.state import StateRegistry
 
 runner = CliRunner()
@@ -294,3 +297,137 @@ def test_operations_logging_creates_records(tmp_path: Path) -> None:
 
     human_content = human_log.read_text(encoding="utf-8")
     assert "config show" in human_content
+
+
+def _create_instance(env: dict[str, str], name: str = "alpha") -> None:
+    result = runner.invoke(app, ["instance", "create", name], env=env)
+    assert result.exit_code == 0
+
+
+def _registry_instances(state_dir: Path) -> list[dict[str, object]]:
+    registry_file = state_dir / "registry" / "instances.yml"
+    data = yaml.safe_load(registry_file.read_text(encoding="utf-8"))
+    return data.get("instances", [])
+
+
+def test_instance_enable_updates_registry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Enable command invokes providers and marks instance enabled."""
+    env, state_dir = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    calls: list[tuple[str, str]] = []
+
+    def fake_systemd_enable(self: SystemdProvider, name: str) -> None:
+        calls.append(("systemd", name))
+
+    def fake_nginx_enable(self: NginxProvider, name: str) -> None:
+        calls.append(("nginx", name))
+
+    monkeypatch.setattr(SystemdProvider, "enable", fake_systemd_enable)
+    monkeypatch.setattr(NginxProvider, "enable", fake_nginx_enable)
+
+    result = runner.invoke(app, ["instance", "enable", "alpha"], env=env)
+    assert result.exit_code == 0
+    assert ("systemd", "alpha") in calls
+    assert ("nginx", "alpha") in calls
+
+    instance = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
+    assert instance["status"] == "enabled"
+
+
+def test_instance_disable_updates_registry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Disable command invokes providers and marks instance disabled."""
+    env, state_dir = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    monkeypatch.setattr(SystemdProvider, "disable", lambda self, name: None)
+    monkeypatch.setattr(NginxProvider, "disable", lambda self, name: None)
+
+    result = runner.invoke(app, ["instance", "disable", "alpha"], env=env)
+    assert result.exit_code == 0
+    instance = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
+    assert instance["status"] == "disabled"
+
+
+def test_instance_start_updates_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Start command sets registry status to running."""
+    env, state_dir = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    monkeypatch.setattr(SystemdProvider, "start", lambda self, name: None)
+
+    result = runner.invoke(app, ["instance", "start", "alpha"], env=env)
+    assert result.exit_code == 0
+    instance = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
+    assert instance["status"] == "running"
+
+
+def test_instance_stop_updates_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stop command sets registry status to stopped."""
+    env, state_dir = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    monkeypatch.setattr(SystemdProvider, "stop", lambda self, name: None)
+
+    result = runner.invoke(app, ["instance", "stop", "alpha"], env=env)
+    assert result.exit_code == 0
+    instance = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
+    assert instance["status"] == "stopped"
+
+
+def test_instance_restart_calls_stop_and_start(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Restart delegates to systemd stop then start and sets running status."""
+    env, state_dir = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    calls: list[str] = []
+
+    def fake_stop(self: SystemdProvider, name: str) -> None:
+        calls.append("stop")
+
+    def fake_start(self: SystemdProvider, name: str) -> None:
+        calls.append("start")
+
+    monkeypatch.setattr(SystemdProvider, "stop", fake_stop)
+    monkeypatch.setattr(SystemdProvider, "start", fake_start)
+
+    result = runner.invoke(app, ["instance", "restart", "alpha"], env=env)
+    assert result.exit_code == 0
+    assert calls == ["stop", "start"]
+    instance = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
+    assert instance["status"] == "running"
+
+
+def test_instance_delete_removes_registry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Delete removes provider assets and unregisters the instance."""
+    env, state_dir = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    monkeypatch.setattr(SystemdProvider, "stop", lambda self, name: None)
+    monkeypatch.setattr(SystemdProvider, "disable", lambda self, name: None)
+    monkeypatch.setattr(SystemdProvider, "remove", lambda self, name: None)
+    monkeypatch.setattr(NginxProvider, "disable", lambda self, name: None)
+    monkeypatch.setattr(NginxProvider, "remove", lambda self, name: None)
+
+    result = runner.invoke(app, ["instance", "delete", "alpha"], env=env)
+    assert result.exit_code == 0
+    instances = _registry_instances(state_dir)
+    assert all(item.get("name") != "alpha" for item in instances)

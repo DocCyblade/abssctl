@@ -23,6 +23,7 @@ This session log shall log all work performed in a work session. Work sesson wil
 - Prototyped the systemd provider: wired it to the template engine, added unit/management helpers, and captured behavior in dedicated tests to prepare for real instance lifecycle commands.
 - Added the nginx provider scaffold with templated vhost rendering, symlink management, validation helpers, and focused tests.
 - Integrated the systemd/nginx providers into `instance create` placeholder flow, generating service/vhost files, logging template steps, and ensuring safe runtime directories.
+- Implemented instance lifecycle commands (enable/disable/start/stop/restart/delete) using the provider scaffolds, updated registry helper APIs, and covered the flows with CLI tests.
 
 ### Wrap Summary
 - Built shared understanding of v1 scope by reviewing requirements and ADRs.
