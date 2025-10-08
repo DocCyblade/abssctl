@@ -33,11 +33,14 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/DocCyblade/abssctl"
-# Documentation = "https://doccyblade.github.io/abssctl/"
-Source = "https://github.com/DocCyblade/abssctl"
+Homepage = "https://doccyblade.github.io/abssctl/"
+Discussions = "https://github.com/DocCyblade/abssctl/discussions"
 Issues = "https://github.com/DocCyblade/abssctl/issues"
-Changelog = "https://github.com/DocCyblade/abssctl/blob/main/CHANGELOG.rst"
+Source = "https://github.com/DocCyblade/abssctl"
+CI = "https://github.com/DocCyblade/abssctl/actions"
+Changelog = "https://github.com/DocCyblade/abssctl/blob/dev-alpha3/CHANGELOG.rst"
+Roadmap = "https://github.com/DocCyblade/abssctl/blob/dev-alpha3/docs/roadmap.rst"             
+License = "https://github.com/DocCyblade/abssctl/blob/dev-alpha3/LICENSE"
 
 
 [project.optional-dependencies]
