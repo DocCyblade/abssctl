@@ -10,8 +10,8 @@ from .config import AppConfig, load_config
 
 __all__ = ["__version__", "get_version", "AppConfig", "load_config"]
 
-# NOTE: The version is duplicated in ``pyproject.toml`` and managed by Hatch.
-__version__ = "0.1.0a0"
+# NOTE: Hatch reads this value via ``tool.hatch.version`` to manage the project version.
+__version__ = "0.1.3a1"
 
 
 def get_version() -> str:

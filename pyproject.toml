@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "abssctl"
-version = "0.1.0a1"
+dynamic = ["version"]
 description = "Actual Budget Multi-Instance Sync Server Admin CLI"
 readme = "README.rst"
 requires-python = ">=3.11"
@@ -29,14 +29,18 @@ dependencies = [
   "typer>=0.12.3",
   "rich>=13.7",
   "PyYAML>=6.0",
+  "Jinja2>=3.1",
 ]
 
 [project.urls]
-Homepage = "https://github.com/DocCyblade/abssctl"
-# Documentation = "https://doccyblade.github.io/abssctl/"
-Source = "https://github.com/DocCyblade/abssctl"
+Homepage = "https://doccyblade.github.io/abssctl/"
+Discussions = "https://github.com/DocCyblade/abssctl/discussions"
 Issues = "https://github.com/DocCyblade/abssctl/issues"
-Changelog = "https://github.com/DocCyblade/abssctl/blob/main/CHANGELOG.rst"
+Source = "https://github.com/DocCyblade/abssctl"
+CI = "https://github.com/DocCyblade/abssctl/actions"
+Changelog = "https://github.com/DocCyblade/abssctl/blob/dev-alpha3/CHANGELOG.rst"
+Roadmap = "https://github.com/DocCyblade/abssctl/blob/dev-alpha3/docs/roadmap.rst"             
+License = "https://github.com/DocCyblade/abssctl/blob/dev-alpha3/LICENSE"
 
 
 [project.optional-dependencies]
@@ -50,6 +54,7 @@ dev = [
   "pyyaml>=6.0.3",
   "sphinx-autobuild>=2024.4",
   "sphinx-rtd-theme",
+  "hatch>=1.14.2",
 ]
 
 [project.scripts]
@@ -66,6 +71,7 @@ include = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/abssctl"]
+core-metadata-version = "2.3"
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -75,6 +81,7 @@ include = [
   "docs/support/actual-support-matrix.rst",
   "docs/requirements/abssctl-app-specs.txt",
 ]
+core-metadata-version = "2.3"
 
 [tool.hatch.version]
 path = "src/abssctl/__init__.py"

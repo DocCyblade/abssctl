@@ -1,11 +1,13 @@
-==============================
-abssctl Documentation Overview
-==============================
+======================================================================
+Actual Budget Sync Server Control CLI (abssctl) Documentation Overview
+======================================================================
 
 .. meta::
    :description: Documentation hub for the abssctl CLI project.
 
-Welcome to the documentation for ``abssctl``—the Actual Budget Sync Server admin
+Documentation version: |release|
+
+Welcome to the documentation for ``abssctl``— the Actual Budget Sync Server admin
 CLI. The content is intentionally skeletal during the Pre-Alpha milestone and
 will be expanded as functionality lands.
 
@@ -18,6 +20,7 @@ will be expanded as functionality lands.
    guides/developer-guide
    reference/cli-commands
    requirements/abssctl-app-specs
+   roadmap
    support/actual-support-matrix
 
 

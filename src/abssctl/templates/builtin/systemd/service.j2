@@ -1,0 +1,15 @@
+[Unit]
+Description=Actual Budget Sync Server ({{ instance_name }})
+After=network.target
+
+[Service]
+Type=simple
+User={{ service_user }}
+WorkingDirectory={{ working_directory }}
+ExecStart={{ exec_start }}
+Restart=on-failure
+RestartSec=5
+Environment={{ environment | join(' ') }}
+
+[Install]
+WantedBy=multi-user.target

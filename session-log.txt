@@ -1,0 +1,92 @@
+# Session Log
+
+#### How to use:
+- This session log shall log all work performed in a work session.
+
+- Work sessions will start with date/time then name for this the session followed by session status in (OPEN/CLOSED)
+- New sessions are appended to file unless session is marked (OPEN) then we append to that session block
+
+- Each session block has it's own header and sub sections defined below
+    - Starts with "## Date - [Session name] (OPEN/CLOSED)"
+       - Session can be OPEN appended too, or CLOSED a new session needs to be started
+       - All work will be detailed, one or two items per line
+    - "### Wrap up: "
+        - Wrap section is a summary of all lines lines logged. Can be written to on going or when we close the session
+    - "### Next Steps / TODO:"
+        - This section is used to keep track in real time of whats to do next or if something is tabled for later, it's written here for follow up. This should be written in real time
+    - "### Next Session Primer"
+        - Used for our AI chat friends to prime a new chat to get the chat up to speed on the poject
+
+
+
+-  Then list out items performed. When session is done write a Wrap up summary, a next steps section for quick next steps, and a AI prompt if working with with AI tools. Always append new sessions (do not edit prior sections).
+
+## 2025-10-06 Alpha3 Session (CLOSED)
+- Session continuing on branch dev-alpha3; prior session notes unavailable.
+- Reviewed docs/requirements/abssctl-app-specs.txt (v1.0-draft-5) for v1 goals, scope, and roadmap.
+- Summarised ADR-001 through ADR-032 decisions (Typer CLI, packaging to PyPI, TKL focus, filesystem layout, locking, TLS defaults, backup policy, doctor/CI strategy).
+- Surveyed current Pre-Alpha code: Typer CLI scaffold with config/instance/version/backup groups, config loader merging defaults+YAML+env, state registry with atomic writes, npm version provider (cache-aware), placeholder instance status, and pytest coverage for these foundations.
+- Renamed session log to `session-log.txt` per workflow update and introduced ROADMAP.md for milestone-aligned TODO tracking.
+- Compiled ROADMAP.md capturing outstanding Alpha, Beta, RC, Release tasks plus optional future enhancements; added docs/roadmap.rst to expose the roadmap in the documentation set and left a pointer from ROADMAP.md.
+- Linked docs/roadmap.rst into the Sphinx toctree (`docs/source/index.rst`), added a Sphinx-friendly wrapper at `docs/source/roadmap.rst`, and surfaced the document in README for easy discovery.
+- Updated `make docs` to remove the previous `docs/_build/html` output before rebuilding to keep generated docs fresh.
+- Ready for next implementation or review task.
+- Implemented structured logging subsystem: introduced `StructuredLogger`, wired every CLI command (including `--version`) to emit human-readable and JSONL entries, ensured logs respect config `logs_dir`, and added pytest coverage for operations log creation.
+- Hardened structured logging to degrade gracefully when log directories are read-only and resolved Sphinx/Ruff lint in support of the new subsystem.
+- Relaxed structured logging type annotations to satisfy mypy (Literal return on `__exit__`, dictionary-based JSON types) and verified clean mypy/ruff/pytest runs from the project venv.
+- Updated `make dist` pipeline: ensure `.venv-test` installs `.[dev]` and rebuilds when `pyproject.toml` or `Makefile` changes so mypy finds typer/rich stubs during CI-style builds.
+- Adjusted `make quick-tests` to reuse the developer venv instead of deleting it, still re-running `pip install -e .[dev]` only when dependencies change.
+- Designed and delivered the global + per-instance locking subsystem per ADR-027 (configurable timeout, flock metadata), integrated it with CLI placeholders, logging, and new tests validating timeouts and metadata.
+- Introduced the templating engine per ADR-009/ADR-010: added configurable template directory, Jinja2-based renderer with override support, bundled systemd/nginx templates, and accompanying unit/CLI coverage.
+- Prototyped the systemd provider: wired it to the template engine, added unit/management helpers, and captured behavior in dedicated tests to prepare for real instance lifecycle commands.
+- Added the nginx provider scaffold with templated vhost rendering, symlink management, validation helpers, and focused tests.
+- Integrated the systemd/nginx providers into `instance create` placeholder flow, generating service/vhost files, logging template steps, and ensuring safe runtime directories.
+- Implemented instance lifecycle commands (enable/disable/start/stop/restart/delete) using the provider scaffolds, updated registry helper APIs, and covered the flows with CLI tests.
+
+### Wrap Summary
+- Built shared understanding of v1 scope by reviewing requirements and ADRs.
+- Catalogued current Pre-Alpha implementation (CLI scaffold, config/state utilities, pytest coverage).
+- Established roadmap tracking in `docs/roadmap.rst` and linked it across README and Sphinx docs.
+- Improved `make docs` workflow to clean out old HTML artifacts before rebuilds.
+- Delivered structured logging foundation with operations.jsonl + human logs and verified coverage.
+- Implemented locking primitives and wired them into the CLI/runtime for future mutating commands.
+- Shipped a templating engine foundation with built-in systemd/nginx templates and override support.
+- Established the systemd and nginx provider scaffolds ready for CLI integration.
+
+### Next Steps / TODO
+- Draft design/implementation plan for systemd/nginx providers in advance of Beta tasks.
+- Evaluate test strategy expansion to cover upcoming mutating commands.
+
+### Next Session Primer
+Prompt: "We're on branch dev-alpha3 with logging, locking, and templating in place. Next step: prototype the systemd provider rendering pipeline using the new engine."
+
+## 2025-10-07 Alpha CI Session (OPEN)
+- Drafted a GitHub Actions workflow for publishing dev tags (``dev-*``) to TestPyPI and reviewed trusted publisher requirements for final rollout.
+- Noted the need to append new session entries without altering previous logs.
+- Converted ``publish-dev`` workflow to use PyPI trusted publishing (OIDC) for TestPyPI dev tags, removing the dependency on stored credentials and updating ``docs/roadmap.rst`` to mark the roadmap item complete.
+- Ran ``make dist`` locally to mirror the workflow steps and confirm lint/type/test/build all pass on the current branch.
+- Recorded the protected GitHub environment ``publish-dev`` with its approval gate (15 min timeout) and the new tag convention ``v*.*.*-dev``.
+- Confirmed TestPyPI trusted publisher registration for ``DocCyblade/abssctl`` → ``publish-dev.yml`` bound to the ``publish-dev`` environment.
+- Addressed the CI failure caused by Metadata-Version 2.4 by pinning Hatch build targets to emit Core Metadata 2.3 (``pyproject.toml``) and rebuilding artifacts via ``make dist`` to verify.
+- Authored ADR-033 defining the unified versioning/tagging strategy (PEP 440 package versions, ``v<version>`` release tags, ``v<version>-dev`` TestPyPI tags, and ``docs-v<version>`` documentation tags).
+- Added explicit PEP 440 reference links to ADR-033 for clarity.
+- Realigned GitHub Actions workflows with ADR-033: CI now reacts to ``v*``/``v*.*.*-dev``/``docs-v*`` tags, docs publishing validates ``docs-v`` tags against ``__version__``, dev publishes enforce version alignment + concurrency, and a new ``publish-release.yml`` promotes ``v<version>`` tags to PyPI via the ``publish-release`` environment.
+- Updated the workflow tag validators to parse ``__version__`` via ``ast`` so version checks work without importing the package (fixes runner errors during ``publish-dev`` guard).
+- Introduced ``buildtools/validate_tag_version.py`` and refactored all workflows to call it, keeping validation logic shared and the YAML cleaner.
+- Brought the new tag validation helper into compliance with Ruff (sorted imports, docstrings, stderr messaging) so lint passes locally and in CI.
+
+### Wrap Summary
+- Dev-tag publishing now uses TestPyPI trusted publishing with the ``publish-dev`` environment guarding releases.
+- Verified the CI workflow path locally via ``make dist`` to ensure build artifacts are healthy, recorded the new tag pattern, and confirmed metadata compatibility with PyPI tooling.
+- GitHub workflows now enforce the standardized tag/version policy across CI, docs, dev, and release pipelines with environment approvals in the loop.
+- Logging discipline reminder stands so we continue appending to open sessions only.
+
+### Next Steps / TODO
+- Trigger a ``v*.*.*-dev`` tag dry-run once environment approval is ready and observe the trusted publishing flow end-to-end.
+- Draft design/implementation plan for systemd/nginx providers in advance of Beta tasks.
+- Evaluate test strategy expansion to cover upcoming mutating commands.
+- Socialize ADR-033 with maintainers and update CI/environment patterns as needed after approval.
+- Coordinate with maintainers on configuring PyPI/TestPyPI trusted publishers for the new ``publish-release`` environment ahead of the first GA/RC tag.
+
+### Next Session Primer
+Prompt: "Trusted publishing + environment protections are in place. Next up: run a ``v*.*.*-dev`` tag dry-run through the approval gate, collect feedback/approval on ADR-033, and shift focus to the systemd/nginx provider implementation plan for Beta."

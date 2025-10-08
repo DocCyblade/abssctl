@@ -27,6 +27,7 @@ The Pre-Alpha milestone focuses solely on repository infrastructure. Alpha
 builds will deliver functional commands for version management, instance
 provisioning, and state inspection.
 
-The first Alpha deliverable is ``abssctl config show``, which exposes the
-effective configuration after merging defaults, ``/etc`` settings, and
-environment overrides.
+Alpha now includes ``abssctl config show`` plus read-only registry commands:
+``version list`` (with optional ``--remote`` npm lookup) and
+``instance list``/``instance show`` for inspecting registry metadata while the
+mutating workflows are built out.

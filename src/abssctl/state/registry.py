@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import os
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 try:  # PyYAML is a runtime dependency declared in pyproject.toml
     import yaml
@@ -88,6 +89,61 @@ class StateRegistry:
         """Return the contents of ``versions.yml`` (empty mapping if missing)."""
         value = self.read("versions.yml", default={"versions": []})
         return value if isinstance(value, Mapping) else {"versions": []}
+
+    def write_instances(self, instances: Iterable[object]) -> None:
+        """Persist instance entries to ``instances.yml``."""
+        self.write("instances.yml", {"instances": list(instances)})
+
+    def write_versions(self, versions: Iterable[object]) -> None:
+        """Persist version entries to ``versions.yml``."""
+        self.write("versions.yml", {"versions": list(versions)})
+
+    # Instance helpers -------------------------------------------------
+    def get_instance(self, name: str) -> dict[str, Any] | None:
+        """Return the instance mapping for *name* if registered."""
+        data = self.read_instances()
+        raw_instances = data.get("instances", [])
+        if not isinstance(raw_instances, list):
+            return None
+        for entry in raw_instances:
+            if isinstance(entry, Mapping) and entry.get("name") == name:
+                return dict(entry)
+        return None
+
+    def update_instance(self, name: str, updates: Mapping[str, object]) -> None:
+        """Apply *updates* to the registered instance named *name*."""
+        data = self.read_instances()
+        raw_instances = data.get("instances", [])
+        instances: list[object] = []
+        found = False
+        if isinstance(raw_instances, list):
+            for entry in raw_instances:
+                if isinstance(entry, Mapping) and entry.get("name") == name:
+                    merged = dict(entry)
+                    merged.update(updates)
+                    instances.append(merged)
+                    found = True
+                else:
+                    instances.append(entry)
+        if not found:
+            raise StateRegistryError(f"Instance '{name}' not found in registry")
+        self.write_instances(instances)
+
+    def remove_instance(self, name: str) -> None:
+        """Remove the instance named *name* from the registry."""
+        data = self.read_instances()
+        raw_instances = data.get("instances", [])
+        instances: list[object] = []
+        removed = False
+        if isinstance(raw_instances, list):
+            for entry in raw_instances:
+                if isinstance(entry, Mapping) and entry.get("name") == name:
+                    removed = True
+                    continue
+                instances.append(entry)
+        if not removed:
+            raise StateRegistryError(f"Instance '{name}' not found in registry")
+        self.write_instances(instances)
 
 
 __all__ = ["StateRegistry", "StateRegistryError"]

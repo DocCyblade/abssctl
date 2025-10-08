@@ -36,6 +36,11 @@ except Exception as exc:  # pragma: no cover - import failure covered in tests
 
 ENV_PREFIX = "ABSSCTL_"
 CONFIG_ENV_VAR = f"{ENV_PREFIX}CONFIG_FILE"
+RESERVED_ENV_KEYS = {
+    CONFIG_ENV_VAR,
+    f"{ENV_PREFIX}SKIP_NPM",
+    f"{ENV_PREFIX}VERSIONS_CACHE",
+}
 
 
 class ConfigError(RuntimeError):
@@ -105,6 +110,8 @@ class AppConfig:
     registry_dir: Path
     logs_dir: Path
     runtime_dir: Path
+    templates_dir: Path
+    lock_timeout: float
     npm_package_name: str
     reverse_proxy: str
     service_user: str
@@ -122,6 +129,8 @@ class AppConfig:
             "registry_dir": str(self.registry_dir),
             "logs_dir": str(self.logs_dir),
             "runtime_dir": str(self.runtime_dir),
+            "templates_dir": str(self.templates_dir),
+            "lock_timeout": self.lock_timeout,
             "npm_package_name": self.npm_package_name,
             "reverse_proxy": self.reverse_proxy,
             "service_user": self.service_user,
@@ -139,6 +148,8 @@ DEFAULTS: dict[str, object] = {
     "registry_dir": None,  # derived from state_dir when absent
     "logs_dir": "/var/log/abssctl",
     "runtime_dir": "/run/abssctl",
+    "templates_dir": "/etc/abssctl/templates",
+    "lock_timeout": 30.0,
     "npm_package_name": "@actual-app/sync-server",
     "reverse_proxy": "nginx",
     "service_user": "actual-sync",
@@ -158,6 +169,9 @@ DEFAULTS: dict[str, object] = {
         },
     },
 }
+
+ALLOWED_TOP_LEVEL_KEYS = set(DEFAULTS.keys())
+ALLOWED_PORT_STRATEGIES = {"sequential"}
 
 
 def load_config(
@@ -186,6 +200,8 @@ def load_config(
 
     merged["config_file"] = str(config_path)
 
+    _validate_structure(merged)
+
     return _build_app_config(merged)
 
 
@@ -213,6 +229,51 @@ def _load_yaml_file(path: Path) -> dict[str, object]:
     return _as_dict(data, f"file:{path}")
 
 
+def _validate_structure(raw: Mapping[str, object]) -> None:
+    unknown_keys = set(raw.keys()) - ALLOWED_TOP_LEVEL_KEYS
+    if unknown_keys:
+        joined = ", ".join(sorted(unknown_keys))
+        raise ConfigError(f"Unknown configuration keys: {joined}.")
+
+    lock_timeout = raw.get("lock_timeout")
+    if lock_timeout is not None:
+        _expect_positive_float(lock_timeout, "lock_timeout", default=30.0)
+
+    ports = raw.get("ports")
+    if ports is not None:
+        ports_map = _as_dict(ports, "ports")
+        unknown = set(ports_map.keys()) - {"base", "strategy"}
+        if unknown:
+            joined = ", ".join(sorted(unknown))
+            raise ConfigError(f"Unknown ports configuration keys: {joined}.")
+        strategy = ports_map.get("strategy")
+        if strategy is not None and str(strategy) not in ALLOWED_PORT_STRATEGIES:
+            allowed = ", ".join(sorted(ALLOWED_PORT_STRATEGIES))
+            raise ConfigError(
+                f"Unsupported port allocation strategy '{strategy}'. Allowed: {allowed}."
+            )
+
+    tls = raw.get("tls")
+    if tls is not None:
+        tls_map = _as_dict(tls, "tls")
+        unknown = set(tls_map.keys()) - {"enabled", "system", "lets_encrypt"}
+        if unknown:
+            joined = ", ".join(sorted(unknown))
+            raise ConfigError(f"Unknown TLS configuration keys: {joined}.")
+
+        system_map = _as_dict(tls_map.get("system"), "tls.system")
+        unknown_system = set(system_map.keys()) - {"cert", "key"}
+        if unknown_system:
+            joined = ", ".join(sorted(unknown_system))
+            raise ConfigError(f"Unknown TLS system keys: {joined}.")
+
+        lets_map = _as_dict(tls_map.get("lets_encrypt"), "tls.lets_encrypt")
+        unknown_lets = set(lets_map.keys()) - {"live_dir"}
+        if unknown_lets:
+            joined = ", ".join(sorted(unknown_lets))
+            raise ConfigError(f"Unknown TLS lets_encrypt keys: {joined}.")
+
+
 def _build_app_config(raw: Mapping[str, object]) -> AppConfig:
     config_file = _to_path(raw.get("config_file"))
     install_root = _to_path(raw.get("install_root"))
@@ -220,6 +281,8 @@ def _build_app_config(raw: Mapping[str, object]) -> AppConfig:
     state_dir = _to_path(raw.get("state_dir"))
     logs_dir = _to_path(raw.get("logs_dir"))
     runtime_dir = _to_path(raw.get("runtime_dir"))
+    templates_dir = _to_path(raw.get("templates_dir"))
+    lock_timeout = _expect_positive_float(raw.get("lock_timeout"), "lock_timeout", default=30.0)
 
     registry_dir_value = raw.get("registry_dir")
     registry_dir = _to_path(registry_dir_value) if registry_dir_value else state_dir / "registry"
@@ -254,6 +317,8 @@ def _build_app_config(raw: Mapping[str, object]) -> AppConfig:
         registry_dir=registry_dir,
         logs_dir=logs_dir,
         runtime_dir=runtime_dir,
+        templates_dir=templates_dir,
+        lock_timeout=lock_timeout,
         npm_package_name=str(raw.get("npm_package_name", "@actual-app/sync-server")),
         reverse_proxy=str(raw.get("reverse_proxy", "nginx")),
         service_user=str(raw.get("service_user", "actual-sync")),
@@ -266,6 +331,8 @@ def _build_app_config(raw: Mapping[str, object]) -> AppConfig:
 def _build_env_overrides(env: Mapping[str, str]) -> dict[str, object]:
     overrides: dict[str, object] = {}
     for key, value in env.items():
+        if key in RESERVED_ENV_KEYS:
+            continue
         if not key.startswith(ENV_PREFIX):
             continue
         suffix = key[len(ENV_PREFIX) :]
@@ -352,6 +419,32 @@ def _expect_str(value: object, key: str) -> str:
     if isinstance(value, str):
         return value
     raise ConfigError(f"Expected {key} to resolve to a string. Got {value!r}.")
+
+
+def _expect_positive_float(
+    value: object | None,
+    label: str,
+    *,
+    default: float,
+) -> float:
+    if value is None:
+        return float(default)
+    if isinstance(value, bool):
+        raise ConfigError(f"Expected {label} to be a number. Got boolean {value!r}.")
+    if isinstance(value, (int, float)):
+        numeric = float(value)
+    elif isinstance(value, str):
+        try:
+            numeric = float(value)
+        except ValueError as exc:
+            raise ConfigError(f"Invalid number for {label}: {value!r}.") from exc
+    else:
+        raise ConfigError(
+            f"Expected {label} to be numeric. Got {type(value).__name__}."
+        )
+    if numeric <= 0:
+        raise ConfigError(f"{label} must be greater than zero. Got {numeric}.")
+    return numeric
 
 
 def _as_dict(value: object | None, label: str) -> dict[str, object]:

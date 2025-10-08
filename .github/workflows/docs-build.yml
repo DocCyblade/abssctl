@@ -1,10 +1,10 @@
-name: docs
+name: Build docs to github-pages
 
 on:
   workflow_dispatch:
   push:
     tags:
-      - 'v*.*.*'
+      - "docs-v*"
 
 permissions:
   contents: read
@@ -38,6 +38,16 @@ jobs:
         with:
           python-version: "3.12"
           cache: "pip"
+
+      - name: Validate docs tag version
+        if: github.event_name == 'push'
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "${TAG}" != docs-v* ]]; then
+            echo "Docs workflow triggered for unexpected tag: ${TAG}"
+            exit 1
+          fi
+          python3 buildtools/validate_tag_version.py --kind docs --tag "${TAG}"
 
       - name: Install doc dependencies
         run: |
