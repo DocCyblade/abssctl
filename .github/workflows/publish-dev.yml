@@ -1,0 +1,46 @@
+name: Publish to Test PyPi
+
+on:
+  push:
+    tags:
+      - "v*.*.*-dev"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-dev-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish-dev:
+    runs-on: ubuntu-latest
+    environment: publish-dev
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate dev tag version
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "${TAG}" != v*-dev ]]; then
+            echo "Dev publish workflow triggered for unexpected tag: ${TAG}"
+            exit 1
+          fi
+          python3 buildtools/validate_tag_version.py --kind dev --tag "${TAG}"
+
+      - name: Build distributions
+        run: |
+          make dist
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@v1.12.2
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true

@@ -1,0 +1,17 @@
+schema_version: 1
+policy:
+  window: "current + 10 prior"   # rolling window (ADR-030)
+  include_prereleases: false       # exclude alpha/beta/rc
+  engines_mismatch: warn           # warn only (ADR-018)
+
+# Edit this list after each MITP run (ADR-030). Newest first is fine; the generator will sort.
+releases: []
+
+# Example entry (copy, edit, and uncomment):
+# - version: "25.8.0"
+#   release_date: "2025-09-15"     # YYYY-MM-DD
+#   engines_node: ">=18"           # from npm metadata
+#   tested_on: "2025-10-05T19:20:00Z"
+#   result: "pass"                 # pass | warn | fail
+#   status: "supported"            # supported | eol
+#   notes: "Baseline on TKL v18; zstd missing (yellow)."

@@ -1,0 +1,34 @@
+This file is used to help bootstrap AI help/chats to keep things consistent between chats and sessions please read this first and all files listed before starting. 
+
+All new chats I will start with the below text
+Start with "Hello AI partner, to get you up to speed and bootstrap this chat session please read the file ai-directives.txt this has all the info you need to get started.
+
+AI Directives for chats for this repo/project
+
+- Base project specs located at docs/requirements/abssctl-app-specs.txt
+    - Any changes to scope will need to be approved and this document updated with an ADR attched
+- Architecture decision records (ADR) are under /docs/adrs
+    - Any new function or deviation of specs or ADRs need a new ADR and approved by developers
+- Roadmap file docs/roadmap.rst
+    - List the road map for the project. This file should be used to check off when things are done, and be added to if things change issues are found and/or ADRs/scope changes. Changes should be approved by developer
+- Session log to be updated in real time by AI at session-log.txt
+    - How to read this and update this file is at the top of the file
+    - When asked to "session recap" give me:
+        - the session wrap up. If not written write it out in the log
+        - Current followup/TODO/Next Steps, if not written write it to log. Should be always up to date
+    - When asked to "close the session:
+        - finish writing all non-written things done
+        - change session from OPEN to CLOSED
+        - Ensure Wrap up is complete
+        - enure Next Steps/TODO list is completed
+        - update/replace Next Session Primer
+            - Next Session Primer - Is used to bootstrap the AI chat session. Should be what is next to be done, using the previous TODO in session log and roadmap.
+
+
+Lets get started, once you have read and understand all the directives your first thing to do
+- Tell me you read and understand the documents, list them if would like
+- Read the Next Session Primer in the session-log.txt
+    - If the last session is CLOSED read it and start a new session asking for the name of session
+    - If the last session is OPEN read it and append to the session
+- Go over the next steps specified in the primer prompt.
+
