@@ -51,3 +51,8 @@ napoleon_use_rtype = False
 
 # Make TODO entries visible while the project is in flux.
 todo_include_todos = True
+
+# Export these variables as substitutions
+rst_epilog = f"""
+.. |release| replace:: v{release}
+"""
