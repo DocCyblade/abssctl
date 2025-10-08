@@ -71,6 +71,9 @@ Prompt: "We're on branch dev-alpha3 with logging, locking, and templating in pla
 - Authored ADR-033 defining the unified versioning/tagging strategy (PEP 440 package versions, ``v<version>`` release tags, ``v<version>-dev`` TestPyPI tags, and ``docs-v<version>`` documentation tags).
 - Added explicit PEP 440 reference links to ADR-033 for clarity.
 - Realigned GitHub Actions workflows with ADR-033: CI now reacts to ``v*``/``v*.*.*-dev``/``docs-v*`` tags, docs publishing validates ``docs-v`` tags against ``__version__``, dev publishes enforce version alignment + concurrency, and a new ``publish-release.yml`` promotes ``v<version>`` tags to PyPI via the ``publish-release`` environment.
+- Updated the workflow tag validators to parse ``__version__`` via ``ast`` so version checks work without importing the package (fixes runner errors during ``publish-dev`` guard).
+- Introduced ``buildtools/validate_tag_version.py`` and refactored all workflows to call it, keeping validation logic shared and the YAML cleaner.
+- Brought the new tag validation helper into compliance with Ruff (sorted imports, docstrings, stderr messaging) so lint passes locally and in CI.
 
 ### Wrap Summary
 - Dev-tag publishing now uses TestPyPI trusted publishing with the ``publish-dev`` environment guarding releases.

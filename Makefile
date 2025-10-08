@@ -63,14 +63,14 @@ ensure-build-venv: $(BUILD_VENV)/.installed
 ## Quick Tests on dev: Run Ruff/mypy/pytest
 .PHONY: quick-tests
 quick-tests: $(DEV_VENV)/.installed
-	$(DEV_VENV)/bin/python -m ruff check src tests
+	$(DEV_VENV)/bin/python -m ruff check src tests buildtools
 	$(DEV_VENV)/bin/python -m mypy src
 	$(DEV_VENV)/bin/python -m pytest
 
 ## lint: Run Ruff via .venv-test (test env)
 .PHONY: lint
 lint: $(TEST_VENV)/.installed
-	$(TEST_VENV)/bin/python -m ruff check src tests
+	$(TEST_VENV)/bin/python -m ruff check src tests buildtools
 
 ## type: Run mypy type checks via test venv
 .PHONY: type

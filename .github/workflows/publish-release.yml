@@ -49,9 +49,7 @@ jobs:
             echo "Release workflow should not run for dev tag: ${TAG}"
             exit 1
           fi
-          VERSION="${TAG#v}"
-          export VERSION
-          python3 -c "import importlib.util, os, pathlib, sys; tag_version = os.environ['VERSION']; init_path = pathlib.Path('src/abssctl/__init__.py'); spec = importlib.util.spec_from_file_location('abssctl', init_path); module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module); package_version = module.__version__; sys.exit(0 if package_version == tag_version else f'Tag version {tag_version} does not match package version {package_version}')"
+          python3 buildtools/validate_tag_version.py --kind release --tag "${TAG}"
 
       - name: Build distributions
         run: |

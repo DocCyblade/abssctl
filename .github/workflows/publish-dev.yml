@@ -1,4 +1,4 @@
-name: Publish Dev Release
+name: Publish to Test PyPi
 
 on:
   push:
@@ -33,9 +33,7 @@ jobs:
             echo "Dev publish workflow triggered for unexpected tag: ${TAG}"
             exit 1
           fi
-          BASE_VERSION="${TAG%-dev}"
-          export BASE_VERSION
-          python3 -c "import importlib.util, os, pathlib, sys; tag_version = os.environ['BASE_VERSION']; init_path = pathlib.Path('src/abssctl/__init__.py'); spec = importlib.util.spec_from_file_location('abssctl', init_path); module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module); package_version = module.__version__; sys.exit(0 if package_version == tag_version else f'Tag version {tag_version} does not match package version {package_version}')"
+          python3 buildtools/validate_tag_version.py --kind dev --tag "${TAG}"
 
       - name: Build distributions
         run: |
