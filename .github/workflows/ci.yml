@@ -1,12 +1,9 @@
-name: abssctl CI
+name: CI Test Suite
 
 on:
   push:
     branches: [main, dev, "dev-*"]
-    tags:
-      - "v*"
-      - "v*.*.*-dev"
-      - "docs-v*"
+
   pull_request:
     branches: [main, dev, "dev-*"]
 
