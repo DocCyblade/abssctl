@@ -60,7 +60,7 @@
 ### Next Session Primer
 Prompt: "We're on branch dev-alpha3 with logging, locking, and templating in place. Next step: prototype the systemd provider rendering pipeline using the new engine."
 
-## 2025-10-07 Alpha CI Session (OPEN)
+## 2025-10-07 Alpha CI Session (CLOSED)
 - Drafted a GitHub Actions workflow for publishing dev tags (``dev-*``) to TestPyPI and reviewed trusted publisher requirements for final rollout.
 - Noted the need to append new session entries without altering previous logs.
 - Converted ``publish-dev`` workflow to use PyPI trusted publishing (OIDC) for TestPyPI dev tags, removing the dependency on stored credentials and updating ``docs/roadmap.rst`` to mark the roadmap item complete.
@@ -82,11 +82,9 @@ Prompt: "We're on branch dev-alpha3 with logging, locking, and templating in pla
 - Logging discipline reminder stands so we continue appending to open sessions only.
 
 ### Next Steps / TODO
-- Trigger a ``v*.*.*-dev`` tag dry-run once environment approval is ready and observe the trusted publishing flow end-to-end.
 - Draft design/implementation plan for systemd/nginx providers in advance of Beta tasks.
 - Evaluate test strategy expansion to cover upcoming mutating commands.
-- Socialize ADR-033 with maintainers and update CI/environment patterns as needed after approval.
-- Coordinate with maintainers on configuring PyPI/TestPyPI trusted publishers for the new ``publish-release`` environment ahead of the first GA/RC tag.
+- Draft an ADR detailing repository management and branching workflow conventions (building on the CI/tagging policy).
 
 ### Next Session Primer
-Prompt: "Trusted publishing + environment protections are in place. Next up: run a ``v*.*.*-dev`` tag dry-run through the approval gate, collect feedback/approval on ADR-033, and shift focus to the systemd/nginx provider implementation plan for Beta."
+Prompt: "Trusted publishing + environment protections are settled. Next up: outline the Beta systemd/nginx provider implementation, expand the mutating-command test plan, and draft the repo management/branching ADR."

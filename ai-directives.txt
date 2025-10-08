@@ -17,7 +17,7 @@ AI Directives for chats for this repo/project
         - the session wrap up. If not written write it out in the log
         - Current followup/TODO/Next Steps, if not written write it to log. Should be always up to date
     - When asked to "close the session:
-        - finish writing all non-written things done
+        - finish writing all non-written things down in log
         - change session from OPEN to CLOSED
         - Ensure Wrap up is complete
         - enure Next Steps/TODO list is completed
