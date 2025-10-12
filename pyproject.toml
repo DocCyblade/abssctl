@@ -38,9 +38,9 @@ Discussions = "https://github.com/DocCyblade/abssctl/discussions"
 Issues = "https://github.com/DocCyblade/abssctl/issues"
 Source = "https://github.com/DocCyblade/abssctl"
 CI = "https://github.com/DocCyblade/abssctl/actions"
-Changelog = "https://github.com/DocCyblade/abssctl/blob/dev-alpha3/CHANGELOG.rst"
-Roadmap = "https://github.com/DocCyblade/abssctl/blob/dev-alpha3/docs/roadmap.rst"             
-License = "https://github.com/DocCyblade/abssctl/blob/dev-alpha3/LICENSE"
+Changelog = "https://github.com/DocCyblade/abssctl/blob/dev/CHANGELOG.rst"
+Roadmap = "https://github.com/DocCyblade/abssctl/blob/dev/docs/roadmap.rst"             
+License = "https://github.com/DocCyblade/abssctl/blob/dev/LICENSE"
 
 
 [project.optional-dependencies]
@@ -99,7 +99,7 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "D", "UP", "DTZ", "T20", "B", "Q", "ANN"]
-ignore = ["ANN101", "ANN102"]
+ignore = ["D203", "D213"]
 
 [tool.ruff.format]
 quote-style = "double"

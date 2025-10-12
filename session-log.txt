@@ -5,23 +5,32 @@
 
 - Work sessions will start with date/time then name for this the session followed by session status in (OPEN/CLOSED)
 - New sessions are appended to file unless session is marked (OPEN) then we append to that session block
+    - Be sure to start new session under the last sessions "-----------------------------------------"
 
 - Each session block has it's own header and sub sections defined below
-    - Starts with "## Date - [Session name] (OPEN/CLOSED)"
+    - Starts with "# Date - [Session name] (OPEN/CLOSED)"
        - Session can be OPEN appended too, or CLOSED a new session needs to be started
        - All work will be detailed, one or two items per line
-    - "### Wrap up: "
-        - Wrap section is a summary of all lines lines logged. Can be written to on going or when we close the session
-    - "### Next Steps / TODO:"
-        - This section is used to keep track in real time of whats to do next or if something is tabled for later, it's written here for follow up. This should be written in real time
-    - "### Next Session Primer"
-        - Used for our AI chat friends to prime a new chat to get the chat up to speed on the poject
-
-
+    - "## Wrap up: "
+        - Wrap section is a summary of all lines lines logged. 
+        - Can be written to on going or when we close the session
+    - After the last line of of the wrap up block add a blank like followed up "-----------------------------------------" and two blank lines for the next session to appended too.
+- Two blocks that are always at the bottom and keep a TODO and Primer for the next session are detailed below
+    - "# Next Steps / TODO:"
+        - This section is used to keep track in real time of whats to do next or if something is tabled for later it's written here for follow up. 
+        - This should be written in real time and things moved from TODO to session log section
+    - "# Next Session Primer"
+        - Used for our AI chat friends to prime a new chat to get the chat up to speed on the project
+        - this header floats at the bottom
 
 -  Then list out items performed. When session is done write a Wrap up summary, a next steps section for quick next steps, and a AI prompt if working with with AI tools. Always append new sessions (do not edit prior sections).
 
-## 2025-10-06 Alpha3 Session (CLOSED)
+
+
+
+--------------- Session log starts below this line. Do not edit above this line ----------------------
+
+# 2025-10-06 Alpha3 Session (CLOSED)
 - Session continuing on branch dev-alpha3; prior session notes unavailable.
 - Reviewed docs/requirements/abssctl-app-specs.txt (v1.0-draft-5) for v1 goals, scope, and roadmap.
 - Summarised ADR-001 through ADR-032 decisions (Typer CLI, packaging to PyPI, TKL focus, filesystem layout, locking, TLS defaults, backup policy, doctor/CI strategy).
@@ -43,7 +52,7 @@
 - Integrated the systemd/nginx providers into `instance create` placeholder flow, generating service/vhost files, logging template steps, and ensuring safe runtime directories.
 - Implemented instance lifecycle commands (enable/disable/start/stop/restart/delete) using the provider scaffolds, updated registry helper APIs, and covered the flows with CLI tests.
 
-### Wrap Summary
+## Wrap Summary
 - Built shared understanding of v1 scope by reviewing requirements and ADRs.
 - Catalogued current Pre-Alpha implementation (CLI scaffold, config/state utilities, pytest coverage).
 - Established roadmap tracking in `docs/roadmap.rst` and linked it across README and Sphinx docs.
@@ -53,14 +62,10 @@
 - Shipped a templating engine foundation with built-in systemd/nginx templates and override support.
 - Established the systemd and nginx provider scaffolds ready for CLI integration.
 
-### Next Steps / TODO
-- Draft design/implementation plan for systemd/nginx providers in advance of Beta tasks.
-- Evaluate test strategy expansion to cover upcoming mutating commands.
+-----------------------------------------
 
-### Next Session Primer
-Prompt: "We're on branch dev-alpha3 with logging, locking, and templating in place. Next step: prototype the systemd provider rendering pipeline using the new engine."
 
-## 2025-10-07 Alpha CI Session (CLOSED)
+# 2025-10-07 Alpha CI Session (CLOSED)
 - Drafted a GitHub Actions workflow for publishing dev tags (``dev-*``) to TestPyPI and reviewed trusted publisher requirements for final rollout.
 - Noted the need to append new session entries without altering previous logs.
 - Converted ``publish-dev`` workflow to use PyPI trusted publishing (OIDC) for TestPyPI dev tags, removing the dependency on stored credentials and updating ``docs/roadmap.rst`` to mark the roadmap item complete.
@@ -75,16 +80,77 @@ Prompt: "We're on branch dev-alpha3 with logging, locking, and templating in pla
 - Introduced ``buildtools/validate_tag_version.py`` and refactored all workflows to call it, keeping validation logic shared and the YAML cleaner.
 - Brought the new tag validation helper into compliance with Ruff (sorted imports, docstrings, stderr messaging) so lint passes locally and in CI.
 
-### Wrap Summary
+## Wrap Summary
 - Dev-tag publishing now uses TestPyPI trusted publishing with the ``publish-dev`` environment guarding releases.
 - Verified the CI workflow path locally via ``make dist`` to ensure build artifacts are healthy, recorded the new tag pattern, and confirmed metadata compatibility with PyPI tooling.
 - GitHub workflows now enforce the standardized tag/version policy across CI, docs, dev, and release pipelines with environment approvals in the loop.
 - Logging discipline reminder stands so we continue appending to open sessions only.
 
-### Next Steps / TODO
-- Draft design/implementation plan for systemd/nginx providers in advance of Beta tasks.
-- Evaluate test strategy expansion to cover upcoming mutating commands.
-- Draft an ADR detailing repository management and branching workflow conventions (building on the CI/tagging policy).
+-----------------------------------------
 
-### Next Session Primer
-Prompt: "Trusted publishing + environment protections are settled. Next up: outline the Beta systemd/nginx provider implementation, expand the mutating-command test plan, and draft the repo management/branching ADR."
+
+# 2025-10-08 Alpha 4 Session (CLOSED)
+- Opened new session on branch dev-alpha4; ready to tackle primer items from prior log.
+- Highlighted first three priorities for this session: tooling directory consolidation, doc alignment, and systemd/nginx provider planning.
+- Consolidated scripting utilities under `tools/`, removing the redundant `buildtools/` directory and updating CI/Makefile references.
+- Refreshed README and Sphinx docs to reflect Alpha foundations (logging/locks/templates), current branch strategy, quickstart/developer guidance, and the real CLI behaviours; verified the updates with `make docs`.
+- Documented Makefile convenience targets (quick-tests/docs/dist) in README and Sphinx guides so contributors can rely on the shared workflows.
+- Drafted the Beta-oriented systemd/nginx provider implementation plan (`docs/source/guides/systemd-nginx-provider-plan.rst`) covering goals, roadmap, testing strategy, and dependencies.
+- Outlined the mutating-command test strategy (`docs/source/guides/mutating-command-test-strategy.rst`) detailing coverage gaps, layered approach, and next testing actions.
+- Authored ADR-034 defining repository branching, release, hotfix, and docfix workflows; updated README and developer guide to reference the policy, verified Sphinx build.
+- Captured the version lifecycle implementation plan (`docs/source/guides/version-lifecycle-plan.rst`) to steer install/switch/uninstall development; linked into Sphinx docs and validated the build.
+- Reorganized the Sphinx index into Overview, Getting Started, Implementation Plans, and Reference sections for clearer navigation; verified the docs build.
+- Normalised `versions.yml` handling with new registry helpers (`get_version`, `upsert_version`, `remove_version`) and schema validation; added unit tests covering success/error paths.
+- Added per-version locking support (`LockManager.version_lock`/`mutate_versions`) with accompanying tests to coordinate lifecycle operations safely.
+- Introduced `VersionInstaller` abstraction for npm-driven installs (dry-run support, staging-to-final move, metadata capture) plus dedicated tests; verified `mypy` and `pytest` passing.
+- Implemented `version install|switch|uninstall` commands using the new installer, locks, and registry helpers; added guardrails (e.g., prevent uninstalling the active version), metadata updates, and CLI tests covering install flows, symlink management, and uninstall safety checks.
+- Replaced the placeholder `version check-updates` with real npm metadata comparisons, producing structured messages/JSON and new CLI tests for upgrades and remote-failure scenarios.
+- Added restart policy handling to `version switch` (`--restart none|rolling|all`) with systemd stop/start integration and CLI coverage for each mode.
+- Introduced safety prompts/flags for `version install|switch|uninstall` (backup reminders, `--no-backup`, `--backup-message`, `--yes`), extended CLI tests, and documented the options.
+
+## Wrap up:
+- Implemented version lifecycle commands with restart policies, safety prompts, registry updates, and CLI/unit tests; introduced real update detection, per-version locking, and a reusable installer; refreshed docs and tooling support. Session remains active.
+
+-----------------------------------------
+
+
+-----------------------------------------
+
+
+# 2025-10-11 Sprint 7 (CLOSED)
+- Session kickoff per primer; focus on version integrity metadata capture across registry and CLI surfaces.
+- Confirmed ai-large-message.txt is clear; proceeding with TODO to record npm shasum/tarball hashes.
+- Logged multi-step plan in `ai-tasks.txt`, opened Sprint 7 session context.
+- Surveyed registry/helpers/tests to confirm `integrity` shape and updated plan for npm shasum + tarball digest coverage.
+- Implemented installer integrity extraction, registry/CLI normalization, and doc updates; refreshed unit/CLI tests to assert new fields.
+- Ran `pytest`; collection failed because local environment lacks editable install for `abssctl`/`typer` (ModuleNotFoundError).
+- Authored backup command implementation plan covering archive layout, locks, index schema, and CLI flags; added to Sphinx implementation guides.
+- Rebuilt docs with `make docs` to validate the new plan renders cleanly.
+- Delivered `backup create`: added backups registry helpers, tar/sha256 workflow, CLI options (`--message`, `--label`, `--out-dir`, `--compression`, `--json`, `--dry-run`), and unit/CLI coverage.
+- Wired version install/switch/uninstall safety prompts to invoke real backups with pre-operation labels, ensuring locks avoid deadlocks.
+- Refined restart handling to use explicit action plans (`restart.plan`), executing systemd stop/start sequences with enhanced logging and tests.
+- Updated README, CLI reference, and guides to document backup behaviour and restart expectations; Sphinx build verified.
+- Added regression tests for backup JSON payloads and backups registry helpers; ran full `pytest` + `make docs` cleanly.
+- Implemented `backup list`/`backup show` with new registry helpers, CLI table/JSON outputs, and coverage; `make quick-tests` now passes on the expanded surface.
+- Added `backup verify`/`backup prune`, checksum revalidation, retention policies, and supporting CLI/unit tests; integrated new backup metadata into instance/version listings and extended prompts to `instance delete`; refreshed docs and Sphinx build succeeded.
+- Drafted immediate next steps to focus on documentation (user guide/ADR updates) and explore restore workflows for future iterations; make quick-tests + docs remain green.
+- Marked Alpha 4 roadmap items as complete, documented remaining backup restore/reconcile scope, introduced the backup restore design plan, and shipped a placeholder `backup restore` command with CLI/docs/tests updates.
+
+## Wrap up:
+
+- Backup command and supporting registry/tests delivered; version operations now auto-run backups on accepted prompts, restart handling uses explicit plans, and documentation/tests updated.
+- Added read-only backup management commands (list/show) with fresh tests to round out observability, keeping quick-tests green.
+- Introduced full backup lifecycle scaffolding (verify/prune/restore design), updated roadmap/docs, and kept tests/docs passing for Alpha 4 Release 2.
+
+-----------------------------------------
+
+
+----------------------- Sessions logging above this line only ----------------------
+
+# Next Steps / TODO:
+- Build systemd/nginx providers and wire comprehensive `instance create` / lifecycle commands per roadmap.
+- Implement port allocation, TLS command suite, and remaining backup workflow (`restore` extraction, `reconcile` CLI).
+- Deliver the initial `doctor` command and flesh out automation-friendly tests.
+
+# Next Session Primer
+- Alpha 5 focus: tackle provider implementations (systemd/nginx), instance create flow, and start on ports/TLS according to roadmap.

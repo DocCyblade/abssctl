@@ -49,7 +49,7 @@ jobs:
             echo "Release workflow should not run for dev tag: ${TAG}"
             exit 1
           fi
-          python3 buildtools/validate_tag_version.py --kind release --tag "${TAG}"
+          python3 tools/validate_tag_version.py --kind release --tag "${TAG}"
 
       - name: Build distributions
         run: |

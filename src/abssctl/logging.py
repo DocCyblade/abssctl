@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
-from typing import Literal
+from typing import Literal, cast
 
 import typer
 
@@ -235,12 +235,19 @@ class OperationScope:
         return False  # never suppress exceptions
 
     # ------------------------------------------------------------------
+    @property
+    def actor(self) -> object:
+        """Return the actor metadata associated with this operation."""
+        return self._actor
+
     def success(
         self,
         message: str,
         *,
         changed: int = 0,
         warnings: Sequence[str] | None = None,
+        backups: Sequence[str] | None = None,
+        context: Mapping[str, object] | None = None,
     ) -> None:
         """Record a successful completion."""
         self._result = OperationResult(
@@ -250,7 +257,8 @@ class OperationScope:
             warnings=list(warnings or []),
             errors=[],
             changed=changed,
-            backups=[],
+            backups=list(backups or []),
+            context=_sanitize_context(context),
         )
 
     def warning(
@@ -261,6 +269,8 @@ class OperationScope:
         errors: Sequence[str] | None = None,
         changed: int = 0,
         rc: int = 0,
+        backups: Sequence[str] | None = None,
+        context: Mapping[str, object] | None = None,
     ) -> None:
         """Record a completion with warnings."""
         self._result = OperationResult(
@@ -270,7 +280,8 @@ class OperationScope:
             warnings=list(warnings or []),
             errors=list(errors or []),
             changed=changed,
-            backups=[],
+            backups=list(backups or []),
+            context=_sanitize_context(context),
         )
 
     def error(
@@ -280,6 +291,8 @@ class OperationScope:
         errors: Sequence[str] | None = None,
         warnings: Sequence[str] | None = None,
         rc: int = 1,
+        backups: Sequence[str] | None = None,
+        context: Mapping[str, object] | None = None,
     ) -> None:
         """Record an error outcome."""
         self._result = OperationResult(
@@ -289,7 +302,8 @@ class OperationScope:
             errors=list(errors or [message]),
             warnings=list(warnings or []),
             changed=0,
-            backups=[],
+            backups=list(backups or []),
+            context=_sanitize_context(context),
         )
 
     def set_lock_wait_ms(self, value: int) -> None:
@@ -328,6 +342,7 @@ class OperationScope:
                     "warnings": self._result.warnings,
                     "changed": self._result.changed,
                     "backups": self._result.backups,
+                    "context": self._result.context,
                 }
             ),
             "rc": self._result.rc,
@@ -368,3 +383,11 @@ class OperationScope:
 
 
 __all__ = ["StructuredLogger", "OperationScope", "OperationResult"]
+def _sanitize_context(
+    context: Mapping[str, object] | None,
+) -> dict[str, object] | None:
+    """Return a sanitized mapping suitable for OperationResult."""
+    if context is None:
+        return None
+    return cast(dict[str, object], _sanitize(context))
+

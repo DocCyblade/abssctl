@@ -100,6 +100,27 @@ class TLSConfig:
 
 
 @dataclass(frozen=True)
+class BackupConfig:
+    """Backup storage and compression defaults."""
+
+    root: Path
+    index: Path
+    compression: str = "auto"
+    compression_level: int | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        """Return a serialisable representation."""
+        return {
+            "root": str(self.root),
+            "index": str(self.index),
+            "compression": {
+                "algorithm": self.compression,
+                "level": self.compression_level,
+            },
+        }
+
+
+@dataclass(frozen=True)
 class AppConfig:
     """Resolved configuration values for abssctl."""
 
@@ -118,6 +139,7 @@ class AppConfig:
     default_version: str
     ports: PortsConfig
     tls: TLSConfig
+    backups: BackupConfig
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-serialisable representation of the config."""
@@ -137,6 +159,7 @@ class AppConfig:
             "default_version": self.default_version,
             "ports": self.ports.to_dict(),
             "tls": self.tls.to_dict(),
+            "backups": self.backups.to_dict(),
         }
 
 
@@ -168,10 +191,19 @@ DEFAULTS: dict[str, object] = {
             "live_dir": "/etc/letsencrypt/live",
         },
     },
+    "backups": {
+        "root": "/srv/backups",
+        "index": None,
+        "compression": {
+            "algorithm": "auto",
+            "level": None,
+        },
+    },
 }
 
 ALLOWED_TOP_LEVEL_KEYS = set(DEFAULTS.keys())
 ALLOWED_PORT_STRATEGIES = {"sequential"}
+ALLOWED_BACKUP_COMPRESSION = {"auto", "zstd", "gzip", "none"}
 
 
 def load_config(
@@ -273,6 +305,38 @@ def _validate_structure(raw: Mapping[str, object]) -> None:
             joined = ", ".join(sorted(unknown_lets))
             raise ConfigError(f"Unknown TLS lets_encrypt keys: {joined}.")
 
+    backups = raw.get("backups")
+    if backups is not None:
+        backups_map = _as_dict(backups, "backups")
+        unknown = set(backups_map.keys()) - {"root", "index", "compression"}
+        if unknown:
+            joined = ", ".join(sorted(unknown))
+            raise ConfigError(f"Unknown backups configuration keys: {joined}.")
+
+        compression_map = _as_dict(backups_map.get("compression"), "backups.compression")
+        unknown_comp = set(compression_map.keys()) - {"algorithm", "level"}
+        if unknown_comp:
+            joined = ", ".join(sorted(unknown_comp))
+            raise ConfigError(f"Unknown backups compression keys: {joined}.")
+
+        algorithm = str(compression_map.get("algorithm", "auto"))
+        if algorithm not in ALLOWED_BACKUP_COMPRESSION:
+            allowed = ", ".join(sorted(ALLOWED_BACKUP_COMPRESSION))
+            raise ConfigError(
+                f"Unsupported backup compression '{algorithm}'. Allowed: {allowed}."
+            )
+
+        level = compression_map.get("level")
+        if level is not None and not isinstance(level, (int, str)):
+            raise ConfigError("backups.compression.level must be an integer or string value.")
+        if isinstance(level, str):
+            try:
+                int(level, 0)
+            except ValueError as exc:
+                raise ConfigError(
+                    f"Invalid integer for backups.compression.level: {level!r}."
+                ) from exc
+
 
 def _build_app_config(raw: Mapping[str, object]) -> AppConfig:
     config_file = _to_path(raw.get("config_file"))
@@ -309,6 +373,33 @@ def _build_app_config(raw: Mapping[str, object]) -> AppConfig:
         ),
     )
 
+    backups_mapping = _as_dict(raw.get("backups"), "backups")
+    backups_root = _to_path(backups_mapping.get("root", "/srv/backups"))
+    backups_index_value = backups_mapping.get("index")
+    backups_index = (
+        _to_path(backups_index_value) if backups_index_value else backups_root / "backups.json"
+    )
+    compression_mapping = _as_dict(backups_mapping.get("compression"), "backups.compression")
+    compression_algorithm = str(compression_mapping.get("algorithm", "auto"))
+    compression_level_raw = compression_mapping.get("level")
+    compression_level: int | None = None
+    if compression_level_raw is not None:
+        parsed_level = _expect_int(
+            compression_level_raw, "backups.compression.level", default=1
+        )
+        if parsed_level <= 0:
+            raise ConfigError(
+                "backups.compression.level must be greater than zero when specified."
+            )
+        compression_level = parsed_level
+
+    backups = BackupConfig(
+        root=backups_root,
+        index=backups_index,
+        compression=compression_algorithm,
+        compression_level=compression_level,
+    )
+
     return AppConfig(
         config_file=config_file,
         install_root=install_root,
@@ -325,6 +416,7 @@ def _build_app_config(raw: Mapping[str, object]) -> AppConfig:
         default_version=str(raw.get("default_version", "current")),
         ports=ports,
         tls=tls,
+        backups=backups,
     )
 
 

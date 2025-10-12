@@ -33,7 +33,7 @@ jobs:
             echo "Dev publish workflow triggered for unexpected tag: ${TAG}"
             exit 1
           fi
-          python3 buildtools/validate_tag_version.py --kind dev --tag "${TAG}"
+          python3 tools/validate_tag_version.py --kind dev --tag "${TAG}"
 
       - name: Build distributions
         run: |

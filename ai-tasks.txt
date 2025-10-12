@@ -1,0 +1,7 @@
+# This file to be used for AI long tasks. AI should use this file to keep track of 
+#   long running or multi step tasks so in case of a crash or error AI can read This
+#   file and try to recover where it was in the long task.
+#
+# - AI do not edit above this line! Keep this header!
+
+- No active multi-step tasks.

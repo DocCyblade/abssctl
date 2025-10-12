@@ -18,9 +18,9 @@ Project Facts
 - **CLI executable:** ``abssctl`` (Actual Budget Sync Server ConTroL).
 
 The project is currently in the **Alpha (foundations)** phase. The repository
-builds on the bootstrap work from Pre-Alpha and now focuses on wiring core
-services: configuration, state management, and read-only workflows that unlock
-future instance operations.
+builds on the bootstrap work from Pre-Alpha and now includes structured logging,
+global/per-instance locking, and templated systemd/nginx provider scaffolds
+alongside configuration, state management, and read-only workflows.
 
 Key Objectives
 ==============
@@ -60,6 +60,10 @@ Quick Start (Alpha Foundations)
       mypy src
       pytest
 
+   Tip: ``make quick-tests`` runs the trio above via the managed developer
+   virtualenv. Use ``make docs`` to rebuild Sphinx HTML and ``make dist`` for
+   the full lint/type/test/build pipeline.
+
 4. Invoke the CLI skeleton::
 
       abssctl --help
@@ -92,6 +96,34 @@ details for a single instance. Use ``--remote`` with ``version list`` to pull
 published versions from npm when the CLI is available (falls back gracefully if
 ``npm`` is missing). All commands accept ``--config-file`` so you can point at
 alternate configuration sources when testing or operating multiple environments.
+The registry now records npm integrity metadata (``shasum`` plus tarball digest)
+for each install, and ``abssctl version list --json`` exposes that block so
+offline operators can verify artifacts.
+
+Backups
+=======
+
+- ``abssctl backup create <instance>`` assembles instance data, rendered
+  systemd/nginx assets, and registry metadata into a timestamped archive under
+  ``/srv/backups/<instance>/`` (override via ``--out-dir``). Archives include a
+  `.sha256` companion file and an entry in ``backups.json`` capturing checksum,
+  compression algorithm, labels, and user-supplied message. ``--message``
+  annotates the entry, ``--label`` (comma-separated) adds search-friendly tags,
+  ``--dry-run`` previews the capture plan, and ``--json`` emits a
+  machine-readable payload for tooling.
+- ``abssctl backup list`` / ``abssctl backup show <id>`` read ``backups.json`` so
+  operators can browse recent backups or drill into a specific archive via JSON.
+- ``abssctl backup verify`` recomputes SHA-256 digests to highlight missing or
+  corrupt archives.
+- ``abssctl backup restore <id>`` (placeholder) validates the backup archive,
+  offers a pre-restore safeguard, and records the planned restore destination
+  (extraction logic arrives in a later iteration).
+- ``abssctl backup prune`` removes old backups using ``--keep`` / ``--older-than``
+  policies (with ``--dry-run`` support) and updates the registry accordingly.
+- Version lifecycle commands and ``instance delete`` honour safety prompts by
+  creating real backups when accepted (``--yes`` auto-confirms, ``--no-backup``
+  bypasses the safeguard). Install/switch/uninstall label backups with their
+  preflight intent so operators can trace why an archive exists.
 
 Roadmap & Specifications
 ========================
@@ -113,7 +145,13 @@ Branch Strategy
 
 - ``main`` — production-ready releases tagged for PyPI.
 - ``dev`` — integration branch for upcoming development builds.
-- ``dev-alpha`` — working branch for the foundations milestone and experimental CLI work.
+- ``dev-<label>`` — milestone integration branches (``dev-alphaN``, ``dev-betaN``,
+  ``dev-1.2.0a1``); the current focus is ``dev-alpha4`` while we finish core
+  provider planning and registry-driven commands.
+- Short-lived feature branches support focused working sessions.
+- Release preparation uses ``release/<version>`` branches before tagging.
+- Urgent fixes branch from ``main`` as ``hotfix/<version>`` (code) or
+  ``docfix/<version>`` (documentation). Refer to ADR-034 for the full workflow.
 - Short-lived feature branches support focused working sessions.
 
 Roadmap Snapshot

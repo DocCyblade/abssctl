@@ -93,6 +93,8 @@ class LockManager:
         self._runtime_dir.mkdir(parents=True, exist_ok=True)
         self._default_timeout = float(default_timeout)
         self._global_path = self._runtime_dir / "abssctl.lock"
+        self._versions_dir = self._runtime_dir / "versions"
+        self._versions_dir.mkdir(parents=True, exist_ok=True)
 
     @property
     def default_timeout(self) -> float:
@@ -109,6 +111,12 @@ class LockManager:
         path = self._runtime_dir / f"{safe_name}.lock"
         return LockHandle(path, timeout or self._default_timeout)
 
+    def version_lock(self, version: str, *, timeout: float | None = None) -> LockHandle:
+        """Acquire the per-version lock for *version*."""
+        safe_name = _sanitize_version(version)
+        path = self._versions_dir / f"{safe_name}.lock"
+        return LockHandle(path, timeout or self._default_timeout)
+
     def mutate_instances(
         self,
         names: Sequence[str],
@@ -123,6 +131,22 @@ class LockManager:
             handles.append(self.global_lock(timeout=timeout_value))
         for name in names:
             handles.append(self.instance_lock(name, timeout=timeout_value))
+        return _LockBundle(handles)
+
+    def mutate_versions(
+        self,
+        versions: Sequence[str],
+        *,
+        timeout: float | None = None,
+        include_global: bool = True,
+    ) -> _LockBundle:
+        """Acquire locks for mutating one or more versions."""
+        timeout_value = timeout or self._default_timeout
+        handles: list[LockHandle] = []
+        if include_global:
+            handles.append(self.global_lock(timeout=timeout_value))
+        for version in versions:
+            handles.append(self.version_lock(version, timeout=timeout_value))
         return _LockBundle(handles)
 
 
@@ -178,6 +202,14 @@ def _sanitize_name(name: str) -> str:
     """Return a filesystem-safe lock filename."""
     sanitized = "".join(char if char.isalnum() or char in {"-", "_", "."} else "_" for char in name)
     return sanitized or "instance"
+
+
+def _sanitize_version(version: str) -> str:
+    """Return a filesystem-safe lock filename for versions."""
+    sanitized = "".join(
+        char if char.isalnum() or char in {"-", "_", "."} else "_" for char in version
+    )
+    return sanitized or "version"
 
 
 __all__ = [

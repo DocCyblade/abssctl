@@ -53,3 +53,57 @@ def test_invalid_yaml_raises(tmp_path: Path) -> None:
 
     with pytest.raises(StateRegistryError):
         registry.read("instances.yml")
+
+
+def test_version_upsert_and_get(tmp_path: Path) -> None:
+    """Version registry helpers normalise and persist entries."""
+    registry = StateRegistry(tmp_path)
+
+    registry.upsert_version(
+        {
+            "version": "1.2.3",
+            "path": tmp_path / "v1.2.3",
+            "metadata": {"npm": "@actual-app/sync-server"},
+            "integrity": {"shasum": "deadbeef"},
+        }
+    )
+
+    entry = registry.get_version("1.2.3")
+    assert entry is not None
+    assert entry["version"] == "1.2.3"
+    assert entry["path"].endswith("v1.2.3")
+    assert entry["metadata"]["npm"] == "@actual-app/sync-server"
+    assert entry["integrity"]["shasum"] == "deadbeef"
+
+    # Update entry with partial data (merge metadata)
+    registry.upsert_version({"version": "1.2.3", "metadata": {"channel": "stable"}})
+    updated = registry.get_version("1.2.3")
+    assert updated is not None
+    assert updated["metadata"]["npm"] == "@actual-app/sync-server"
+    assert updated["metadata"]["channel"] == "stable"
+
+
+def test_remove_version(tmp_path: Path) -> None:
+    """Removing a version deletes it from the registry."""
+    registry = StateRegistry(tmp_path)
+    registry.upsert_version({"version": "2.0.0"})
+
+    registry.remove_version("2.0.0")
+    assert registry.get_version("2.0.0") is None
+
+    with pytest.raises(StateRegistryError):
+        registry.remove_version("2.0.0")
+
+
+def test_invalid_version_entry_raises(tmp_path: Path) -> None:
+    """Invalid version metadata types raise errors."""
+    registry = StateRegistry(tmp_path)
+
+    with pytest.raises(StateRegistryError):
+        registry.upsert_version({"version": ""})
+
+    with pytest.raises(StateRegistryError):
+        registry.upsert_version({"version": "1.0.0", "metadata": "not-a-mapping"})
+
+    with pytest.raises(StateRegistryError):
+        registry.remove_version("")

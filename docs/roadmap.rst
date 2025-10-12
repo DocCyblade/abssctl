@@ -20,8 +20,8 @@ Pre-Alpha — Repo Bootstrap
 
 - No open TODOs; scaffolding, packaging metadata, and CI skeletons are in place.
 
-Alpha Builds — Foundations
-==========================
+Alpha 3 — Foundations
+=====================
 
 - [x] Implement the structured logging subsystem per ADR-014/ADR-028 (human
   logs + ``operations.jsonl``) and integrate it with existing CLI commands.
@@ -33,14 +33,18 @@ Alpha Builds — Foundations
 - [x] Extend CI to publish dev builds to Test PyPI when tags matching ``v*.*.*-dev`` land (aligns
   with the "Alpha Builds" release engineering goal).
 
-Beta Releases — Core Features
-=============================
+Alpha 4 — Core Features 1
+=========================
 
-- [ ] Implement ``version install``, ``version switch``, and ``version
+- [x] Implement ``version install``, ``version switch``, and ``version
   uninstall`` flows that manage ``/srv/app/vX.Y.Z``, enforce integrity, update
   ``versions.yml``, and honour safety prompts (ADR-011/ADR-017/ADR-026).
-- [ ] Replace the placeholder ``version check-updates`` logic with real npm
+- [x] Replace the placeholder ``version check-updates`` logic with real npm
   metadata comparisons and JSON output.
+
+Alpha 5 — Core Features 2
+=========================
+
 - [ ] Build the systemd provider to render/manage per-instance units (create,
   enable/disable, start/stop/restart, logs) per ADR-009/ADR-010.
 - [ ] Build the nginx provider to render vhosts, run ``nginx -t``, manage
@@ -53,15 +57,21 @@ Beta Releases — Core Features
   ``start|stop|restart|enable|disable|status|logs``, ``set-fqdn``, ``set-port``,
   ``set-version``, ``rename``, and ``delete --purge-data``, incorporating
   ``--dry-run`` and safety prompts.
+
+Beta — Basic Functions
+======================
+
 - [ ] Implement port allocation and collision detection backed by ``ports.yml``,
   following ADR-015 (base port 5000, sequential strategy, locks).
 - [ ] Implement TLS subcommands (``tls verify``, ``tls install``,
   ``tls use-system``) including file validation, secure permissions, nginx
   reloads, and Let’s Encrypt detection (ADR-031).
 - [ ] Implement backup operations per §5.8 / ADR-012 / ADR-021 / ADR-022,
-  including ``backup create``, ``backup list``, ``backup show``,
-  ``backup restore``, ``backup verify``, ``backup reconcile``, and
-  ``backup prune`` with checksum handling and prompts.
+  including ``backup restore`` and ``backup reconcile``; ``backup create`` /
+  ``list`` /
+  ``show`` /
+  ``verify`` /
+  ``prune`` are in place with checksum handling and prompts.
 - [ ] Ensure all mutating commands honour ``--dry-run``, ``--yes``, backup
   prompt inventory (ADR-016/ADR-025/ADR-026), and emit consistent exit codes
   (ADR-013).
