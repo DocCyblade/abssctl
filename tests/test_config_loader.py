@@ -17,6 +17,9 @@ def test_load_config_defaults_when_file_missing(tmp_path: Path) -> None:
     assert config.registry_dir == Path("/var/lib/abssctl/registry")
     assert config.tls.enabled is True
     assert config.templates_dir == Path("/etc/abssctl/templates")
+    assert config.backups.root == Path("/srv/backups")
+    assert config.backups.index == Path("/srv/backups/backups.json")
+    assert config.backups.compression == "auto"
 
 
 def test_load_config_reads_yaml_file(tmp_path: Path) -> None:
@@ -28,6 +31,13 @@ def test_load_config_reads_yaml_file(tmp_path: Path) -> None:
         "  base: 6200\n"
         "tls:\n"
         "  enabled: false\n"
+        "backups:\n"
+        "  root: {root}\n"
+        "  compression:\n"
+        "    algorithm: gzip\n"
+    )
+    cfg.write_text(
+        cfg.read_text().format(root=str(tmp_path / "backups"))
     )
 
     config = load_config(config_file=cfg, env={})
@@ -36,6 +46,8 @@ def test_load_config_reads_yaml_file(tmp_path: Path) -> None:
     assert config.install_root == Path("/opt/actual")
     assert config.ports.base == 6200
     assert config.tls.enabled is False
+    assert config.backups.root == tmp_path / "backups"
+    assert config.backups.compression == "gzip"
 
 
 def test_env_overrides_take_precedence(tmp_path: Path) -> None:
@@ -47,6 +59,9 @@ def test_env_overrides_take_precedence(tmp_path: Path) -> None:
         "ABSSCTL_STATE_DIR": str(state_dir),
         "ABSSCTL_LOCK_TIMEOUT": "45",
         "ABSSCTL_TEMPLATES_DIR": str(tmp_path / "templates"),
+        "ABSSCTL_BACKUPS__ROOT": str(tmp_path / "bk"),
+        "ABSSCTL_BACKUPS__COMPRESSION__ALGORITHM": "none",
+        "ABSSCTL_BACKUPS__COMPRESSION__LEVEL": "5",
     }
 
     config = load_config(env=env)
@@ -57,6 +72,10 @@ def test_env_overrides_take_precedence(tmp_path: Path) -> None:
     assert config.registry_dir == state_dir / "registry"
     assert config.lock_timeout == 45.0
     assert config.templates_dir == tmp_path / "templates"
+    assert config.backups.root == tmp_path / "bk"
+    assert config.backups.index == (tmp_path / "bk" / "backups.json")
+    assert config.backups.compression == "none"
+    assert config.backups.compression_level == 5
 
 
 def test_env_can_select_config_file(tmp_path: Path) -> None:
@@ -111,4 +130,17 @@ def test_unknown_tls_nested_keys_raise(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ConfigError, match="Unknown TLS configuration keys"):
+        load_config(config_file=cfg, env={})
+
+
+def test_invalid_backup_compression_algorithm_raises(tmp_path: Path) -> None:
+    """Unsupported backup compression algorithms raise errors."""
+    cfg = tmp_path / "config.yml"
+    cfg.write_text(
+        "backups:\n"
+        "  compression:\n"
+        "    algorithm: invalid\n"
+    )
+
+    with pytest.raises(ConfigError, match="Unsupported backup compression"):
         load_config(config_file=cfg, env={})

@@ -1,9 +1,19 @@
 This file is used to help bootstrap AI help/chats to keep things consistent between chats and sessions please read this first and all files listed before starting. 
 
 All new chats I will start with the below text
-Start with "Hello AI partner, to get you up to speed and bootstrap this chat session please read the file ai-directives.txt this has all the info you need to get started.
+Start with: 
+Hello AI Dev Partner, can I call you AL? :-) you can call me Ken. to get you up to speed and bootstrap this chat session please 
+read the file ai-directives.txt this has all the info you need to get started.
 
 AI Directives for chats for this repo/project
+
+- Workflow should always be documentation centric. Documentation -> Code -> Write/Run CI Test (where we can) -> Debug -> Change in Code -> Add/Update Docs 
+- Project Documentation should be kept in sync with any major rework or progress. Try and keep docs in check.
+   - If docs located or type is not specified work with the developer to get that specified and into the correct specs documents 
+- Large messages may be asked via a file called ai-large-message.txt. 
+   - Be sure to only remove below the correct line once read.
+   - On session startup check this file as it may have longer message for session startup
+     - if file is blank (except for header) assume we have no longer message at startup 
 
 - Base project specs located at docs/requirements/abssctl-app-specs.txt
     - Any changes to scope will need to be approved and this document updated with an ADR attched
@@ -17,18 +27,50 @@ AI Directives for chats for this repo/project
         - the session wrap up. If not written write it out in the log
         - Current followup/TODO/Next Steps, if not written write it to log. Should be always up to date
     - When asked to "close the session:
-        - finish writing all non-written things done
+        - finish writing all non-written things down in log
         - change session from OPEN to CLOSED
         - Ensure Wrap up is complete
         - enure Next Steps/TODO list is completed
         - update/replace Next Session Primer
             - Next Session Primer - Is used to bootstrap the AI chat session. Should be what is next to be done, using the previous TODO in session log and roadmap.
+- Project Documentation should be kept in sync with any major rework or progress. Try and keep docs in check. 
+- Always confirm your next actions before changing files, once approved work can be done
 
+- Basic AI workflow loop
+   1. AI reads and understands current project status, opens or read existing session log
+   2. AI reads session log, and roadmap files recommends next 3 - 6 steps
+   3. User prompts AI:
+      3a. confirms next step or another issues or topic, proceed to step 4
+      3b. "wrap up session" or "session recap" - Wrap up the session. We may still proceed from here or close the session 
+      3c. "close the session" or "end this session" - AI to confirm this action then proceed to close the session
+   4. AI works and gives proposed solution, asking clarify questions where needed
+   5. User confirms the proposed idea or asks clarifying questions
+   6. if proposed solution confirmed
+      6a. AI works the solution on project files
+      6b. runs tests ruff/mypy/pytests to test changes, fixes issues found
+      6c. AI updates any docs that need updated due to the change to keep docs in sync. Runs build test on docs to confirm docs build
+      6c. AI presents summary of changes
+   7. User will confirm changes and run own tests.
+      7a. If errors or other issues found, user presents issues AI/user to repeat steps 4-7 until solved
+      7b. If no errors, user will commit changes
+   8. User informs AI that work looks good and changes have been committed
+   9. AI will then check the to ensure work was committed and if not let user know, we loop to step 2
+
+
+- Task State on Crash or Failure: AI, to help keep track of longer tasks for a request please use the ai-tasks.txt
+   - Keep an eye on your session model memory. If getting close let me know so we can start a new session
+   - This file is to help you and me abd you in case you crash or failure during multi file edits
+   - On a large task or multi task processes write to this file the goals and the steps to take to get there
+   - As things are done remove them from the file.
+   - This will work as a state list so if there is a crash we can recover
+   - this file should be empty (except the file header)
+   - If there is tasks in here assume there was a crash an try and recover
 
 Lets get started, once you have read and understand all the directives your first thing to do
 - Tell me you read and understand the documents, list them if would like
 - Read the Next Session Primer in the session-log.txt
     - If the last session is CLOSED read it and start a new session asking for the name of session
     - If the last session is OPEN read it and append to the session
-- Go over the next steps specified in the primer prompt.
+- Go over the next steps specified in the primer prompt unless there are things in the ai-task.log
+
 

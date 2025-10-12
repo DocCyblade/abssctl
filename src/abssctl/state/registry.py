@@ -98,6 +98,53 @@ class StateRegistry:
         """Persist version entries to ``versions.yml``."""
         self.write("versions.yml", {"versions": list(versions)})
 
+    # Version helpers -------------------------------------------------
+    def get_version(self, version: str) -> dict[str, Any] | None:
+        """Return the registry entry for *version* if present."""
+        normalized_version = version.strip()
+        if not normalized_version:
+            raise StateRegistryError("Version identifier must be a non-empty string.")
+
+        entries = _load_version_entries(self.read_versions())
+        for entry in entries:
+            if entry.get("version") == normalized_version:
+                return deepcopy(entry)
+        return None
+
+    def upsert_version(self, entry: Mapping[str, object]) -> None:
+        """Add or update a version registry entry."""
+        normalized_entry = _normalize_version_entry(entry)
+        versions = _load_version_entries(self.read_versions())
+        metadata_to_store: list[dict[str, Any]] = []
+        replaced = False
+
+        for existing in versions:
+            if existing.get("version") == normalized_entry["version"]:
+                merged = _merge_version_entries(existing, normalized_entry)
+                metadata_to_store.append(merged)
+                replaced = True
+            else:
+                metadata_to_store.append(existing)
+
+        if not replaced:
+            metadata_to_store.append(normalized_entry)
+
+        self.write_versions(metadata_to_store)
+
+    def remove_version(self, version: str) -> None:
+        """Remove *version* from the registry."""
+        normalized_version = version.strip()
+        if not normalized_version:
+            raise StateRegistryError("Version identifier must be a non-empty string.")
+
+        versions = _load_version_entries(self.read_versions())
+        filtered = [entry for entry in versions if entry.get("version") != normalized_version]
+
+        if len(filtered) == len(versions):
+            raise StateRegistryError(f"Version '{normalized_version}' not found in registry")
+
+        self.write_versions(filtered)
+
     # Instance helpers -------------------------------------------------
     def get_instance(self, name: str) -> dict[str, Any] | None:
         """Return the instance mapping for *name* if registered."""
@@ -144,6 +191,79 @@ class StateRegistry:
         if not removed:
             raise StateRegistryError(f"Instance '{name}' not found in registry")
         self.write_instances(instances)
+
+
+def _load_version_entries(raw: Mapping[str, object]) -> list[dict[str, Any]]:
+    """Return a normalised list of version entries from the registry mapping."""
+    entries: list[dict[str, Any]] = []
+    raw_entries = raw.get("versions", [])
+
+    if isinstance(raw_entries, list):
+        for item in raw_entries:
+            if isinstance(item, Mapping):
+                entries.append(_normalize_version_entry(item))
+            elif isinstance(item, str):
+                entries.append({"version": item.strip()})
+            else:
+                entries.append({"version": str(item)})
+    return entries
+
+
+def _normalize_version_entry(entry: Mapping[str, object]) -> dict[str, Any]:
+    """Validate and normalise a version registry entry."""
+    if not isinstance(entry, Mapping):
+        raise StateRegistryError("Version entry must be a mapping.")
+
+    version_raw = entry.get("version")
+    version = str(version_raw).strip() if version_raw is not None else ""
+    if not version:
+        raise StateRegistryError("Version entry missing 'version'.")
+
+    normalized: dict[str, Any] = {"version": version}
+
+    if "path" in entry and entry["path"] is not None:
+        normalized["path"] = str(entry["path"])
+
+    if "installed_at" in entry and entry["installed_at"] is not None:
+        normalized["installed_at"] = str(entry["installed_at"])
+
+    if "source" in entry and entry["source"] is not None:
+        normalized["source"] = str(entry["source"])
+
+    if "metadata" in entry and entry["metadata"] is not None:
+        metadata = entry["metadata"]
+        if not isinstance(metadata, Mapping):
+            raise StateRegistryError("Version entry 'metadata' must be a mapping.")
+        normalized["metadata"] = dict(metadata)
+
+    if "integrity" in entry and entry["integrity"] is not None:
+        integrity = entry["integrity"]
+        if not isinstance(integrity, Mapping):
+            raise StateRegistryError("Version entry 'integrity' must be a mapping.")
+        normalized["integrity"] = dict(integrity)
+
+    if "notes" in entry and entry["notes"] is not None:
+        normalized["notes"] = str(entry["notes"])
+
+    return normalized
+
+
+def _merge_version_entries(
+    existing: Mapping[str, Any],
+    new: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Merge two version entries, preferring values from *new*."""
+    merged: dict[str, Any] = dict(existing)
+    for key, value in new.items():
+        if key in {"metadata", "integrity"} and key in merged:
+            if isinstance(merged[key], Mapping):
+                combined = dict(merged[key])
+                if isinstance(value, Mapping):
+                    combined.update(dict(value))
+                    merged[key] = combined
+                    continue
+        merged[key] = value
+    return merged
 
 
 __all__ = ["StateRegistry", "StateRegistryError"]

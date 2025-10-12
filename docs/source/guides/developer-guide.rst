@@ -8,6 +8,8 @@ Repository Standards
 --------------------
 
 - Follow the architecture decisions recorded in ``docs/adrs``.
+- Adhere to the branching and release workflow defined in
+  ``docs/adrs/ADR-034-repo-management-and-branching.md``.
 - Use type hints and keep ``mypy`` clean under the ``strict`` settings defined
   in ``pyproject.toml``.
 - Write tests alongside features; prefer ``pytest`` parametrisation to cover
@@ -18,7 +20,9 @@ Repository Standards
 Coding Workflow
 ---------------
 
-1. Fork the repository or create a feature branch from ``dev``.
+1. Fork the repository or create a feature branch from the active milestone
+   integration branch (currently ``dev-alpha4``; check ``session-log.txt`` for
+   the latest session information).
 2. Create a Python 3.11 virtual environment stored in ``.venv`` with a prompt label ``dev`` and activate it::
 
       python3.11 -m venv .venv --prompt dev
@@ -35,7 +39,12 @@ Coding Workflow
       pytest
       sphinx-build -b html docs/source docs/_build/html
 
-6. Open a pull request targeting ``dev`` and request review.
+   The ``Makefile`` provides the same routines: ``make quick-tests`` wraps the
+   Ruff/mypy/pytest trio, ``make docs`` rebuilds Sphinx HTML, and ``make dist``
+   executes the full lint/type/test/build pipeline used in CI.
+
+6. Open a pull request targeting the same milestone branch you started from
+   (``dev-alpha4`` at the moment) and request review.
 
 Testing Registry Data
 ---------------------
@@ -53,7 +62,7 @@ Testing Registry Data
 Open Questions
 --------------
 
-- Release engineering automation will be defined once the PyPI project name is
-  secured.
+- Repository management and long-lived branching conventions are being drafted
+  as an ADR to complement the new trusted-publishing workflows.
 - Integration test strategy on TurnKey Linux appliances is captured in
   ``docs/adrs/ADR-030-ci-integration-tests.md``.

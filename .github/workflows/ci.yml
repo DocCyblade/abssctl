@@ -2,10 +2,10 @@ name: CI Test Suite
 
 on:
   push:
-    branches: [main, dev, "dev-*"]
+    branches: [main, dev]
 
   pull_request:
-    branches: [main, dev, "dev-*"]
+    branches: [main, dev]
 
 permissions:
   contents: read

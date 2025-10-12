@@ -23,11 +23,12 @@ Project Pillars
 Next Steps
 ==========
 
-The Pre-Alpha milestone focuses solely on repository infrastructure. Alpha
-builds will deliver functional commands for version management, instance
-provisioning, and state inspection.
+Alpha foundations now include ``abssctl config show``, read-only registry
+commands (``version list``/``instance list``/``instance show``),
+structured logging with JSONL operations, lock management, and templated
+systemd/nginx provider scaffolds. The near-term focus is on:
 
-Alpha now includes ``abssctl config show`` plus read-only registry commands:
-``version list`` (with optional ``--remote`` npm lookup) and
-``instance list``/``instance show`` for inspecting registry metadata while the
-mutating workflows are built out.
+- Finalising the provider implementation plan for systemd and nginx ahead of Beta.
+- Bringing version lifecycle commands (install/switch/uninstall) online.
+- Expanding automated tests that exercise mutating command flows and provider
+  interactions.

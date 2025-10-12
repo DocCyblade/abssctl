@@ -5,6 +5,7 @@ on:
   push:
     tags:
       - "docs-v*"
+      - "v*.*.*"
 
 permissions:
   contents: read
@@ -47,7 +48,7 @@ jobs:
             echo "Docs workflow triggered for unexpected tag: ${TAG}"
             exit 1
           fi
-          python3 buildtools/validate_tag_version.py --kind docs --tag "${TAG}"
+          python3 tools/validate_tag_version.py --kind docs --tag "${TAG}"
 
       - name: Install doc dependencies
         run: |
