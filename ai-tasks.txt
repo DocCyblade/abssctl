@@ -3,5 +3,3 @@
 #   file and try to recover where it was in the long task.
 #
 # - AI do not edit above this line! Keep this header!
-
-- No active multi-step tasks.

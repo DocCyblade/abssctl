@@ -21,7 +21,7 @@ Coding Workflow
 ---------------
 
 1. Fork the repository or create a feature branch from the active milestone
-   integration branch (currently ``dev-alpha4``; check ``session-log.txt`` for
+   integration branch (currently ``dev-alpha5``; check ``session-log.txt`` for
    the latest session information).
 2. Create a Python 3.11 virtual environment stored in ``.venv`` with a prompt label ``dev`` and activate it::
 
@@ -44,7 +44,7 @@ Coding Workflow
    executes the full lint/type/test/build pipeline used in CI.
 
 6. Open a pull request targeting the same milestone branch you started from
-   (``dev-alpha4`` at the moment) and request review.
+   (``dev-alpha5`` at the moment) and request review.
 
 Testing Registry Data
 ---------------------
@@ -62,7 +62,6 @@ Testing Registry Data
 Open Questions
 --------------
 
-- Repository management and long-lived branching conventions are being drafted
-  as an ADR to complement the new trusted-publishing workflows.
 - Integration test strategy on TurnKey Linux appliances is captured in
-  ``docs/adrs/ADR-030-ci-integration-tests.md``.
+  ``docs/adrs/ADR-030-ci-integration-tests.md`` and will be revisited ahead of
+  the Release Candidate milestone.

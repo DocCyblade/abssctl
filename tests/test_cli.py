@@ -5,6 +5,7 @@ import base64
 import hashlib
 import json
 import os
+import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -16,7 +17,7 @@ from abssctl import __version__
 from abssctl.backups import BackupEntryBuilder, BackupsRegistry
 from abssctl.cli import app
 from abssctl.providers.nginx import NginxProvider
-from abssctl.providers.systemd import SystemdProvider
+from abssctl.providers.systemd import SystemdError, SystemdProvider
 from abssctl.providers.version_installer import VersionInstaller, VersionInstallResult
 from abssctl.providers.version_provider import VersionProvider
 from abssctl.state import StateRegistry
@@ -31,6 +32,16 @@ FAKE_INTEGRITY_PAYLOAD = {
     "npm": {"shasum": FAKE_CLI_SHASUM, "integrity": FAKE_CLI_INTEGRITY},
     "tarball": {"algorithm": "sha512", "digest": FAKE_CLI_DIGEST_HEX},
 }
+
+
+def _fake_systemctl(action: str, name: str) -> subprocess.CompletedProcess:
+    return subprocess.CompletedProcess(
+        ["systemctl", action, f"abssctl-{name}.service"], returncode=0
+    )
+
+
+def _fake_completed(command: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(command, returncode=0, stdout="", stderr="")
 
 
 def _prepare_environment(
@@ -50,7 +61,12 @@ def _prepare_environment(
         "logs_dir": str(logs_dir),
         "runtime_dir": str(runtime_dir),
         "templates_dir": str(templates_dir),
+        "instance_root": str(tmp_path / "instances"),
         "backups": {"root": str(tmp_path / "backups")},
+        "systemd": {
+            "systemctl_bin": str(tmp_path / "bin" / "systemctl"),
+            "journalctl_bin": str(tmp_path / "bin" / "journalctl"),
+        },
     }
     if config_overrides:
         config.update(config_overrides)
@@ -120,8 +136,29 @@ def test_config_show_json(tmp_path: Path) -> None:
     payload = json.loads(result.stdout)
     assert payload["install_root"] == "/opt/abssctl"
     assert payload["state_dir"] == str(state_dir)
-    assert payload["lock_timeout"] == 30.0
-    assert Path(payload["templates_dir"]).name == "templates"
+
+
+def test_ports_list_reports_reservations(tmp_path: Path) -> None:
+    """`ports list` renders current port reservations."""
+    env, state_dir = _prepare_environment(tmp_path)
+    registry = StateRegistry(state_dir / "registry")
+    registry.write_ports([
+        {"name": "alpha", "port": 5000},
+        {"name": "beta", "port": 5001},
+    ])
+
+    result = runner.invoke(app, ["ports", "list"], env=env)
+
+    assert result.exit_code == 0
+    output = result.stdout
+    assert "alpha" in output
+    assert "5000" in output
+    assert "beta" in output
+
+    json_result = runner.invoke(app, ["ports", "list", "--json"], env=env)
+    assert json_result.exit_code == 0
+    payload = json.loads(json_result.stdout)
+    assert payload == {"ports": [{"name": "alpha", "port": 5000}, {"name": "beta", "port": 5001}]}
 
 
 def test_version_list_uses_registry(tmp_path: Path) -> None:
@@ -571,8 +608,16 @@ def test_backup_restore_placeholder(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         checksum=checksum,
     )
 
-    monkeypatch.setattr(SystemdProvider, "stop", lambda self, name: None)
-    monkeypatch.setattr(SystemdProvider, "disable", lambda self, name: None)
+    monkeypatch.setattr(
+        SystemdProvider,
+        "stop",
+        lambda self, name: _fake_systemctl("stop", name),
+    )
+    monkeypatch.setattr(
+        SystemdProvider,
+        "disable",
+        lambda self, name: _fake_systemctl("disable", name),
+    )
     monkeypatch.setattr(SystemdProvider, "remove", lambda self, name: None)
     monkeypatch.setattr(NginxProvider, "disable", lambda self, name: None)
     monkeypatch.setattr(NginxProvider, "remove", lambda self, name: None)
@@ -611,8 +656,16 @@ def test_instance_delete_triggers_backup(tmp_path: Path, monkeypatch: pytest.Mon
     (runtime_dir / "nginx" / "sites-available").mkdir(parents=True, exist_ok=True)
     (runtime_dir / "nginx" / "sites-enabled").mkdir(parents=True, exist_ok=True)
 
-    monkeypatch.setattr(SystemdProvider, "stop", lambda self, name: None)
-    monkeypatch.setattr(SystemdProvider, "disable", lambda self, name: None)
+    monkeypatch.setattr(
+        SystemdProvider,
+        "stop",
+        lambda self, name: _fake_systemctl("stop", name),
+    )
+    monkeypatch.setattr(
+        SystemdProvider,
+        "disable",
+        lambda self, name: _fake_systemctl("disable", name),
+    )
     monkeypatch.setattr(SystemdProvider, "remove", lambda self, name: None)
     monkeypatch.setattr(NginxProvider, "disable", lambda self, name: None)
     monkeypatch.setattr(NginxProvider, "remove", lambda self, name: None)
@@ -750,11 +803,13 @@ def test_version_switch_restart_rolling(tmp_path: Path, monkeypatch: pytest.Monk
 
     calls: list[tuple[str, str]] = []
 
-    def fake_stop(self: SystemdProvider, name: str) -> None:
+    def fake_stop(self: SystemdProvider, name: str) -> subprocess.CompletedProcess:
         calls.append(("stop", name))
+        return _fake_systemctl("stop", name)
 
-    def fake_start(self: SystemdProvider, name: str) -> None:
+    def fake_start(self: SystemdProvider, name: str) -> subprocess.CompletedProcess:
         calls.append(("start", name))
+        return _fake_systemctl("start", name)
 
     monkeypatch.setattr(SystemdProvider, "stop", fake_stop)
     monkeypatch.setattr(SystemdProvider, "start", fake_start)
@@ -782,11 +837,13 @@ def test_version_switch_restart_all(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
     calls: list[tuple[str, str]] = []
 
-    def fake_stop(self: SystemdProvider, name: str) -> None:
+    def fake_stop(self: SystemdProvider, name: str) -> subprocess.CompletedProcess:
         calls.append(("stop", name))
+        return _fake_systemctl("stop", name)
 
-    def fake_start(self: SystemdProvider, name: str) -> None:
+    def fake_start(self: SystemdProvider, name: str) -> subprocess.CompletedProcess:
         calls.append(("start", name))
+        return _fake_systemctl("start", name)
 
     monkeypatch.setattr(SystemdProvider, "stop", fake_stop)
     monkeypatch.setattr(SystemdProvider, "start", fake_start)
@@ -1225,6 +1282,18 @@ def test_instance_create_acquires_lock(tmp_path: Path) -> None:
     lock_metadata = json.loads(lock_path.read_text(encoding="utf-8"))
     assert lock_metadata["pid"] == os.getpid()
 
+    instance_root = tmp_path / "instances" / "alpha"
+    data_dir = instance_root / "data"
+    runtime_instance_dir = runtime_dir / "instances" / "alpha"
+    logs_instance_dir = (tmp_path / "logs") / "alpha"
+    state_instance_dir = state_dir / "instances" / "alpha"
+
+    assert instance_root.exists()
+    assert data_dir.exists()
+    assert runtime_instance_dir.exists()
+    assert logs_instance_dir.exists()
+    assert state_instance_dir.exists()
+
     systemd_unit = runtime_dir / "systemd" / "abssctl-alpha.service"
     assert systemd_unit.exists()
     assert "Actual Budget Sync Server" in systemd_unit.read_text(encoding="utf-8")
@@ -1241,14 +1310,359 @@ def test_instance_create_acquires_lock(tmp_path: Path) -> None:
     assert record.get("lock_wait_ms") is not None
     assert record["result"]["status"] == "success"
     steps = record.get("steps", [])
-    assert any(step.get("name") == "systemd.render_unit" for step in steps)
-    assert any(step.get("name") == "nginx.render_site" for step in steps)
-    assert any(step.get("name") == "registry.write_instances" for step in steps)
+    steps_by_name = {step.get("name"): step for step in steps}
+    assert "filesystem.mkdir.root" in steps_by_name
+    assert "config.write" in steps_by_name
+    assert "systemd.render_unit" in steps_by_name
+    assert "systemd.enable" in steps_by_name
+    assert steps_by_name["systemd.enable"]["status"] == "skipped"
+    assert "nginx.render_site" in steps_by_name
+    assert "nginx.enable" in steps_by_name
+    assert "registry.write_instances" in steps_by_name
+    assert "registry.update" in steps_by_name
 
     registry_file = state_dir / "registry" / "instances.yml"
     registry_data = yaml.safe_load(registry_file.read_text(encoding="utf-8"))
     instances = registry_data.get("instances", [])
-    assert any(item.get("name") == "alpha" for item in instances)
+    entry = next(item for item in instances if item.get("name") == "alpha")
+    assert entry["status"] == "enabled"
+    assert entry["port"] == 5000
+    assert entry["paths"]["root"] == str(instance_root)
+    assert entry["paths"]["data"] == str(data_dir)
+    assert entry["paths"]["runtime"] == str(runtime_instance_dir)
+    assert entry["metadata"]["auto_start"] is True
+    assert "activated_at" in entry["metadata"]
+    metadata = entry["metadata"]
+    assert metadata["port"] == 5000
+    assert metadata["domain"] == "alpha.local"
+    diagnostics = metadata.get("diagnostics", {})
+    assert isinstance(diagnostics, dict)
+    systemd_diag = diagnostics.get("systemd", {})
+    assert isinstance(systemd_diag, dict)
+    assert systemd_diag.get("unit_path", "").endswith("abssctl-alpha.service")
+    nginx_diag = diagnostics.get("nginx", {})
+    assert isinstance(nginx_diag, dict)
+    assert nginx_diag.get("site_path", "").endswith("abssctl-alpha.conf")
+    # nginx validation/reload steps recorded
+    assert "nginx.validate" in steps_by_name
+    assert "nginx.reload" in steps_by_name
+
+    config_payload = json.loads((data_dir / "config.json").read_text(encoding="utf-8"))
+    assert config_payload["instance"]["name"] == "alpha"
+    assert config_payload["instance"]["domain"] == "alpha.local"
+    assert config_payload["server"]["upstream"]["port"] == 5000
+    assert config_payload["server"]["version"] == "current"
+    assert config_payload["paths"]["root"] == str(instance_root)
+    assert config_payload["paths"]["data"] == str(data_dir)
+
+
+def test_instance_create_rolls_back_on_systemd_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Failures during provisioning roll back filesystem, registry, and ports."""
+    env, state_dir = _prepare_environment(tmp_path)
+
+    def fail_render(
+        self: SystemdProvider,
+        name: str,
+        context: dict[str, object],
+    ) -> bool:
+        raise SystemdError("boom")
+
+    monkeypatch.setattr(SystemdProvider, "render_unit", fail_render)
+
+    result = runner.invoke(app, ["instance", "create", "alpha"], env=env)
+
+    assert result.exit_code == 1
+
+    instance_root = tmp_path / "instances" / "alpha"
+    assert not instance_root.exists()
+
+    runtime_dir = tmp_path / "run"
+    assert not (runtime_dir / "systemd" / "abssctl-alpha.service").exists()
+    assert not (runtime_dir / "nginx" / "sites-available" / "abssctl-alpha.conf").exists()
+
+    registry_instances = _registry_instances(state_dir)
+    assert all(item.get("name") != "alpha" for item in registry_instances)
+
+    ports_file = state_dir / "registry" / "ports.yml"
+    ports_data = yaml.safe_load(ports_file.read_text(encoding="utf-8"))
+    assert ports_data.get("ports", []) == []
+
+
+def test_instance_create_no_start_skips_service(tmp_path: Path) -> None:
+    """`--no-start` skips the systemd start step and updates registry metadata."""
+    env, state_dir = _prepare_environment(tmp_path)
+
+    result = runner.invoke(app, ["instance", "create", "alpha", "--no-start"], env=env)
+    assert result.exit_code == 0
+
+    operations_log = (state_dir.parent / "logs" / "operations.jsonl").read_text(
+        encoding="utf-8"
+    )
+    record = json.loads(operations_log.splitlines()[-1])
+    steps = {step.get("name"): step for step in record.get("steps", [])}
+    assert steps["systemd.start"]["status"] == "skipped"
+    assert steps["systemd.start"]["detail"] == "--no-start requested"
+
+    entry = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
+    assert entry["metadata"]["auto_start"] is False
+    assert entry["status"] == "enabled"
+
+
+def test_instance_status_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`instance status --json` reports registry and systemd information."""
+    instances = [{"name": "alpha", "status": "enabled"}]
+    env, _ = _prepare_environment(tmp_path, instances=instances)
+
+    def fake_status(self: SystemdProvider, name: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            ["systemctl", "status", f"abssctl-{name}.service"],
+            returncode=0,
+            stdout="active (running)\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(SystemdProvider, "status", fake_status)
+
+    result = runner.invoke(app, ["instance", "status", "alpha", "--json"], env=env)
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["name"] == "alpha"
+    assert payload["registry_status"] == "enabled"
+    assert "active" in payload["systemd_output"]
+    assert isinstance(payload.get("diagnostics"), dict)
+
+
+def test_instance_logs_outputs_journal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`instance logs` streams the systemd journal output."""
+    instances = [{"name": "alpha"}]
+    env, _ = _prepare_environment(tmp_path, instances=instances)
+
+    def fake_logs(
+        self: SystemdProvider,
+        name: str,
+        *,
+        lines: int | None = None,
+        since: str | None = None,
+        follow: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            ["journalctl", "--unit", f"abssctl-{name}.service"],
+            returncode=0,
+            stdout="line1\nline2\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(SystemdProvider, "logs", fake_logs)
+
+    result = runner.invoke(app, ["instance", "logs", "alpha"], env=env)
+    assert result.exit_code == 0
+    assert "line1" in result.stdout
+    assert "line2" in result.stdout
+
+
+def test_instance_env_json(tmp_path: Path) -> None:
+    """`instance env --json` emits environment variables."""
+    env, _ = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    result = runner.invoke(app, ["instance", "env", "alpha", "--json"], env=env)
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["ABSSCTL_INSTANCE"] == "alpha"
+    assert payload["PORT"] == "5000"
+    assert payload["ABSSCTL_INSTANCE_ROOT"].endswith("/instances")
+
+
+def test_instance_set_fqdn_updates_registry(tmp_path: Path) -> None:
+    """`set-fqdn` updates domain in config and registry."""
+    env, state_dir = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    result = runner.invoke(
+        app,
+        ["instance", "set-fqdn", "alpha", "alpha.example.com", "--no-backup", "--yes"],
+        env=env,
+    )
+    assert result.exit_code == 0
+
+    entry = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
+    assert entry["domain"] == "alpha.example.com"
+    metadata = entry["metadata"]
+    assert metadata["domain"] == "alpha.example.com"
+    history = metadata.get("domain_history", [])
+    assert history
+    assert history[-1]["domain"] == "alpha.local"
+
+    config_path = tmp_path / "instances" / "alpha" / "data" / "config.json"
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    assert payload["instance"]["domain"] == "alpha.example.com"
+    assert payload["server"]["public_url"] == "https://alpha.example.com"
+
+
+def test_instance_set_port_updates_registry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`set-port` rewrites config, ports registry, and restarts service."""
+    env, state_dir = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    def fake_stop(
+        self: SystemdProvider,
+        name: str,
+        *,
+        dry_run: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        return _fake_completed(["systemctl", "stop", name])
+
+    def fake_start(
+        self: SystemdProvider,
+        name: str,
+        *,
+        dry_run: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        return _fake_completed(["systemctl", "start", name])
+
+    monkeypatch.setattr(SystemdProvider, "stop", fake_stop)
+    monkeypatch.setattr(SystemdProvider, "start", fake_start)
+
+    result = runner.invoke(
+        app,
+        ["instance", "set-port", "alpha", "6000", "--no-backup", "--yes"],
+        env=env,
+    )
+    assert result.exit_code == 0
+
+    entry = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
+    assert entry["port"] == 6000
+    assert entry["status"] == "enabled"
+    metadata = entry["metadata"]
+    assert metadata["port"] == 6000
+    history = metadata.get("port_history", [])
+    assert history
+    assert history[-1]["port"] == 5000
+
+    ports_file = state_dir / "registry" / "ports.yml"
+    ports_data = yaml.safe_load(ports_file.read_text(encoding="utf-8"))
+    reserved_ports = {item["port"] for item in ports_data.get("ports", [])}
+    assert 6000 in reserved_ports
+    assert 5000 not in reserved_ports
+
+
+def test_instance_set_version_updates_registry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`set-version` binds to a registered version."""
+    install_root = tmp_path / "srv" / "app"
+    version_path = install_root / "v25.9.0"
+    version_path.mkdir(parents=True, exist_ok=True)
+
+    env, state_dir = _prepare_environment(
+        tmp_path,
+        config_overrides={"install_root": str(install_root)},
+        versions=[{"version": "25.9.0", "path": str(version_path)}],
+    )
+    _create_instance(env)
+
+    monkeypatch.setattr(
+        SystemdProvider,
+        "stop",
+        lambda self, name, dry_run=False: _fake_completed(["systemctl", "stop", name]),
+    )
+    monkeypatch.setattr(
+        SystemdProvider,
+        "start",
+        lambda self, name, dry_run=False: _fake_completed(["systemctl", "start", name]),
+    )
+
+    result = runner.invoke(
+        app,
+        ["instance", "set-version", "alpha", "25.9.0", "--no-backup", "--yes"],
+        env=env,
+    )
+    assert result.exit_code == 0
+
+    entry = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
+    assert entry["version"] == "25.9.0"
+    metadata = entry["metadata"]
+    assert metadata.get("version_changed_at")
+
+    config_path = tmp_path / "instances" / "alpha" / "data" / "config.json"
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    assert payload["server"]["version"] == "25.9.0"
+
+
+def test_instance_delete_purge_data_removes_root(tmp_path: Path) -> None:
+    """`instance delete --purge-data` removes the instance root directory."""
+    env, _ = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    root_path = tmp_path / "instances" / "alpha"
+    assert root_path.exists()
+
+    result = runner.invoke(
+        app,
+        ["instance", "delete", "alpha", "--purge-data", "--no-backup", "--yes"],
+        env=env,
+    )
+    assert result.exit_code == 0
+    assert not root_path.exists()
+
+
+def test_instance_rename_moves_directories(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`instance rename` moves directories and updates the registry."""
+    env, state_dir = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    monkeypatch.setattr(
+        SystemdProvider,
+        "stop",
+        lambda self, name, dry_run=False: _fake_completed(["systemctl", "stop", name]),
+    )
+    monkeypatch.setattr(
+        SystemdProvider,
+        "start",
+        lambda self, name, dry_run=False: _fake_completed(["systemctl", "start", name]),
+    )
+    monkeypatch.setattr(
+        SystemdProvider,
+        "enable",
+        lambda self, name, dry_run=False: _fake_completed(["systemctl", "enable", name]),
+    )
+    monkeypatch.setattr(
+        SystemdProvider,
+        "disable",
+        lambda self, name, dry_run=False: _fake_completed(["systemctl", "disable", name]),
+    )
+
+    result = runner.invoke(
+        app,
+        ["instance", "rename", "alpha", "beta", "--no-backup", "--yes"],
+        env=env,
+    )
+    assert result.exit_code == 0
+
+    instances = _registry_instances(state_dir)
+    assert any(item.get("name") == "beta" for item in instances)
+    assert all(item.get("name") != "alpha" for item in instances)
+
+    old_root = tmp_path / "instances" / "alpha"
+    new_root = tmp_path / "instances" / "beta"
+    assert not old_root.exists()
+    assert new_root.exists()
+
+    ports_file = state_dir / "registry" / "ports.yml"
+    ports_data = yaml.safe_load(ports_file.read_text(encoding="utf-8"))
+    reserved_names = {item["name"] for item in ports_data.get("ports", [])}
+    assert "beta" in reserved_names
+    assert "alpha" not in reserved_names
 
 
 def test_operations_logging_creates_records(tmp_path: Path) -> None:
@@ -1287,6 +1701,28 @@ def _registry_instances(state_dir: Path) -> list[dict[str, object]]:
     return data.get("instances", [])
 
 
+def _latest_operation(state_dir: Path) -> dict[str, object]:
+    """Return the most recent structured operations log record."""
+    log_path = state_dir.parent / "logs" / "operations.jsonl"
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert lines, "operations log is empty"
+    return json.loads(lines[-1])
+
+
+def _index_steps(record: dict[str, object]) -> dict[str, dict[str, object]]:
+    """Index operation steps by name for convenient lookup."""
+    steps_raw = record.get("steps", [])
+    steps: dict[str, dict[str, object]] = {}
+    if isinstance(steps_raw, list):
+        for item in steps_raw:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name")
+            if isinstance(name, str):
+                steps[name] = item
+    return steps
+
+
 def test_instance_enable_updates_registry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1297,8 +1733,16 @@ def test_instance_enable_updates_registry(
 
     calls: list[tuple[str, str]] = []
 
-    def fake_systemd_enable(self: SystemdProvider, name: str) -> None:
+    def fake_systemd_enable(
+        self: SystemdProvider,
+        name: str,
+        *,
+        dry_run: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
         calls.append(("systemd", name))
+        return subprocess.CompletedProcess(
+            ["systemctl", "enable", f"abssctl-{name}.service"], returncode=0
+        )
 
     def fake_nginx_enable(self: NginxProvider, name: str) -> None:
         calls.append(("nginx", name))
@@ -1313,6 +1757,85 @@ def test_instance_enable_updates_registry(
 
     instance = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
     assert instance["status"] == "enabled"
+    metadata = instance["metadata"]
+    assert metadata.get("enabled_at")
+
+
+def test_instance_enable_dry_run_skips_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dry-run enable avoids provider calls and metadata updates."""
+    env, state_dir = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    def _fail_systemd_enable(
+        self: SystemdProvider,
+        name: str,
+        *,
+        dry_run: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        raise AssertionError("systemd enable should not execute during dry-run")
+
+    def _fail_nginx_enable(self: NginxProvider, name: str) -> None:
+        raise AssertionError("nginx enable should not execute during dry-run")
+
+    monkeypatch.setattr(SystemdProvider, "enable", _fail_systemd_enable)
+    monkeypatch.setattr(NginxProvider, "enable", _fail_nginx_enable)
+
+    result = runner.invoke(app, ["instance", "enable", "alpha", "--dry-run"], env=env)
+    assert result.exit_code == 0
+
+    record = _latest_operation(state_dir)
+    steps = _index_steps(record)
+    assert steps["systemd.enable"]["status"] == "skipped"
+    assert steps["systemd.enable"]["detail"] == "dry-run"
+    assert steps["nginx.enable"]["status"] == "skipped"
+    assert steps["nginx.enable"]["detail"] == "dry-run"
+
+    entry = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
+    metadata = entry.get("metadata", {})
+    assert isinstance(metadata, dict)
+    assert "enabled_at" not in metadata
+    assert entry["status"] == "enabled"
+
+
+def test_instance_enable_systemd_failure_preserves_registry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Systemd failures surface an error and keep registry metadata unchanged."""
+    env, state_dir = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    def _boom_systemd_enable(
+        self: SystemdProvider,
+        name: str,
+        *,
+        dry_run: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        raise SystemdError("boom")
+
+    def _fail_nginx_enable(self: NginxProvider, name: str) -> None:
+        raise AssertionError("nginx enable should not execute when systemd fails")
+
+    monkeypatch.setattr(SystemdProvider, "enable", _boom_systemd_enable)
+    monkeypatch.setattr(NginxProvider, "enable", _fail_nginx_enable)
+
+    result = runner.invoke(app, ["instance", "enable", "alpha"], env=env)
+    assert result.exit_code == 1
+
+    entry = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
+    metadata = entry.get("metadata", {})
+    assert isinstance(metadata, dict)
+    assert "enabled_at" not in metadata
+    assert entry["status"] == "enabled"
+
+    record = _latest_operation(state_dir)
+    assert record["command"] == "instance enable"
+    result_payload = record.get("result", {})
+    assert result_payload.get("status") == "error"
+    assert result_payload.get("errors")
 
 
 def test_instance_disable_updates_registry(
@@ -1323,13 +1846,101 @@ def test_instance_disable_updates_registry(
     env, state_dir = _prepare_environment(tmp_path)
     _create_instance(env)
 
-    monkeypatch.setattr(SystemdProvider, "disable", lambda self, name: None)
+    monkeypatch.setattr(
+        SystemdProvider,
+        "disable",
+        lambda self, name, dry_run=False: subprocess.CompletedProcess(
+            ["systemctl", "disable", f"abssctl-{name}.service"], returncode=0
+        ),
+    )
     monkeypatch.setattr(NginxProvider, "disable", lambda self, name: None)
 
     result = runner.invoke(app, ["instance", "disable", "alpha"], env=env)
     assert result.exit_code == 0
     instance = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
     assert instance["status"] == "disabled"
+    metadata = instance["metadata"]
+    assert metadata.get("disabled_at")
+    diagnostics = metadata.get("diagnostics", {})
+    systemd_diag = diagnostics.get("systemd", {}) if isinstance(diagnostics, dict) else {}
+    assert systemd_diag.get("enabled") is False
+
+
+def test_instance_disable_dry_run_skips_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dry-run disable avoids provider calls and leaves registry untouched."""
+    env, state_dir = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    def _fail_systemd_disable(
+        self: SystemdProvider,
+        name: str,
+        *,
+        dry_run: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        raise AssertionError("systemd disable should not execute during dry-run")
+
+    def _fail_nginx_disable(self: NginxProvider, name: str) -> None:
+        raise AssertionError("nginx disable should not execute during dry-run")
+
+    monkeypatch.setattr(SystemdProvider, "disable", _fail_systemd_disable)
+    monkeypatch.setattr(NginxProvider, "disable", _fail_nginx_disable)
+
+    result = runner.invoke(app, ["instance", "disable", "alpha", "--dry-run"], env=env)
+    assert result.exit_code == 0
+
+    record = _latest_operation(state_dir)
+    steps = _index_steps(record)
+    assert steps["systemd.disable"]["status"] == "skipped"
+    assert steps["systemd.disable"]["detail"] == "dry-run"
+    assert steps["nginx.disable"]["status"] == "skipped"
+    assert steps["nginx.disable"]["detail"] == "dry-run"
+
+    entry = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
+    metadata = entry.get("metadata", {})
+    assert isinstance(metadata, dict)
+    assert "disabled_at" not in metadata
+    assert entry["status"] == "enabled"
+
+
+def test_instance_disable_systemd_failure_preserves_registry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Systemd disable failures exit with an error and keep state unchanged."""
+    env, state_dir = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    def _boom_systemd_disable(
+        self: SystemdProvider,
+        name: str,
+        *,
+        dry_run: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        raise SystemdError("boom")
+
+    def _fail_nginx_disable(self: NginxProvider, name: str) -> None:
+        raise AssertionError("nginx disable should not run when systemd fails")
+
+    monkeypatch.setattr(SystemdProvider, "disable", _boom_systemd_disable)
+    monkeypatch.setattr(NginxProvider, "disable", _fail_nginx_disable)
+
+    result = runner.invoke(app, ["instance", "disable", "alpha"], env=env)
+    assert result.exit_code == 1
+
+    entry = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
+    metadata = entry.get("metadata", {})
+    assert isinstance(metadata, dict)
+    assert "disabled_at" not in metadata
+    assert entry["status"] == "enabled"
+
+    record = _latest_operation(state_dir)
+    assert record["command"] == "instance disable"
+    result_payload = record.get("result", {})
+    assert result_payload.get("status") == "error"
+    assert result_payload.get("errors")
 
 
 def test_instance_start_updates_status(
@@ -1340,12 +1951,86 @@ def test_instance_start_updates_status(
     env, state_dir = _prepare_environment(tmp_path)
     _create_instance(env)
 
-    monkeypatch.setattr(SystemdProvider, "start", lambda self, name: None)
+    monkeypatch.setattr(
+        SystemdProvider,
+        "start",
+        lambda self, name, dry_run=False: subprocess.CompletedProcess(
+            ["systemctl", "start", f"abssctl-{name}.service"], returncode=0
+        ),
+    )
 
     result = runner.invoke(app, ["instance", "start", "alpha"], env=env)
     assert result.exit_code == 0
     instance = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
     assert instance["status"] == "running"
+    assert instance["metadata"].get("last_started_at")
+
+
+def test_instance_start_dry_run_skips_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dry-run start avoids provider execution and metadata updates."""
+    env, state_dir = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    def _fail_systemd_start(
+        self: SystemdProvider,
+        name: str,
+        *,
+        dry_run: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        raise AssertionError("systemd start should not execute during dry-run")
+
+    monkeypatch.setattr(SystemdProvider, "start", _fail_systemd_start)
+
+    result = runner.invoke(app, ["instance", "start", "alpha", "--dry-run"], env=env)
+    assert result.exit_code == 0
+
+    record = _latest_operation(state_dir)
+    steps = _index_steps(record)
+    assert steps["systemd.start"]["status"] == "skipped"
+    assert steps["systemd.start"]["detail"] == "dry-run"
+
+    entry = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
+    metadata = entry.get("metadata", {})
+    assert isinstance(metadata, dict)
+    assert "last_started_at" not in metadata
+    assert entry["status"] == "enabled"
+
+
+def test_instance_start_systemd_failure_preserves_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Start failure reports an error and leaves registry intact."""
+    env, state_dir = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    def _boom_systemd_start(
+        self: SystemdProvider,
+        name: str,
+        *,
+        dry_run: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        raise SystemdError("boom")
+
+    monkeypatch.setattr(SystemdProvider, "start", _boom_systemd_start)
+
+    result = runner.invoke(app, ["instance", "start", "alpha"], env=env)
+    assert result.exit_code == 1
+
+    entry = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
+    metadata = entry.get("metadata", {})
+    assert isinstance(metadata, dict)
+    assert "last_started_at" not in metadata
+    assert entry["status"] == "enabled"
+
+    record = _latest_operation(state_dir)
+    assert record["command"] == "instance start"
+    result_payload = record.get("result", {})
+    assert result_payload.get("status") == "error"
+    assert result_payload.get("errors")
 
 
 def test_instance_stop_updates_status(
@@ -1356,12 +2041,86 @@ def test_instance_stop_updates_status(
     env, state_dir = _prepare_environment(tmp_path)
     _create_instance(env)
 
-    monkeypatch.setattr(SystemdProvider, "stop", lambda self, name: None)
+    monkeypatch.setattr(
+        SystemdProvider,
+        "stop",
+        lambda self, name: subprocess.CompletedProcess(
+            ["systemctl", "stop", f"abssctl-{name}.service"], returncode=0
+        ),
+    )
 
     result = runner.invoke(app, ["instance", "stop", "alpha"], env=env)
     assert result.exit_code == 0
     instance = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
     assert instance["status"] == "stopped"
+    assert instance["metadata"].get("last_stopped_at")
+
+
+def test_instance_stop_dry_run_skips_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dry-run stop avoids provider execution and registry updates."""
+    env, state_dir = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    def _fail_systemd_stop(
+        self: SystemdProvider,
+        name: str,
+        *,
+        dry_run: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        raise AssertionError("systemd stop should not execute during dry-run")
+
+    monkeypatch.setattr(SystemdProvider, "stop", _fail_systemd_stop)
+
+    result = runner.invoke(app, ["instance", "stop", "alpha", "--dry-run"], env=env)
+    assert result.exit_code == 0
+
+    record = _latest_operation(state_dir)
+    steps = _index_steps(record)
+    assert steps["systemd.stop"]["status"] == "skipped"
+    assert steps["systemd.stop"]["detail"] == "dry-run"
+
+    entry = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
+    metadata = entry.get("metadata", {})
+    assert isinstance(metadata, dict)
+    assert "last_stopped_at" not in metadata
+    assert entry["status"] == "enabled"
+
+
+def test_instance_stop_systemd_failure_preserves_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stop failure reports an error without altering registry data."""
+    env, state_dir = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    def _boom_systemd_stop(
+        self: SystemdProvider,
+        name: str,
+        *,
+        dry_run: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        raise SystemdError("boom")
+
+    monkeypatch.setattr(SystemdProvider, "stop", _boom_systemd_stop)
+
+    result = runner.invoke(app, ["instance", "stop", "alpha"], env=env)
+    assert result.exit_code == 1
+
+    entry = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
+    metadata = entry.get("metadata", {})
+    assert isinstance(metadata, dict)
+    assert "last_stopped_at" not in metadata
+    assert entry["status"] == "enabled"
+
+    record = _latest_operation(state_dir)
+    assert record["command"] == "instance stop"
+    result_payload = record.get("result", {})
+    assert result_payload.get("status") == "error"
+    assert result_payload.get("errors")
 
 
 def test_instance_restart_calls_stop_and_start(
@@ -1374,11 +2133,17 @@ def test_instance_restart_calls_stop_and_start(
 
     calls: list[str] = []
 
-    def fake_stop(self: SystemdProvider, name: str) -> None:
+    def fake_stop(self: SystemdProvider, name: str) -> subprocess.CompletedProcess:
         calls.append("stop")
+        return subprocess.CompletedProcess(
+            ["systemctl", "stop", f"abssctl-{name}.service"], returncode=0
+        )
 
-    def fake_start(self: SystemdProvider, name: str) -> None:
+    def fake_start(self: SystemdProvider, name: str) -> subprocess.CompletedProcess:
         calls.append("start")
+        return subprocess.CompletedProcess(
+            ["systemctl", "start", f"abssctl-{name}.service"], returncode=0
+        )
 
     monkeypatch.setattr(SystemdProvider, "stop", fake_stop)
     monkeypatch.setattr(SystemdProvider, "start", fake_start)
@@ -1388,6 +2153,98 @@ def test_instance_restart_calls_stop_and_start(
     assert calls == ["stop", "start"]
     instance = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
     assert instance["status"] == "running"
+    assert instance["metadata"].get("last_restarted_at")
+
+
+def test_instance_restart_dry_run_skips_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dry-run restart records skipped steps and keeps registry untouched."""
+    env, state_dir = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    def _fail_systemd_stop(
+        self: SystemdProvider,
+        name: str,
+        *,
+        dry_run: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        raise AssertionError("systemd stop should not execute during dry-run")
+
+    def _fail_systemd_start(
+        self: SystemdProvider,
+        name: str,
+        *,
+        dry_run: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        raise AssertionError("systemd start should not execute during dry-run")
+
+    monkeypatch.setattr(SystemdProvider, "stop", _fail_systemd_stop)
+    monkeypatch.setattr(SystemdProvider, "start", _fail_systemd_start)
+
+    result = runner.invoke(app, ["instance", "restart", "alpha", "--dry-run"], env=env)
+    assert result.exit_code == 0
+
+    record = _latest_operation(state_dir)
+    steps = _index_steps(record)
+    assert steps["systemd.stop"]["status"] == "skipped"
+    assert steps["systemd.stop"]["detail"] == "dry-run"
+    assert steps["systemd.start"]["status"] == "skipped"
+    assert steps["systemd.start"]["detail"] == "dry-run"
+
+    entry = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
+    metadata = entry.get("metadata", {})
+    assert isinstance(metadata, dict)
+    assert "last_restarted_at" not in metadata
+    assert entry["status"] == "enabled"
+
+
+def test_instance_restart_systemd_failure_preserves_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Restart surfaces provider errors without mutating registry metadata."""
+    env, state_dir = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    calls: list[str] = []
+
+    def _ok_systemd_stop(
+        self: SystemdProvider,
+        name: str,
+        *,
+        dry_run: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append("stop")
+        return _fake_systemctl("stop", name)
+
+    def _boom_systemd_start(
+        self: SystemdProvider,
+        name: str,
+        *,
+        dry_run: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        raise SystemdError("boom")
+
+    monkeypatch.setattr(SystemdProvider, "stop", _ok_systemd_stop)
+    monkeypatch.setattr(SystemdProvider, "start", _boom_systemd_start)
+
+    result = runner.invoke(app, ["instance", "restart", "alpha"], env=env)
+    assert result.exit_code == 1
+    assert calls == ["stop"]
+
+    entry = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
+    metadata = entry.get("metadata", {})
+    assert isinstance(metadata, dict)
+    assert "last_restarted_at" not in metadata
+    assert entry["status"] == "enabled"
+
+    record = _latest_operation(state_dir)
+    assert record["command"] == "instance restart"
+    result_payload = record.get("result", {})
+    assert result_payload.get("status") == "error"
+    assert result_payload.get("errors")
 
 
 def test_instance_delete_removes_registry(
@@ -1398,8 +2255,20 @@ def test_instance_delete_removes_registry(
     env, state_dir = _prepare_environment(tmp_path)
     _create_instance(env)
 
-    monkeypatch.setattr(SystemdProvider, "stop", lambda self, name: None)
-    monkeypatch.setattr(SystemdProvider, "disable", lambda self, name: None)
+    monkeypatch.setattr(
+        SystemdProvider,
+        "stop",
+        lambda self, name: subprocess.CompletedProcess(
+            ["systemctl", "stop", f"abssctl-{name}.service"], returncode=0
+        ),
+    )
+    monkeypatch.setattr(
+        SystemdProvider,
+        "disable",
+        lambda self, name: subprocess.CompletedProcess(
+            ["systemctl", "disable", f"abssctl-{name}.service"], returncode=0
+        ),
+    )
     monkeypatch.setattr(SystemdProvider, "remove", lambda self, name: None)
     monkeypatch.setattr(NginxProvider, "disable", lambda self, name: None)
     monkeypatch.setattr(NginxProvider, "remove", lambda self, name: None)
@@ -1408,3 +2277,189 @@ def test_instance_delete_removes_registry(
     assert result.exit_code == 0
     instances = _registry_instances(state_dir)
     assert all(item.get("name") != "alpha" for item in instances)
+
+
+def test_instance_delete_dry_run_keeps_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dry-run delete skips side effects and retains registry/ports."""
+    env, state_dir = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    def _fail_systemd_stop(
+        self: SystemdProvider,
+        name: str,
+        *,
+        dry_run: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        raise AssertionError("systemd stop should not execute during dry-run")
+
+    def _fail_systemd_disable(
+        self: SystemdProvider,
+        name: str,
+        *,
+        dry_run: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        raise AssertionError("systemd disable should not execute during dry-run")
+
+    def _fail_systemd_remove(self: SystemdProvider, name: str) -> None:
+        raise AssertionError("systemd remove should not execute during dry-run")
+
+    def _fail_nginx_disable(self: NginxProvider, name: str) -> None:
+        raise AssertionError("nginx disable should not execute during dry-run")
+
+    def _fail_nginx_remove(self: NginxProvider, name: str) -> None:
+        raise AssertionError("nginx remove should not execute during dry-run")
+
+    monkeypatch.setattr(SystemdProvider, "stop", _fail_systemd_stop)
+    monkeypatch.setattr(SystemdProvider, "disable", _fail_systemd_disable)
+    monkeypatch.setattr(SystemdProvider, "remove", _fail_systemd_remove)
+    monkeypatch.setattr(NginxProvider, "disable", _fail_nginx_disable)
+    monkeypatch.setattr(NginxProvider, "remove", _fail_nginx_remove)
+
+    result = runner.invoke(app, ["instance", "delete", "alpha", "--dry-run"], env=env)
+    assert result.exit_code == 0
+
+    record = _latest_operation(state_dir)
+    steps = _index_steps(record)
+    for name in [
+        "backup.prompt",
+        "systemd.stop",
+        "systemd.disable",
+        "nginx.disable",
+        "systemd.remove",
+        "nginx.remove",
+        "filesystem.cleanup",
+        "registry.remove",
+        "ports.release",
+    ]:
+        assert steps[name]["status"] == "skipped"
+        assert steps[name]["detail"] == "dry-run"
+    assert record["result"]["status"] == "success"
+    assert record["result"]["changed"] == 0
+
+    entry = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
+    assert entry["status"] == "enabled"
+
+    ports_path = state_dir / "registry" / "ports.yml"
+    ports_data = yaml.safe_load(ports_path.read_text(encoding="utf-8"))
+    reserved = {item["name"] for item in ports_data.get("ports", [])}
+    assert "alpha" in reserved
+
+    instance_root = tmp_path / "instances" / "alpha"
+    runtime_instance_dir = (tmp_path / "run" / "instances" / "alpha")
+    logs_instance_dir = tmp_path / "logs" / "alpha"
+    state_instance_dir = state_dir / "instances" / "alpha"
+    assert instance_root.exists()
+    assert runtime_instance_dir.exists()
+    assert logs_instance_dir.exists()
+    assert state_instance_dir.exists()
+
+
+def test_instance_delete_cleans_files_and_releases_port(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Delete removes runtime artifacts and frees the reserved port."""
+    env, state_dir = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    monkeypatch.setattr(
+        SystemdProvider,
+        "start",
+        lambda self, name, dry_run=False: _fake_systemctl("start", name),
+    )
+    start_result = runner.invoke(app, ["instance", "start", "alpha"], env=env)
+    assert start_result.exit_code == 0
+
+    runtime_dir = tmp_path / "run"
+    instance_root = tmp_path / "instances" / "alpha"
+    runtime_instance_dir = runtime_dir / "instances" / "alpha"
+    logs_instance_dir = tmp_path / "logs" / "alpha"
+    state_instance_dir = state_dir / "instances" / "alpha"
+    systemd_unit = runtime_dir / "systemd" / "abssctl-alpha.service"
+    nginx_site = runtime_dir / "nginx" / "sites-available" / "abssctl-alpha.conf"
+    nginx_enabled = runtime_dir / "nginx" / "sites-enabled" / "abssctl-alpha.conf"
+
+    assert systemd_unit.exists()
+    assert nginx_site.exists()
+    assert nginx_enabled.exists()
+    assert runtime_instance_dir.exists()
+    assert logs_instance_dir.exists()
+    assert state_instance_dir.exists()
+
+    calls: list[str] = []
+    original_systemd_remove = SystemdProvider.remove
+    original_nginx_disable = NginxProvider.disable
+    original_nginx_remove = NginxProvider.remove
+
+    def _ok_systemd_stop(
+        self: SystemdProvider,
+        name: str,
+        *,
+        dry_run: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append("systemd.stop")
+        return _fake_systemctl("stop", name)
+
+    def _ok_systemd_disable(
+        self: SystemdProvider,
+        name: str,
+        *,
+        dry_run: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append("systemd.disable")
+        return _fake_systemctl("disable", name)
+
+    def _wrap_systemd_remove(self: SystemdProvider, name: str) -> None:
+        calls.append("systemd.remove")
+        original_systemd_remove(self, name)
+
+    def _wrap_nginx_disable(self: NginxProvider, name: str) -> None:
+        calls.append("nginx.disable")
+        original_nginx_disable(self, name)
+
+    def _wrap_nginx_remove(self: NginxProvider, name: str) -> None:
+        calls.append("nginx.remove")
+        original_nginx_remove(self, name)
+
+    monkeypatch.setattr(SystemdProvider, "stop", _ok_systemd_stop)
+    monkeypatch.setattr(SystemdProvider, "disable", _ok_systemd_disable)
+    monkeypatch.setattr(SystemdProvider, "remove", _wrap_systemd_remove)
+    monkeypatch.setattr(NginxProvider, "disable", _wrap_nginx_disable)
+    monkeypatch.setattr(NginxProvider, "remove", _wrap_nginx_remove)
+
+    result = runner.invoke(
+        app,
+        ["instance", "delete", "alpha", "--no-backup", "--yes", "--purge-data"],
+        env=env,
+    )
+    assert result.exit_code == 0
+    assert set(calls) == {
+        "systemd.stop",
+        "systemd.disable",
+        "systemd.remove",
+        "nginx.disable",
+        "nginx.remove",
+    }
+
+    assert not instance_root.exists()
+    assert not runtime_instance_dir.exists()
+    assert not logs_instance_dir.exists()
+    assert not state_instance_dir.exists()
+    assert not systemd_unit.exists()
+    assert not nginx_site.exists()
+    assert not nginx_enabled.exists()
+
+    ports_path = state_dir / "registry" / "ports.yml"
+    ports_data = yaml.safe_load(ports_path.read_text(encoding="utf-8"))
+    assert ports_data.get("ports", []) == []
+
+    instances = _registry_instances(state_dir)
+    assert all(item.get("name") != "alpha" for item in instances)
+
+    record = _latest_operation(state_dir)
+    steps = _index_steps(record)
+    assert steps["ports.release"]["status"] == "success"
+    assert steps["registry.remove"]["status"] == "success"

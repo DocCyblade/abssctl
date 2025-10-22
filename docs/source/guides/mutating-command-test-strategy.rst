@@ -17,14 +17,18 @@ Read-only commands already have good coverage via CLI integration tests (see
 registry, and on-disk application data, we need a deliberate strategy to keep
 tests reliable, fast, and representative of real TurnKey Linux deployments.
 
-Current Coverage Snapshot (Alpha Foundations)
-=============================================
+Current Coverage Snapshot (Alpha Core Features)
+===============================================
 
-- CLI tests patch provider methods to focus on registry and logging side effects.
-- Template rendering, locking primitives, and providers have unit tests exercising
-  happy paths and error handling at a basic level.
-- There is no simulation of systemctl/nginx binaries, no rollback verification,
-  and no tests for dry-run/confirmation workflows (not yet implemented).
+- CLI tests exercise lifecycle commands end-to-end using temporary directories,
+  asserting registry updates, filesystem side effects, rollback behaviour, and
+  operations-log entries.
+- Provider unit tests simulate systemctl/nginx invocations, covering reload on
+  change, validation failures, dry-run handling, and error propagation.
+- Ports registry and backup prompts are validated in CLI integration tests to
+  ensure safety flows trigger as expected.
+- Fake binaries are still rudimentary; deeper doctor/support-bundle scenarios
+  remain to be modelled.
 
 Testing Goals for Beta
 ======================
@@ -35,8 +39,9 @@ Testing Goals for Beta
    relying instead on fakes and temporary directories.
 3. **Determinism** — No external network or clock dependence; operations (e.g.,
    port allocation) should use seeded inputs.
-4. **Coverage** — Exercise success paths, dry-run flows, and representative
-   failure cases (validation errors, subprocess failures, lock timeouts).
+4. **Coverage** — Continue exercising success paths, dry-run flows, and
+   representative failure cases (validation errors, subprocess failures, lock
+   timeouts) as new commands arrive.
 
 Test Layers & Techniques
 ========================
@@ -63,23 +68,18 @@ Functional CLI Tests
   into ``PATH`` so CLI tests can exercise end-to-end flows without the real
   binaries (per ADR-009/ADR-010 expectations).
 
-Rollback & Failure Scenarios
-----------------------------
+Rollback, Failure, and Dry-Run Scenarios
+----------------------------------------
 
-- Ensure ``instance create`` cleans up rendered artifacts and registry entries
-  when validation (e.g., ``nginx -t``) fails.
+- Maintain coverage that proves ``instance create`` and other lifecycle commands
+  clean up rendered artifacts and registry entries when provider validation or
+  filesystem operations fail.
 - Simulate ``systemctl`` failures (non-zero exit) and assert commands emit
-  helpful errors, rollback partial work, and exit with code 4 (ADR-013).
+  helpful errors, rollback partial work, and map to ADR-013 exit semantics.
 - Test lock contention by pre-acquiring locks and ensuring commands respect
   timeouts and logging.
-
-Dry-Run & Confirmation Flows
-----------------------------
-
-- Once ``--dry-run`` and safety prompts land, add tests that assert no filesystem
-  changes occur, while logs enumerate the planned actions.
-- Cover both interactive (prompt) and ``--yes`` non-interactive modes so CI
-  scripts can run confidently.
+- Keep dry-run coverage up to date as new commands land so operations.jsonl
+  records skipped steps and no state change occurs.
 
 Tooling & Fixtures
 ==================
@@ -103,14 +103,17 @@ Testing Open Questions
 ======================
 
 - How far should we simulate TurnKey-specific paths (e.g., real ``/etc/ssl``)
-  versus using fixtures? Determine during Beta implementation.
+  versus using fixtures? Determine during Beta implementation when TLS tooling
+  lands.
 - Do we require smoke tests on an actual TurnKey VM in CI (per ADR-030), or can
   that remain a release-candidate manual step? Needs an ADR update if automated.
 
 Next Actions
 ============
 
-1. Implement fake binary fixtures and retrofit existing CLI tests to use them.
-2. Add golden-template assertions for the current ``instance create`` scaffolding.
-3. Prepare regression tests for the forthcoming version install/switch commands.
+1. Expand fake binary fixtures to support doctor/support-bundle probes and more
+   intricate subprocess failure modes.
+2. Add golden-template assertions for forthcoming TLS-enabled nginx contexts.
+3. Backfill integration tests for backup restore once extraction logic is
+   implemented.
 4. Document any new fixtures/helpers in ``docs/source/guides/developer-guide.rst``.

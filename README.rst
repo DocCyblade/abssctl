@@ -5,11 +5,13 @@ abssctl — Actual Sync Server Admin CLI
 .. image:: https://img.shields.io/badge/status-alpha-blue
    :alt: Project maturity badge showing Alpha status
 
-``abssctl`` is a planned, batteries-included command line tool that installs and
-manages multiple Actual Budget Sync Server instances on the TurnKey Linux
-Node.js appliance. The CLI will own the full lifecycle: provisioning new
-instances, performing upgrades or rollbacks, managing nginx and systemd
-integrations, and producing support bundles for operators.
+``abssctl`` is a batteries-included command line tool that installs and manages
+multiple Actual Budget Sync Server instances on the TurnKey Linux Node.js
+appliance. The CLI owns the full lifecycle today: provisioning new instances,
+performing upgrades or rollbacks, managing nginx and systemd integrations, and
+producing backup archives for operators. Alpha milestone efforts continue to
+iterate on the operational polish before Beta health checks and support bundles
+arrive.
 
 Project Facts
 =============
@@ -17,10 +19,10 @@ Project Facts
 - **Project name:** Actual Budget Multi-Instance Sync Server Admin CLI.
 - **CLI executable:** ``abssctl`` (Actual Budget Sync Server ConTroL).
 
-The project is currently in the **Alpha (foundations)** phase. The repository
+The project is currently in the **Alpha (core features)** phase. The repository
 builds on the bootstrap work from Pre-Alpha and now includes structured logging,
-global/per-instance locking, and templated systemd/nginx provider scaffolds
-alongside configuration, state management, and read-only workflows.
+global/per-instance locking, templated systemd/nginx providers, a ports
+registry, full instance lifecycle commands, and end-to-end version management.
 
 Key Objectives
 ==============
@@ -38,9 +40,11 @@ Quick Start (Alpha Foundations)
 ===============================
 
 .. note::
-   The CLI is still stabilising APIs during Alpha. Initial commands focus on
-   configuration and read-only inspection; mutating workflows arrive once the
-   providers and state engine solidify.
+   The CLI is still stabilising APIs during Alpha. All lifecycle commands are
+   available today (version install/switch/uninstall, instance
+   create/enable/start/stop/restart/delete, etc.), but production deployments
+   should continue to treat this release as a preview until the Beta hardening
+   work (doctor/support-bundle/TLS restore flows) lands.
 
 1. Create a Python 3.11 virtual environment stored in ``.venv`` with a prompt label ``dev`` and activate it::
 
@@ -64,13 +68,15 @@ Quick Start (Alpha Foundations)
    virtualenv. Use ``make docs`` to rebuild Sphinx HTML and ``make dist`` for
    the full lint/type/test/build pipeline.
 
-4. Invoke the CLI skeleton::
+4. Exercise the CLI::
 
       abssctl --help
       abssctl --version
       abssctl config show
       abssctl version list --json
       abssctl instance list --json
+      abssctl ports list --json
+      abssctl instance create demo --no-start --port 6000
 
 Repository Layout
 =================
@@ -89,16 +95,19 @@ The configuration loader follows ADR-023 precedence: built-in defaults,
 ``abssctl config show`` (or ``--json``) to inspect the merged values and
 confirm environment overrides are applied as expected.
 
-Read-only registry commands are now wired up: ``abssctl version list`` and
-``abssctl instance list`` surface the contents of ``versions.yml`` and
-``instances.yml`` respectively, while ``abssctl instance show <name>`` displays
-details for a single instance. Use ``--remote`` with ``version list`` to pull
-published versions from npm when the CLI is available (falls back gracefully if
-``npm`` is missing). All commands accept ``--config-file`` so you can point at
-alternate configuration sources when testing or operating multiple environments.
-The registry now records npm integrity metadata (``shasum`` plus tarball digest)
-for each install, and ``abssctl version list --json`` exposes that block so
-offline operators can verify artifacts.
+Lifecycle commands are fully wired: ``abssctl version install|switch|uninstall``
+manage ``/srv/app`` contents and record metadata/integrity, while
+``abssctl instance create`` provisions directory scaffolding, reserves ports,
+renders templates, and rolls back on failure. Instance mutators (enable/disable,
+start/stop/restart, set-fqdn, set-port, set-version, rename, delete) update the
+registry, invoke systemd/nginx helpers, and support ``--dry-run`` plus safety
+prompts. Use ``--remote`` with ``version list`` to pull published versions from
+npm when the CLI is available (falls back gracefully if ``npm`` is missing). All
+commands accept ``--config-file`` so you can point at alternate configuration
+sources when testing or operating multiple environments. The registry records
+npm integrity metadata (``shasum`` plus tarball digest) for each install, and
+``abssctl version list --json`` exposes that block so offline operators can
+verify artifacts.
 
 Backups
 =======
@@ -146,13 +155,12 @@ Branch Strategy
 - ``main`` — production-ready releases tagged for PyPI.
 - ``dev`` — integration branch for upcoming development builds.
 - ``dev-<label>`` — milestone integration branches (``dev-alphaN``, ``dev-betaN``,
-  ``dev-1.2.0a1``); the current focus is ``dev-alpha4`` while we finish core
-  provider planning and registry-driven commands.
+  ``dev-1.2.0a1``); the current focus is ``dev-alpha5`` while we prepare the Beta
+  health-check and restore work.
 - Short-lived feature branches support focused working sessions.
 - Release preparation uses ``release/<version>`` branches before tagging.
 - Urgent fixes branch from ``main`` as ``hotfix/<version>`` (code) or
   ``docfix/<version>`` (documentation). Refer to ADR-034 for the full workflow.
-- Short-lived feature branches support focused working sessions.
 
 Roadmap Snapshot
 ================
@@ -162,8 +170,11 @@ Roadmap Snapshot
 - **Alpha Builds — Foundations:** CLI skeleton beyond placeholders, config
   loader, logging, state/lock primitives, template engine, read-only commands,
   JSON output plumbing. Publish dev builds to PyPI from tags on ``dev``.
-- **Beta Releases — Core Features:** Version operations, instance lifecycle,
-  systemd/nginx providers, doctor basics. All updates become non-destructive or
+- **Alpha Core Features (current):** Version install/switch/uninstall, ports
+  registry, systemd/nginx providers, instance lifecycle subcommands, structured
+  rollback handling, and expanded test coverage.
+- **Beta Releases — Core Features:** TLS tooling, backup restore/reconcile,
+  doctor basics, support bundle groundwork. All updates become non-destructive or
   ship with migration hooks.
 - **Release Candidate — Quality & Docs:** Support bundle, robust errors, man
   pages & completion, full docs & examples, CI integration tests on TurnKey

@@ -2,11 +2,12 @@
 CLI Command Overview
 ====================
 
-During the Alpha foundations milestone ``abssctl`` exposes real functionality
-for configuration inspection, registry-backed listings, and provider-driven
-instance scaffolding. Structured logging captures every invocation, and
-commands that mutate state acquire the appropriate locks before touching the
-registry or calling out to system services.
+During the Alpha core-features milestone ``abssctl`` exposes full lifecycle
+functionality for configuration inspection, registry-backed listings, version
+management, and provider-driven instance provisioning. Structured logging
+captures every invocation, and commands that mutate state acquire the
+appropriate locks before touching the registry or calling out to system
+services.
 
 Config Commands
 ===============
@@ -52,6 +53,15 @@ Version Commands
    the active ``current`` version is blocked. Prompts for a pre-flight backup
    unless ``--no-backup`` is supplied.
 
+Ports Registry
+==============
+
+``abssctl ports list [--json]``
+   Displays the reserved port set recorded in ``ports.yml``. JSON output is a
+   stable list of ``{"name": ..., "port": ...}`` mappings that tooling can
+   consume. The registry updates automatically when instances are created,
+   deleted, or reassigned to a new port.
+
 Instance Commands
 =================
 
@@ -62,27 +72,54 @@ Instance Commands
    requested instance is missing.
 
 ``abssctl instance create <name>``
-   Renders templated systemd and nginx assets using the configured template
-   directory (defaults ship with the project), writes them under the runtime
-   overlay (``<runtime_dir>/systemd`` and ``<runtime_dir>/nginx``), and
-   registers the instance in ``instances.yml``. Attempts to create an existing
-   instance surface a clear error and abort the operation.
+   Provisions directories under ``instance_root`` (data/runtime/state/logs),
+   reserves or honours a chosen port, renders templated systemd and nginx
+   assets using the configured templates, and registers the instance in
+   ``instances.yml``. Validation includes filesystem conflict checks, registry
+   duplication detection, and nginx config testing. Failures roll back
+   directories, registry updates, and port reservations automatically. ``--port``,
+   ``--domain``, ``--version``, ``--data-dir``, and ``--no-start`` customise the
+   initial state.
 
 ``abssctl instance enable|disable <name>``
    Acquire the per-instance lock, validate the instance exists, then delegate to
    the systemd and nginx providers. ``enable`` creates the systemd enablement
-   state and nginx symlink, while ``disable`` tears them down. The registry entry
-   is updated to reflect the new status.
+   state and nginx symlink, while ``disable`` tears them down. ``--dry-run`` on
+   either command reports planned actions without calling the providers. The
+   registry entry is updated to reflect the new status and diagnostics snapshot.
 
 ``abssctl instance start|stop|restart <name>``
    Ensure the instance exists, then call the systemd provider to control the
-   unit via ``systemctl``. Status information in the registry is updated to
-   ``running``/``stopped`` accordingly.
+   unit via ``systemctl``. ``--dry-run`` reports the intended systemd calls, and
+   successful operations update registry metadata (timestamps, status flags).
 
-``abssctl instance delete <name>``
-   Stops and disables the instance (best-effort on stop), removes rendered
-   systemd/nginx assets, and deletes the registry entry. All steps are logged
-   and performed under the instance mutation lock.
+``abssctl instance status <name> [--json]``
+   Combines registry data, provider diagnostics, and ``systemctl status`` output
+   to present the current state. JSON mode is suitable for automation, while the
+   default table highlights registry status, systemd enablement, and nginx
+   enablement.
+
+``abssctl instance logs <name> [--lines N] [--since TS] [--follow]``
+   Streams or samples the systemd journal for the instance using the provider's
+   ``journalctl`` wrapper.
+
+``abssctl instance env <name> [--json]``
+   Emits environment variables and path helpers that scripts can source when
+   interacting with the instance.
+
+- ``abssctl instance set-fqdn <name> <domain> [--dry-run] [--no-backup] [--backup-message TEXT] [--yes]`` updates the instance domain, rewrites configuration, and records history in the registry.
+- ``abssctl instance set-port <name> <port> [--dry-run] [--no-backup] [--backup-message TEXT] [--yes]`` reserves a new port, rewrites config, restarts the systemd unit, and updates the ports registry.
+- ``abssctl instance set-version <name> <version> [--dry-run] [--no-backup] [--backup-message TEXT] [--yes]`` binds an instance to a specific installed version and restarts as needed.
+- ``abssctl instance rename <name> <new-name> [--dry-run] [--no-backup] [--backup-message TEXT] [--yes]`` moves directories, updates registry metadata/history, and refreshes rendered provider assets.
+
+All mutators honour locks, safety prompts, and support ``--dry-run`` to preview changes while recording skipped steps in the operations log.
+
+``abssctl instance delete <name> [--purge-data] [--dry-run] [--no-backup] [--backup-message TEXT] [--yes]``
+   Stops (best-effort), disables providers, removes rendered systemd/nginx
+   assets, deletes registry entries, and releases reserved ports. ``--purge-data``
+   removes the instance data directory, while ``--dry-run`` reports planned
+   actions without changing state. When the operator accepts the safety prompt,
+   the command runs ``backup create`` before proceeding.
 
 System Diagnostics & Backups
 ============================

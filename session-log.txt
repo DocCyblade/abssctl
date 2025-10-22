@@ -145,12 +145,44 @@
 -----------------------------------------
 
 
+# 2025-10-21 Alpha5-1 Session (OPEN)
+- Session kickoff per Next Session Primer; confirmed focus is Alpha 5 provider work.
+- Starting with systemd provider implementation to unblock instance lifecycle commands.
+- Implemented SystemdProvider enhancements (daemon-reload on changes, restart/logs helpers, richer error reporting) to expand system integration surface.
+- Added targeted unit coverage for the new provider behaviors and ran `.venv/bin/python -m pytest tests/test_systemd_provider.py`.
+- Delivered NginxProvider upgrades (site naming helper, validate/reload on change, rollback on failure, clearer errors) to align with Alpha 5 system integration goals.
+- Extended nginx provider tests to cover validation/reload ordering and rollback scenarios; ran `.venv/bin/python -m pytest tests/test_nginx_provider.py`.
+- Introduced PortsRegistry for sequential allocations, wired it into runtime setup, and enriched systemd/nginx contexts with port/TLS metadata to prep upcoming features.
+- Updated `instance create` and `instance delete` to reserve/release ports, add provider rollback safeguards, and verified via `.venv/bin/python -m pytest tests/test_ports_registry.py tests/test_systemd_provider.py tests/test_nginx_provider.py`.
+- Enhanced systemd/nginx templates and provider tests to surface reserved port + TLS metadata (including conditional SSL directives).
+- Added `ports list` CLI command with table/JSON output backed by the new registry helpers and accompanying tests.
+- Ran `make quick-tests` to confirm ruff/mypy/pytest remain green after the CLI/template updates.
+- Added systemd configuration overrides (unit dir/binaries) and enriched context/env data (runtime/state/logs paths) with updated provider/template tests; quick-tests remain green.
+- Implemented systemd provider dry-run support, structured command logging details, and fallback handling for missing binaries; expanded provider/CLI tests accordingly; `make quick-tests` passes.
+- Enhanced nginx provider context + template to emit HTTP/HTTPS listeners, upstream targets, and TLS cert selections; refreshed provider/template/CLI tests and re-ran `make quick-tests` (all green).
+- Wired nginx validation (`nginx -t`) results into structured logs, preserved rollback behaviour, and captured reload details; provider + CLI tests updated; `make quick-tests` still green.
+- Added nginx reload-on-change toggle plus diagnostics helpers (`site_exists`, `is_enabled`, `diagnostics`) for future doctor/log commands; expanded tests and revalidated with `make quick-tests`.
+- Strengthened nginx coverage (TLS enabled/disabled, validation rollback, CLI step assertions) to satisfy Alpha 5 testing goals; `make quick-tests` successful.
+- Ran `make quick-tests` to confirm ruff/mypy/pytest remain green after the integration updates.
+- Implemented full instance lifecycle subcommands (`status`, `logs`, `env`, `set-fqdn`, `set-port`, `set-version`, `rename`) with dry-run/backups handling, enriched registry metadata, and resilient delete support (`--purge-data`, non-fatal provider failures).
+- Added shared helpers for instance filesystem/config management and expanded CLI tests to cover the new lifecycle flows (`pytest tests/test_cli.py`).
+- Persisted systemd/nginx diagnostics plus port/domain metadata in the registry, updating `instance status/logs` outputs and keeping history for `set-fqdn`/`set-port`/`rename` flows.
+- Reviewed lifecycle CLI coverage gaps for Task 3.4 and outlined required dry-run/failure scenarios across enable/disable/start/stop/restart/delete.
+- Added helper utilities and new CLI tests covering dry-run + failure paths for lifecycle commands plus delete cleanup/port release checks in `tests/test_cli.py`.
+- Verified the expanded coverage via `.venv/bin/python -m pytest tests/test_cli.py` and `make quick-tests` (ruff/mypy/pytest all green).
+- Updated `docs/roadmap.rst` to mark Alpha 5 lifecycle/provider milestones and port allocation work as complete.
+- Refreshed README + Sphinx guides (overview, quickstart, developer guide, provider/version plans, CLI reference, test strategy) to reflect delivered lifecycle/systemd/nginx functionality and removed stale Alpha-foundations language; `make docs` now builds cleanly.
+
+## Wrap up:
+- Session in progress.
+
+-----------------------------------------
+
+
 ----------------------- Sessions logging above this line only ----------------------
 
 # Next Steps / TODO:
-- Build systemd/nginx providers and wire comprehensive `instance create` / lifecycle commands per roadmap.
-- Implement port allocation, TLS command suite, and remaining backup workflow (`restore` extraction, `reconcile` CLI).
-- Deliver the initial `doctor` command and flesh out automation-friendly tests.
+- Awaiting next priority; candidate follow-up is documenting the expanded lifecycle test plan and identifying remaining Alpha 5 gaps.
 
 # Next Session Primer
-- Alpha 5 focus: tackle provider implementations (systemd/nginx), instance create flow, and start on ports/TLS according to roadmap.
+- Lifecycle dry-run/failure coverage and delete cleanup tests are now in place. Confirm the next focus (docs, restore workflows, or other Alpha 5 items) before diving in; quick-tests currently green.

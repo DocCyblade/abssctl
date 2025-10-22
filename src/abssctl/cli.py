@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -37,6 +38,7 @@ from .backups import (
 from .config import ALLOWED_BACKUP_COMPRESSION, AppConfig, load_config
 from .locking import LockManager
 from .logging import OperationScope, StructuredLogger
+from .ports import PortsRegistry, PortsRegistryError
 from .providers import (
     InstanceStatusProvider,
     NginxError,
@@ -48,7 +50,7 @@ from .providers import (
     VersionInstallResult,
     VersionProvider,
 )
-from .state import StateRegistry
+from .state import StateRegistry, StateRegistryError
 from .templates import TemplateEngine
 
 console = Console()
@@ -83,6 +85,20 @@ RESTORE_DEST_OPTION = typer.Option(
     file_okay=False,
 )
 
+DATA_DIR_OPTION = typer.Option(
+    None,
+    "--data-dir",
+    dir_okay=True,
+    file_okay=False,
+    help="Custom data directory for Actual (defaults to /srv/<name>/data).",
+)
+
+NO_START_OPTION = typer.Option(
+    False,
+    "--no-start",
+    help="Provision without starting the systemd service.",
+)
+
 app = typer.Typer(
     add_completion=False,
     help=textwrap.dedent(
@@ -103,6 +119,7 @@ class RuntimeContext:
 
     config: AppConfig
     registry: StateRegistry
+    ports: PortsRegistry
     version_provider: VersionProvider
     version_installer: VersionInstaller
     instance_status_provider: InstanceStatusProvider
@@ -112,6 +129,216 @@ class RuntimeContext:
     systemd_provider: SystemdProvider
     nginx_provider: NginxProvider
     backups: BackupsRegistry
+
+
+@dataclass(slots=True)
+class InstancePaths:
+    """Filesystem paths associated with an instance."""
+
+    root: Path
+    data: Path
+    config_file: Path
+    runtime: Path
+    logs: Path
+    state: Path
+
+
+def _instance_paths_from_entry(
+    config: AppConfig,
+    name: str,
+    entry: Mapping[str, object] | None,
+) -> InstancePaths:
+    """Derive instance paths from the registry entry with sensible fallbacks."""
+    paths_raw = entry.get("paths") if isinstance(entry, Mapping) else None
+    root = _coerce_path(paths_raw, "root") if isinstance(paths_raw, Mapping) else None
+    data_dir = _coerce_path(paths_raw, "data") if isinstance(paths_raw, Mapping) else None
+    config_path = _coerce_path(paths_raw, "config") if isinstance(paths_raw, Mapping) else None
+    runtime_dir = _coerce_path(paths_raw, "runtime") if isinstance(paths_raw, Mapping) else None
+    logs_dir = _coerce_path(paths_raw, "logs") if isinstance(paths_raw, Mapping) else None
+    state_dir = _coerce_path(paths_raw, "state") if isinstance(paths_raw, Mapping) else None
+
+    root = root or (config.instance_root / name)
+    data_dir = data_dir or (root / "data")
+    config_path = config_path or (root / "config.json")
+    runtime_dir = runtime_dir or (config.runtime_dir / "instances" / name)
+    logs_dir = logs_dir or (config.logs_dir / name)
+    state_dir = state_dir or (config.state_dir / "instances" / name)
+    return InstancePaths(
+        root=root,
+        data=data_dir,
+        config_file=config_path,
+        runtime=runtime_dir,
+        logs=logs_dir,
+        state=state_dir,
+    )
+
+
+def _coerce_path(value: Mapping[str, object], key: str) -> Path | None:
+    raw = value.get(key)
+    if raw is None:
+        return None
+    return Path(str(raw)).expanduser()
+
+
+def _coerce_port(value: object, default: int) -> int:
+    """Return an integer port from arbitrary registry/config values."""
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        candidate = value.strip()
+        if candidate:
+            try:
+                return int(candidate)
+            except ValueError:
+                return default
+    return default
+
+
+def _collect_provider_diagnostics(
+    runtime: RuntimeContext,
+    name: str,
+    paths: InstancePaths,
+) -> dict[str, object]:
+    """Return structured diagnostics for systemd and nginx providers."""
+    systemd_unit = runtime.systemd_provider.unit_path(name)
+    systemd_diag: dict[str, object] = {
+        "unit_path": str(systemd_unit),
+        "unit_exists": systemd_unit.exists(),
+        "logs_dir": str(paths.logs),
+        "state_dir": str(paths.state),
+    }
+    nginx_raw = runtime.nginx_provider.diagnostics(name)
+    nginx_diag = {
+        key: (str(value) if isinstance(value, Path) else value)
+        for key, value in nginx_raw.items()
+    }
+    return {
+        "systemd": systemd_diag,
+        "nginx": nginx_diag,
+    }
+
+
+def _record_instance_state(
+    runtime: RuntimeContext,
+    name: str,
+    *,
+    status: str | None = None,
+    paths: InstancePaths | None = None,
+    port: int | None = None,
+    domain: str | None = None,
+    version: str | None = None,
+    systemd_enabled: bool | None = None,
+    systemd_state: str | None = None,
+    nginx_enabled: bool | None = None,
+    metadata: Mapping[str, object] | None = None,
+    update_last_changed: bool = True,
+) -> None:
+    """Persist instance metadata/diagnostics back to the registry."""
+    entry = runtime.registry.get_instance(name)
+    if entry is None:
+        return
+
+    now = datetime.now(UTC).isoformat()
+    if paths is None:
+        paths = _instance_paths_from_entry(runtime.config, name, entry)
+
+    diagnostics = _collect_provider_diagnostics(runtime, name, paths)
+    systemd_entry = diagnostics.get("systemd")
+    systemd_diag: dict[str, object]
+    if isinstance(systemd_entry, dict):
+        systemd_diag = dict(systemd_entry)
+    else:
+        systemd_diag = {}
+    diagnostics["systemd"] = systemd_diag
+    if systemd_enabled is not None:
+        systemd_diag["enabled"] = systemd_enabled
+    if systemd_state is not None:
+        systemd_diag["state"] = systemd_state
+    systemd_diag["last_checked"] = now
+
+    nginx_entry = diagnostics.get("nginx")
+    nginx_diag: dict[str, object]
+    if isinstance(nginx_entry, dict):
+        nginx_diag = dict(nginx_entry)
+    else:
+        nginx_diag = {}
+    diagnostics["nginx"] = nginx_diag
+    if nginx_enabled is not None:
+        nginx_diag["enabled"] = nginx_enabled
+    nginx_diag["last_checked"] = now
+
+    metadata_updates: dict[str, object] = {
+        "diagnostics": diagnostics,
+        "domain": domain if domain is not None else entry.get("domain"),
+        "port": port if port is not None else entry.get("port"),
+        "last_checked_at": now,
+    }
+    if metadata:
+        for key, value in metadata.items():
+            if value is not None:
+                metadata_updates[key] = value
+
+    existing_metadata = entry.get("metadata")
+    if isinstance(existing_metadata, Mapping):
+        created_at = existing_metadata.get("created_at")
+        if created_at:
+            metadata_updates.setdefault("created_at", created_at)
+        auto_start = existing_metadata.get("auto_start")
+        if auto_start is not None:
+            metadata_updates.setdefault("auto_start", auto_start)
+
+        previous_port = entry.get("port")
+        if port is not None and previous_port not in (None, port):
+            history = (
+                list(existing_metadata.get("port_history", []))
+                if isinstance(existing_metadata.get("port_history"), list)
+                else []
+            )
+            history.append({"port": previous_port, "changed_at": now})
+            metadata_updates["port_history"] = history
+        elif isinstance(existing_metadata.get("port_history"), list):
+            metadata_updates.setdefault("port_history", existing_metadata["port_history"])
+
+        previous_domain = entry.get("domain")
+        if domain and previous_domain and domain != previous_domain:
+            domain_history = (
+                list(existing_metadata.get("domain_history", []))
+                if isinstance(existing_metadata.get("domain_history"), list)
+                else []
+            )
+            domain_history.append({"domain": previous_domain, "changed_at": now})
+            metadata_updates["domain_history"] = domain_history
+        elif isinstance(existing_metadata.get("domain_history"), list):
+            metadata_updates.setdefault(
+                "domain_history",
+                existing_metadata["domain_history"],
+            )
+
+    if update_last_changed:
+        metadata_updates.setdefault("last_changed", now)
+
+    updates: dict[str, object] = {}
+    if status is not None:
+        updates["status"] = status
+    if domain is not None:
+        updates["domain"] = domain
+    if port is not None:
+        updates["port"] = port
+    if version is not None:
+        updates["version"] = version
+    updates["paths"] = {
+        "root": str(paths.root),
+        "data": str(paths.data),
+        "config": str(paths.config_file),
+        "runtime": str(paths.runtime),
+        "logs": str(paths.logs),
+        "state": str(paths.state),
+        "systemd_unit": str(runtime.systemd_provider.unit_path(name)),
+        "nginx_site": str(runtime.nginx_provider.site_path(name)),
+        "nginx_enabled": str(runtime.nginx_provider.enabled_path(name)),
+    }
+
+    _update_instance_registry(runtime, name, updates, metadata=metadata_updates)
 
 
 def _ensure_runtime(
@@ -129,12 +356,20 @@ def _ensure_runtime(
 
     config = load_config(config_file=config_file, overrides=overrides)
     registry = StateRegistry(config.registry_dir)
+    registry.ensure_root()
     version_cache = registry.root / "remote-versions.json"
     version_provider = VersionProvider(cache_path=version_cache)
     instance_status_provider = InstanceStatusProvider()
     locks = LockManager(config.runtime_dir, config.lock_timeout)
     logger = StructuredLogger(config.logs_dir)
     templates = TemplateEngine.with_overrides(config.templates_dir)
+    systemd_config = config.systemd
+    systemd_unit_dir = systemd_config.unit_dir or (config.runtime_dir / "systemd")
+    ports_registry = PortsRegistry(
+        registry=registry,
+        base_port=config.ports.base,
+        strategy=config.ports.strategy,
+    )
     installer = VersionInstaller(
         install_root=config.install_root,
         package_name=config.npm_package_name,
@@ -143,7 +378,9 @@ def _ensure_runtime(
         templates=templates,
         logger=logger,
         locks=locks,
-        systemd_dir=config.runtime_dir / "systemd",
+        systemd_dir=systemd_unit_dir,
+        systemctl_bin=systemd_config.systemctl_bin,
+        journalctl_bin=systemd_config.journalctl_bin,
     )
     nginx_provider = NginxProvider(
         templates=templates,
@@ -155,6 +392,7 @@ def _ensure_runtime(
     runtime = RuntimeContext(
         config=config,
         registry=registry,
+        ports=ports_registry,
         version_provider=version_provider,
         version_installer=installer,
         instance_status_provider=instance_status_provider,
@@ -359,57 +597,312 @@ def _merge_versions(
     return combined
 
 
-def _build_systemd_context(config: AppConfig, instance: str) -> dict[str, object]:
-    install_dir = config.install_root / "current"
-    working_directory = config.instance_root / instance
-    exec_start = install_dir / "server.js"
+def _build_systemd_context(
+    config: AppConfig,
+    instance: str,
+    *,
+    port: int,
+    domain: str,
+    paths: InstancePaths,
+    exec_path: Path,
+    version: str,
+) -> dict[str, object]:
     environment = [
         "NODE_ENV=production",
         f"ABSSCTL_INSTANCE={instance}",
+        f"ABSSCTL_DOMAIN={domain}",
+        f"PORT={port}",
+        f"ABSSCTL_RUNTIME_DIR={config.runtime_dir}",
+        f"ABSSCTL_STATE_DIR={config.state_dir}",
+        f"ABSSCTL_LOGS_DIR={config.logs_dir}",
+        f"ABSSCTL_INSTALL_ROOT={config.install_root}",
+        f"ABSSCTL_INSTANCE_ROOT={config.instance_root}",
+        f"ABSSCTL_CONFIG_FILE={config.config_file}",
+        f"ABSSCTL_DATA_DIR={paths.data}",
+        f"ABSSCTL_VERSION={version}",
     ]
     return {
         "instance_name": instance,
         "service_user": config.service_user,
-        "working_directory": str(working_directory),
-        "exec_start": str(exec_start),
+        "working_directory": str(paths.root),
+        "exec_start": str(exec_path),
         "environment": environment,
     }
 
 
-def _build_nginx_context(config: AppConfig, instance: str) -> dict[str, object]:
-    listen_port = config.ports.base
-    upstream = f"127.0.0.1:{config.ports.base}"
-    server_name = f"{instance}.local"
-    log_prefix = config.logs_dir / instance
+def _format_systemd_detail(result: subprocess.CompletedProcess[str], *, dry_run: bool) -> str:
+    """Format a human-readable detail string for systemd commands."""
+    args = result.args
+    if isinstance(args, (list, tuple)):
+        command = " ".join(str(item) for item in args)
+    else:
+        command = str(args)
+    return f"command={command} dry_run={dry_run} rc={result.returncode}"
+
+
+def _format_nginx_detail(result: subprocess.CompletedProcess[str]) -> str:
+    args = result.args
+    if isinstance(args, (list, tuple)):
+        command = " ".join(str(item) for item in args)
+    else:
+        command = str(args)
+    stdout = (getattr(result, "stdout", "") or "").strip()
+    stderr = (getattr(result, "stderr", "") or "").strip()
+    detail = f"command={command} rc={result.returncode}"
+    if stdout:
+        detail += f" stdout={stdout}"
+    if stderr:
+        detail += f" stderr={stderr}"
+    return detail
+
+
+def _build_tls_context(config: AppConfig, domain: str) -> dict[str, object]:
+    tls_config = config.tls
+    mode = "system" if tls_config.enabled else "disabled"
+    certificate = tls_config.system.cert
+    key = tls_config.system.key
     return {
-        "listen_port": listen_port,
-        "server_name": server_name,
-        "access_log": str(log_prefix.with_suffix(".nginx.access.log")),
-        "error_log": str(log_prefix.with_suffix(".nginx.error.log")),
-        "upstream": upstream,
+        "enabled": tls_config.enabled,
+        "mode": mode,
+        "domain": domain,
+        "certificate": str(certificate),
+        "certificate_key": str(key),
+        "system": {
+            "cert": str(tls_config.system.cert),
+            "key": str(tls_config.system.key),
+        },
+        "lets_encrypt": {
+            "live_dir": str(tls_config.lets_encrypt.live_dir),
+        },
     }
 
 
-def _register_instance(runtime: RuntimeContext, name: str) -> None:
+def _build_nginx_context(
+    config: AppConfig,
+    instance: str,
+    *,
+    domain: str,
+    port: int,
+) -> dict[str, object]:
+    log_prefix = config.logs_dir / instance
+    tls_context = _build_tls_context(config, domain)
+    return {
+        "http_listen_port": 80,
+        "https_listen_port": 443,
+        "upstream_host": "127.0.0.1",
+        "upstream_port": port,
+        "server_name": domain,
+        "access_log": str(log_prefix.with_suffix(".nginx.access.log")),
+        "error_log": str(log_prefix.with_suffix(".nginx.error.log")),
+        "upstream_url": f"127.0.0.1:{port}",
+        "tls": tls_context,
+    }
+
+
+def _validate_instance_name(name: str) -> str:
+    """Validate and normalise an instance name."""
+    normalised = name.strip()
+    if not normalised:
+        raise ValueError("Instance name must be a non-empty string.")
+    if not re.fullmatch(r"[a-z0-9-]+", normalised):
+        raise ValueError("Instance name must match [a-z0-9-]+.")
+    return normalised
+
+
+def _validate_domain(value: str) -> str:
+    """Validate and normalise a domain/FQDN."""
+    normalised = value.strip().lower()
+    if not normalised:
+        raise ValueError("Domain must be a non-empty string.")
+    if len(normalised) > 255:
+        raise ValueError("Domain must be 255 characters or fewer.")
+    if normalised.startswith("-") or normalised.endswith("-"):
+        raise ValueError("Domain cannot start or end with a hyphen.")
+    if not re.fullmatch(r"[a-z0-9.-]+", normalised):
+        raise ValueError("Domain may contain letters, numbers, dots, and hyphens.")
+    return normalised
+
+
+def _determine_instance_paths(
+    config: AppConfig,
+    name: str,
+    data_dir_override: Path | None,
+) -> InstancePaths:
+    """Return the filesystem paths required for an instance."""
+    root = config.instance_root / name
+    data_dir = Path(data_dir_override).expanduser() if data_dir_override else (root / "data")
+    config_file = data_dir / "config.json"
+    runtime_dir = config.runtime_dir / "instances" / name
+    logs_dir = config.logs_dir / name
+    state_dir = config.state_dir / "instances" / name
+    return InstancePaths(
+        root=root,
+        data=data_dir,
+        config_file=config_file,
+        runtime=runtime_dir,
+        logs=logs_dir,
+        state=state_dir,
+    )
+
+
+def _build_instance_config(
+    *,
+    name: str,
+    domain: str,
+    port: int,
+    version: str,
+    paths: InstancePaths,
+    created_at: datetime,
+) -> dict[str, object]:
+    """Construct the default config.json payload for a new instance."""
+    return {
+        "schema": 1,
+        "instance": {
+            "name": name,
+            "domain": domain,
+            "created_at": created_at.isoformat(),
+        },
+        "server": {
+            "upstream": {
+                "host": "127.0.0.1",
+                "port": port,
+            },
+            "public_url": f"https://{domain}",
+            "version": version,
+        },
+        "paths": {
+            "root": str(paths.root),
+            "data": str(paths.data),
+            "config": str(paths.config_file),
+        },
+    }
+
+
+def _default_instance_domain(config: AppConfig, instance: str) -> str:
+    """Return the default domain for *instance* based on configuration."""
+    # Placeholder logic until configurable domains land.
+    return f"{instance}.local"
+
+
+def _read_instance_config(paths: InstancePaths) -> dict[str, object]:
+    """Return the instance config.json payload (empty mapping if missing)."""
+    if not paths.config_file.exists():
+        return {}
+    try:
+        payload = json.loads(paths.config_file.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Failed to parse {paths.config_file}: {exc}") from exc
+    return payload if isinstance(payload, dict) else {}
+
+
+def _write_instance_config(paths: InstancePaths, payload: Mapping[str, object]) -> None:
+    """Persist *payload* to config.json with strict permissions."""
+    content = json.dumps(payload, indent=2, sort_keys=True)
+    paths.config_file.parent.mkdir(parents=True, exist_ok=True)
+    paths.config_file.write_text(content + "\n", encoding="utf-8")
+    os.chmod(paths.config_file, 0o640)
+
+
+def _update_instance_registry(
+    runtime: RuntimeContext,
+    name: str,
+    updates: Mapping[str, object],
+    *,
+    metadata: Mapping[str, object] | None = None,
+) -> None:
+    """Update the registry entry for *name* merging metadata timestamps."""
+    existing = runtime.registry.get_instance(name)
+    if existing is None:
+        raise StateRegistryError(f"Instance '{name}' not found in registry")
+    merged_metadata = dict(existing.get("metadata", {}) if isinstance(existing, Mapping) else {})
+    now = datetime.now(UTC).isoformat()
+    merged_metadata.setdefault("created_at", now)
+    merged_metadata["last_changed"] = now
+    if metadata:
+        merged_metadata.update(metadata)
+
+    payload = dict(updates)
+    if "metadata" in payload:
+        inner = payload["metadata"]
+        if isinstance(inner, Mapping):
+            merged_metadata.update(inner)
+        else:
+            raise ValueError("metadata updates must be a mapping")
+    payload["metadata"] = merged_metadata
+    runtime.registry.update_instance(name, payload)
+
+
+def _resolve_exec_path(runtime: RuntimeContext, version: str) -> Path:
+    """Return the expected server.js path for *version*."""
+    normalized = version.strip() or runtime.config.default_version
+    if normalized == "current":
+        base = runtime.config.install_root / "current"
+    else:
+        entry = runtime.registry.get_version(normalized)
+        if entry and entry.get("path"):
+            base = Path(str(entry["path"]))
+        else:
+            base = runtime.config.install_root / f"v{normalized}"
+    return base / "server.js"
+
+
+def _register_instance(
+    runtime: RuntimeContext,
+    entry: Mapping[str, object],
+) -> None:
+    name_raw = entry.get("name", "")
+    name = str(name_raw).strip() if name_raw is not None else ""
+    if not name:
+        raise ValueError("Instance entry missing 'name'.")
     registry_data = runtime.registry.read_instances()
     raw_instances = registry_data.get("instances", [])
     if isinstance(raw_instances, list):
         existing: list[object] = list(raw_instances)
     else:
         existing = []
-    for entry in existing:
-        if isinstance(entry, Mapping) and entry.get("name") == name:
+    for candidate in existing:
+        if isinstance(candidate, Mapping) and candidate.get("name") == name:
             raise ValueError(f"Instance '{name}' already registered")
 
-    new_entry = {
-        "name": name,
-        "domain": f"{name}.local",
-        "port": runtime.config.ports.base,
-        "version": runtime.config.default_version,
-        "status": "disabled",
-    }
-    existing.append(new_entry)
+    existing.append(dict(entry))
     runtime.registry.write_instances(existing)
+
+
+def _cleanup_instance_create(
+    runtime: RuntimeContext,
+    name: str,
+    *,
+    release_port: bool = False,
+    paths: Sequence[Path] = (),
+    remove_registry: bool = False,
+) -> None:
+    """Best-effort cleanup for partially provisioned instance scaffolding."""
+    try:
+        runtime.systemd_provider.remove(name)
+    except SystemdError:
+        pass
+    try:
+        runtime.nginx_provider.remove(name)
+    except NginxError:
+        pass
+    if remove_registry:
+        try:
+            runtime.registry.remove_instance(name)
+        except StateRegistryError:
+            pass
+    for path in paths:
+        try:
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                path.unlink(missing_ok=True)
+        except OSError:
+            pass
+    if release_port:
+        try:
+            runtime.ports.release(name)
+        except PortsRegistryError:
+            pass
 
 
 def _require_instance(
@@ -465,14 +958,53 @@ def support_bundle(ctx: typer.Context) -> None:
 
 
 instances_app = typer.Typer(help="Manage Actual Budget Sync Server instances.")
+ports_app = typer.Typer(help="Inspect and manage port reservations.")
 versions_app = typer.Typer(help="Manage installed Sync Server versions.")
 backups_app = typer.Typer(help="Create and reconcile instance backups.")
 config_app = typer.Typer(help="Inspect and manage global configuration.")
 
 app.add_typer(instances_app, name="instance")
+app.add_typer(ports_app, name="ports")
 app.add_typer(versions_app, name="version")
 app.add_typer(backups_app, name="backup")
 app.add_typer(config_app, name="config")
+
+
+@ports_app.command("list")
+def ports_list(
+    ctx: typer.Context,
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit port reservations as JSON instead of a table.",
+    ),
+) -> None:
+    """List reserved instance ports."""
+    runtime = _get_runtime(ctx)
+    entries = runtime.ports.list_entries()
+
+    with runtime.logger.operation(
+        "ports list",
+        args={"json": json_output},
+        target={"kind": "ports"},
+    ) as op:
+        if json_output:
+            console.print_json(data={"ports": entries})
+            op.success("Reported port reservations as JSON.", changed=0)
+            return
+
+        table = Table(show_header=True, header_style="bold magenta")
+        table.add_column("Instance", style="bold")
+        table.add_column("Port")
+
+        if not entries:
+            table.add_row("(none)", "")
+        else:
+            for entry in entries:
+                table.add_row(entry["name"], str(entry["port"]))
+
+        console.print(table)
+        op.success("Reported port reservations.", changed=0)
 
 
 @versions_app.command("install")
@@ -890,10 +1422,14 @@ def _execute_restart_plan(
     for instance, action in plan:
         try:
             if action == "stop":
-                runtime.systemd_provider.stop(instance)
+                result = runtime.systemd_provider.stop(instance)
             else:
-                runtime.systemd_provider.start(instance)
-            op.add_step(f"systemd.{action}", status="success", detail=instance)
+                result = runtime.systemd_provider.start(instance)
+            op.add_step(
+                f"systemd.{action}",
+                status="success",
+                detail=_format_systemd_detail(result, dry_run=False),
+            )
         except SystemdError as exc:
             _provider_error(op, f"systemd {action} failed for '{instance}': {exc}")
 
@@ -1741,74 +2277,397 @@ def instance_show(
 def instance_create(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Name of the instance to create."),
+    port: int | None = typer.Option(
+        None,
+        "--port",
+        min=1,
+        help="Reserve a specific port instead of auto-allocating.",
+    ),
+    domain: str | None = typer.Option(
+        None,
+        "--domain",
+        help="Override the default domain (defaults to <name>.local).",
+    ),
+    version: str | None = typer.Option(
+        None,
+        "--version",
+        help="Bind the instance to a specific installed version (default: current).",
+    ),
+    data_dir: Path | None = DATA_DIR_OPTION,
+    no_start: bool = NO_START_OPTION,
 ) -> None:
-    """Provision a new Actual Budget instance (coming soon)."""
+    """Provision an Actual Budget instance with filesystem, registry, and provider scaffolding."""
     runtime = _get_runtime(ctx)
+
+    try:
+        normalised_name = _validate_instance_name(name)
+    except ValueError as exc:
+        with runtime.logger.operation(
+            "instance create",
+            args={"name": name},
+            target={"kind": "instance", "name": name},
+        ) as op:
+            console.print(f"[red]{exc}[/red]")
+            message = str(exc)
+            op.error(message, errors=[message], rc=1)
+        raise typer.Exit(code=1) from exc
+
+    resolved_domain = domain.strip() if domain and domain.strip() else None
+    args = {
+        "name": normalised_name,
+        "port": port,
+        "domain": resolved_domain,
+        "version": version,
+        "data_dir": str(data_dir) if data_dir else None,
+        "no_start": no_start,
+    }
+
     with runtime.logger.operation(
         "instance create",
-        args={"name": name},
-        target={"kind": "instance", "name": name},
+        args=args,
+        target={"kind": "instance", "name": normalised_name},
     ) as op:
+        name = normalised_name
         with runtime.locks.mutate_instances([name]) as bundle:
             op.set_lock_wait_ms(bundle.wait_ms)
-            systemd_context = _build_systemd_context(runtime.config, name)
-            systemd_changed = runtime.systemd_provider.render_unit(name, systemd_context)
-            if systemd_changed:
-                op.add_step(
-                    "systemd.render_unit",
-                    status="success",
-                    detail=str(runtime.systemd_provider.unit_path(name)),
-                )
 
-            nginx_context = _build_nginx_context(runtime.config, name)
-            nginx_changed = runtime.nginx_provider.render_site(name, nginx_context)
-            if nginx_changed:
-                op.add_step(
-                    "nginx.render_site",
-                    status="success",
-                    detail=str(runtime.nginx_provider.site_path(name)),
+            if runtime.registry.get_instance(name) is not None:
+                message = f"Instance '{name}' already exists in the registry."
+                console.print(f"[red]{message}[/red]")
+                op.error(message, errors=[message], rc=1)
+                raise typer.Exit(code=1)
+
+            domain_value = resolved_domain or _default_instance_domain(runtime.config, name)
+            version_value = (
+                (version or runtime.config.default_version).strip()
+                or runtime.config.default_version
+            )
+
+            if version_value != "current":
+                version_entry = runtime.registry.get_version(version_value)
+                if version_entry is None:
+                    message = f"Version '{version_value}' is not registered."
+                    console.print(f"[red]{message}[/red]")
+                    op.error(message, errors=[message], rc=1)
+                    raise typer.Exit(code=1) from None
+
+            exec_path = _resolve_exec_path(runtime, version_value)
+
+            paths = _determine_instance_paths(runtime.config, name, data_dir)
+            seen_paths: set[Path] = set()
+            conflicts: list[str] = []
+            for label, candidate in [
+                ("root", paths.root),
+                ("data", paths.data),
+                ("runtime", paths.runtime),
+                ("logs", paths.logs),
+                ("state", paths.state),
+            ]:
+                if candidate in seen_paths:
+                    continue
+                seen_paths.add(candidate)
+                if candidate.exists():
+                    conflicts.append(f"{label}:{candidate}")
+            if paths.config_file.exists():
+                conflicts.append(f"config:{paths.config_file}")
+            if conflicts:
+                message = (
+                    "Cannot create instance because the following paths already exist: "
+                    + ", ".join(conflicts)
                 )
+                console.print(f"[red]{message}[/red]")
+                op.error(message, errors=[message], rc=1)
+                raise typer.Exit(code=1)
+
+            port_reserved = False
 
             try:
-                _register_instance(runtime, name)
+                port_value = runtime.ports.reserve(name, requested_port=port)
+                op.add_step("ports.reserve", status="success", detail=str(port_value))
+            except PortsRegistryError as exc:
+                message = str(exc)
+                console.print(f"[red]{message}[/red]")
+                op.error(message, errors=[message], rc=1)
+                raise typer.Exit(code=1) from exc
+
+            port_reserved = True
+            cleanup_files: list[Path] = []
+            cleanup_dirs: list[Path] = []
+            registry_registered = False
+            registry_updated = False
+            config_written = False
+            systemd_changed = False
+            systemd_enabled = False
+            systemd_started = False
+            nginx_changed = False
+            nginx_enabled = False
+
+            created_at = datetime.now(UTC)
+
+            try:
+                for label, path in [
+                    ("filesystem.mkdir.root", paths.root),
+                    ("filesystem.mkdir.data", paths.data),
+                    ("filesystem.mkdir.runtime", paths.runtime),
+                    ("filesystem.mkdir.logs", paths.logs),
+                    ("filesystem.mkdir.state", paths.state),
+                ]:
+                    path.mkdir(parents=True, exist_ok=False)
+                    os.chmod(path, 0o750)
+                    op.add_step(label, status="success", detail=str(path))
+                    cleanup_dirs.append(path)
+
+                config_payload = _build_instance_config(
+                    name=name,
+                    domain=domain_value,
+                    port=port_value,
+                    version=version_value,
+                    paths=paths,
+                    created_at=created_at,
+                )
+                _write_instance_config(paths, config_payload)
+                op.add_step("config.write", status="success", detail=str(paths.config_file))
+                config_written = True
+                cleanup_files.append(paths.config_file)
+
+                registry_entry = {
+                    "name": name,
+                    "domain": domain_value,
+                    "port": port_value,
+                    "version": version_value,
+                    "status": "provisioning",
+                    "paths": {
+                        "root": str(paths.root),
+                        "data": str(paths.data),
+                        "config": str(paths.config_file),
+                        "runtime": str(paths.runtime),
+                        "logs": str(paths.logs),
+                        "state": str(paths.state),
+                        "systemd_unit": str(runtime.systemd_provider.unit_path(name)),
+                        "nginx_site": str(runtime.nginx_provider.site_path(name)),
+                        "nginx_enabled": str(runtime.nginx_provider.enabled_path(name)),
+                    },
+                    "metadata": {
+                        "created_at": created_at.isoformat(),
+                        "auto_start": not no_start,
+                        "domain": domain_value,
+                        "port": port_value,
+                    },
+                }
+                _register_instance(runtime, registry_entry)
                 op.add_step(
                     "registry.write_instances",
                     status="success",
                     detail=f"registered:{name}",
                 )
+                registry_registered = True
+
+                systemd_context = _build_systemd_context(
+                    runtime.config,
+                    name,
+                    port=port_value,
+                    domain=domain_value,
+                    paths=paths,
+                    exec_path=exec_path,
+                    version=version_value,
+                )
+                systemd_changed = runtime.systemd_provider.render_unit(name, systemd_context)
+                if systemd_changed:
+                    op.add_step(
+                        "systemd.render_unit",
+                        status="success",
+                        detail=str(runtime.systemd_provider.unit_path(name)),
+                    )
+
+                systemctl_missing = shutil.which(runtime.systemd_provider.systemctl_bin) is None
+                enable_result = runtime.systemd_provider.enable(name, dry_run=systemctl_missing)
+                enable_status = "success" if not systemctl_missing else "skipped"
+                op.add_step(
+                    "systemd.enable",
+                    status=enable_status,
+                    detail=_format_systemd_detail(enable_result, dry_run=systemctl_missing),
+                )
+                systemd_enabled = not systemctl_missing
+
+                if no_start:
+                    op.add_step("systemd.start", status="skipped", detail="--no-start requested")
+                else:
+                    start_result = runtime.systemd_provider.start(name, dry_run=systemctl_missing)
+                    start_status = "success" if not systemctl_missing else "skipped"
+                    op.add_step(
+                        "systemd.start",
+                        status=start_status,
+                        detail=_format_systemd_detail(start_result, dry_run=systemctl_missing),
+                    )
+                    systemd_started = not systemctl_missing
+
+                nginx_context = _build_nginx_context(
+                    runtime.config,
+                    name,
+                    domain=domain_value,
+                    port=port_value,
+                )
+                nginx_result = runtime.nginx_provider.render_site(name, nginx_context)
+                if nginx_result.validation_error is not None:
+                    _cleanup_instance_create(
+                        runtime,
+                        name,
+                        release_port=True,
+                        paths=cleanup_files + list(reversed(cleanup_dirs)),
+                        remove_registry=registry_registered,
+                    )
+                    _provider_error(
+                        op,
+                        f"nginx validation failed for '{name}': {nginx_result.validation_error}",
+                    )
+                nginx_changed = nginx_result.changed
+                if nginx_changed:
+                    op.add_step(
+                        "nginx.render_site",
+                        status="success",
+                        detail=str(runtime.nginx_provider.site_path(name)),
+                    )
+                    if nginx_result.validation is not None:
+                        op.add_step(
+                            "nginx.validate",
+                            status="success",
+                            detail=_format_nginx_detail(nginx_result.validation),
+                        )
+                    if nginx_result.reload is not None:
+                        op.add_step(
+                            "nginx.reload",
+                            status="success",
+                            detail=_format_nginx_detail(nginx_result.reload),
+                        )
+                runtime.nginx_provider.enable(name)
+                op.add_step(
+                    "nginx.enable",
+                    status="success",
+                    detail=str(runtime.nginx_provider.enabled_path(name)),
+                )
+                nginx_enabled = True
+
+                activated_at = datetime.now(UTC)
+                final_status = "running" if (not no_start and systemd_started) else "enabled"
+                metadata_updates = {
+                    "created_at": created_at.isoformat(),
+                    "auto_start": not no_start,
+                    "activated_at": activated_at.isoformat(),
+                }
+                if not no_start and systemd_started:
+                    metadata_updates["last_started_at"] = activated_at.isoformat()
+                _record_instance_state(
+                    runtime,
+                    name,
+                    status=final_status,
+                    paths=paths,
+                    port=port_value,
+                    domain=domain_value,
+                    systemd_enabled=systemd_enabled,
+                    systemd_state="running" if final_status == "running" else final_status,
+                    nginx_enabled=nginx_enabled,
+                    metadata=metadata_updates,
+                )
+                op.add_step("registry.update", status="success", detail=f"status={final_status}")
+                registry_updated = True
+
+                changed_count = (
+                    1  # ports.reserve
+                    + len(cleanup_dirs)
+                    + int(config_written)
+                    + int(systemd_changed)
+                    + int(systemd_enabled)
+                    + int(systemd_started and not no_start)
+                    + int(nginx_changed)
+                    + int(nginx_enabled)
+                    + int(registry_registered)
+                    + int(registry_updated)
+                )
+
+                console.print(
+                    "[green]Provisioned instance "
+                    f"'{name}' on port {port_value} ({domain_value}).[/green]"
+                )
+                if no_start:
+                    console.print("[yellow]Instance start skipped (--no-start).[/yellow]")
+                elif not systemd_started:
+                    console.print(
+                        "[yellow]systemctl not available; start recorded as dry-run.[/yellow]"
+                    )
+
+                op.success(
+                    "Instance provisioned.",
+                    changed=changed_count,
+                    context={"status": final_status},
+                )
             except ValueError as exc:
+                _cleanup_instance_create(
+                    runtime,
+                    name,
+                    release_port=port_reserved,
+                    paths=cleanup_files + list(reversed(cleanup_dirs)),
+                    remove_registry=registry_registered,
+                )
                 console.print(f"[red]{exc}[/red]")
                 op.error(str(exc), errors=[str(exc)], rc=1)
                 raise typer.Exit(code=1) from exc
-
-            changed_count = int(systemd_changed) + int(nginx_changed) + 1
-            console.print(
-                f"[green]Rendered systemd/nginx scaffolding for instance '{name}'.[/green]"
-            )
-            op.success(
-                "Instance scaffolding rendered.",
-                changed=changed_count,
-            )
+            except (SystemdError, NginxError) as exc:
+                _cleanup_instance_create(
+                    runtime,
+                    name,
+                    release_port=port_reserved,
+                    paths=cleanup_files + list(reversed(cleanup_dirs)),
+                    remove_registry=registry_registered,
+                )
+                _provider_error(op, f"Provisioning failed for '{name}': {exc}")
+            except OSError as exc:
+                _cleanup_instance_create(
+                    runtime,
+                    name,
+                    release_port=port_reserved,
+                    paths=cleanup_files + list(reversed(cleanup_dirs)),
+                    remove_registry=registry_registered,
+                )
+                message = f"Filesystem error provisioning '{name}': {exc}"
+                console.print(f"[red]{message}[/red]")
+                op.error(message, errors=[str(exc)], rc=1)
+                raise typer.Exit(code=1) from exc
 
 
 @instances_app.command("enable")
 def instance_enable(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Name of the instance to enable."),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Report the actions that would be taken without applying changes.",
+    ),
 ) -> None:
     """Enable an instance's systemd unit and nginx site."""
     runtime = _get_runtime(ctx)
     with runtime.logger.operation(
         "instance enable",
-        args={"name": name},
+        args={"name": name, "dry_run": dry_run},
         target={"kind": "instance", "name": name},
     ) as op:
         with runtime.locks.mutate_instances([name]) as bundle:
             op.set_lock_wait_ms(bundle.wait_ms)
             _require_instance(runtime, name, op)
+            if dry_run:
+                op.add_step("systemd.enable", status="skipped", detail="dry-run")
+                op.add_step("nginx.enable", status="skipped", detail="dry-run")
+                console.print(f"[yellow]Dry run[/yellow]: Instance '{name}' would be enabled.")
+                op.success("Instance enable dry-run complete.", changed=0)
+                return
+
             try:
-                runtime.systemd_provider.enable(name)
-                op.add_step("systemd.enable", status="success")
+                result = runtime.systemd_provider.enable(name, dry_run=False)
+                op.add_step(
+                    "systemd.enable",
+                    status="success",
+                    detail=_format_systemd_detail(result, dry_run=False),
+                )
             except SystemdError as exc:
                 _provider_error(op, f"systemd enable failed: {exc}")
             try:
@@ -1816,7 +2675,15 @@ def instance_enable(
                 op.add_step("nginx.enable", status="success")
             except NginxError as exc:
                 _provider_error(op, f"nginx enable failed: {exc}")
-            runtime.registry.update_instance(name, {"status": "enabled"})
+            metadata_updates = {"enabled_at": datetime.now(UTC).isoformat()}
+            _record_instance_state(
+                runtime,
+                name,
+                status="enabled",
+                systemd_enabled=True,
+                systemd_state="enabled",
+                metadata=metadata_updates,
+            )
             op.add_step("registry.update", status="success", detail="status=enabled")
             console.print(f"[green]Instance '{name}' enabled.[/green]")
             op.success("Instance enabled.", changed=3)
@@ -1826,20 +2693,37 @@ def instance_enable(
 def instance_disable(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Name of the instance to disable."),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Report the actions that would be taken without applying changes.",
+    ),
 ) -> None:
     """Disable an instance's systemd unit and nginx site."""
     runtime = _get_runtime(ctx)
     with runtime.logger.operation(
         "instance disable",
-        args={"name": name},
+        args={"name": name, "dry_run": dry_run},
         target={"kind": "instance", "name": name},
     ) as op:
         with runtime.locks.mutate_instances([name]) as bundle:
             op.set_lock_wait_ms(bundle.wait_ms)
             _require_instance(runtime, name, op)
+
+            if dry_run:
+                op.add_step("systemd.disable", status="skipped", detail="dry-run")
+                op.add_step("nginx.disable", status="skipped", detail="dry-run")
+                console.print(f"[yellow]Dry run[/yellow]: Instance '{name}' would be disabled.")
+                op.success("Instance disable dry-run complete.", changed=0)
+                return
+
             try:
-                runtime.systemd_provider.disable(name)
-                op.add_step("systemd.disable", status="success")
+                result = runtime.systemd_provider.disable(name, dry_run=False)
+                op.add_step(
+                    "systemd.disable",
+                    status="success",
+                    detail=_format_systemd_detail(result, dry_run=False),
+                )
             except SystemdError as exc:
                 _provider_error(op, f"systemd disable failed: {exc}")
             try:
@@ -1847,7 +2731,15 @@ def instance_disable(
                 op.add_step("nginx.disable", status="success")
             except NginxError as exc:
                 _provider_error(op, f"nginx disable failed: {exc}")
-            runtime.registry.update_instance(name, {"status": "disabled"})
+            metadata_updates = {"disabled_at": datetime.now(UTC).isoformat()}
+            _record_instance_state(
+                runtime,
+                name,
+                status="disabled",
+                systemd_enabled=False,
+                systemd_state="disabled",
+                metadata=metadata_updates,
+            )
             op.add_step("registry.update", status="success", detail="status=disabled")
             console.print(f"[yellow]Instance '{name}' disabled.[/yellow]")
             op.success("Instance disabled.", changed=3)
@@ -1857,23 +2749,47 @@ def instance_disable(
 def instance_start(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Name of the instance to start."),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Report the actions that would be taken without applying changes.",
+    ),
 ) -> None:
     """Start the systemd unit for an instance."""
     runtime = _get_runtime(ctx)
     with runtime.logger.operation(
         "instance start",
-        args={"name": name},
+        args={"name": name, "dry_run": dry_run},
         target={"kind": "instance", "name": name},
     ) as op:
         with runtime.locks.mutate_instances([name]) as bundle:
             op.set_lock_wait_ms(bundle.wait_ms)
             _require_instance(runtime, name, op)
+
+            if dry_run:
+                op.add_step("systemd.start", status="skipped", detail="dry-run")
+                console.print(f"[yellow]Dry run[/yellow]: Instance '{name}' would be started.")
+                op.success("Instance start dry-run complete.", changed=0)
+                return
+
             try:
-                runtime.systemd_provider.start(name)
-                op.add_step("systemd.start", status="success")
+                result = runtime.systemd_provider.start(name, dry_run=False)
+                op.add_step(
+                    "systemd.start",
+                    status="success",
+                    detail=_format_systemd_detail(result, dry_run=False),
+                )
             except SystemdError as exc:
                 _provider_error(op, f"systemd start failed: {exc}")
-            runtime.registry.update_instance(name, {"status": "running"})
+            metadata_updates = {"last_started_at": datetime.now(UTC).isoformat()}
+            _record_instance_state(
+                runtime,
+                name,
+                status="running",
+                systemd_state="running",
+                systemd_enabled=True,
+                metadata=metadata_updates,
+            )
             op.add_step("registry.update", status="success", detail="status=running")
             console.print(f"[green]Instance '{name}' started.[/green]")
             op.success("Instance started.", changed=2)
@@ -1883,23 +2799,47 @@ def instance_start(
 def instance_stop(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Name of the instance to stop."),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Report the actions that would be taken without applying changes.",
+    ),
 ) -> None:
     """Stop the systemd unit for an instance."""
     runtime = _get_runtime(ctx)
     with runtime.logger.operation(
         "instance stop",
-        args={"name": name},
+        args={"name": name, "dry_run": dry_run},
         target={"kind": "instance", "name": name},
     ) as op:
         with runtime.locks.mutate_instances([name]) as bundle:
             op.set_lock_wait_ms(bundle.wait_ms)
             _require_instance(runtime, name, op)
+
+            if dry_run:
+                op.add_step("systemd.stop", status="skipped", detail="dry-run")
+                console.print(f"[yellow]Dry run[/yellow]: Instance '{name}' would be stopped.")
+                op.success("Instance stop dry-run complete.", changed=0)
+                return
+
             try:
-                runtime.systemd_provider.stop(name)
-                op.add_step("systemd.stop", status="success")
+                result = runtime.systemd_provider.stop(name)
+                op.add_step(
+                    "systemd.stop",
+                    status="success",
+                    detail=_format_systemd_detail(result, dry_run=False),
+                )
             except SystemdError as exc:
                 _provider_error(op, f"systemd stop failed: {exc}")
-            runtime.registry.update_instance(name, {"status": "stopped"})
+            metadata_updates = {"last_stopped_at": datetime.now(UTC).isoformat()}
+            _record_instance_state(
+                runtime,
+                name,
+                status="stopped",
+                systemd_state="stopped",
+                systemd_enabled=False,
+                metadata=metadata_updates,
+            )
             op.add_step("registry.update", status="success", detail="status=stopped")
             console.print(f"[yellow]Instance '{name}' stopped.[/yellow]")
             op.success("Instance stopped.", changed=2)
@@ -1909,34 +2849,162 @@ def instance_stop(
 def instance_restart(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Name of the instance to restart."),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Report the actions that would be taken without applying changes.",
+    ),
 ) -> None:
     """Restart the systemd unit for an instance."""
     runtime = _get_runtime(ctx)
     with runtime.logger.operation(
         "instance restart",
-        args={"name": name},
+        args={"name": name, "dry_run": dry_run},
         target={"kind": "instance", "name": name},
     ) as op:
         with runtime.locks.mutate_instances([name]) as bundle:
             op.set_lock_wait_ms(bundle.wait_ms)
             _require_instance(runtime, name, op)
+
+            if dry_run:
+                op.add_step("systemd.stop", status="skipped", detail="dry-run")
+                op.add_step("systemd.start", status="skipped", detail="dry-run")
+                console.print(f"[yellow]Dry run[/yellow]: Instance '{name}' would be restarted.")
+                op.success("Instance restart dry-run complete.", changed=0)
+                return
+
             try:
-                runtime.systemd_provider.stop(name)
-                op.add_step("systemd.stop", status="success")
-                runtime.systemd_provider.start(name)
-                op.add_step("systemd.start", status="success")
+                stop_result = runtime.systemd_provider.stop(name)
+                op.add_step(
+                    "systemd.stop",
+                    status="success",
+                    detail=_format_systemd_detail(stop_result, dry_run=False),
+                )
+                start_result = runtime.systemd_provider.start(name)
+                op.add_step(
+                    "systemd.start",
+                    status="success",
+                    detail=_format_systemd_detail(start_result, dry_run=False),
+                )
             except SystemdError as exc:
                 _provider_error(op, f"systemd restart failed: {exc}")
-            runtime.registry.update_instance(name, {"status": "running"})
+            metadata_updates = {"last_restarted_at": datetime.now(UTC).isoformat()}
+            _record_instance_state(
+                runtime,
+                name,
+                status="running",
+                systemd_state="running",
+                systemd_enabled=True,
+                metadata=metadata_updates,
+            )
             op.add_step("registry.update", status="success", detail="status=running")
             console.print(f"[green]Instance '{name}' restarted.[/green]")
             op.success("Instance restarted.", changed=3)
+
+
+@instances_app.command("status")
+def instance_status_command(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="Name of the instance to query."),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit structured JSON instead of human-readable output.",
+    ),
+) -> None:
+    """Report the registry/systemd state for an instance."""
+    runtime = _get_runtime(ctx)
+    with runtime.logger.operation(
+        "instance status",
+        args={"name": name, "json": json_output},
+        target={"kind": "instance", "name": name},
+    ) as op:
+        entry = _require_instance(runtime, name, op)
+        paths = _instance_paths_from_entry(runtime.config, name, entry)
+        status_info = runtime.instance_status_provider.status(name, entry)
+        registry_status = str(entry.get("status", "unknown") or "unknown")
+
+        systemd_output = ""
+        try:
+            result = runtime.systemd_provider.status(name)
+            op.add_step(
+                "systemd.status",
+                status="success",
+                detail=_format_systemd_detail(result, dry_run=False),
+            )
+            systemd_output = (getattr(result, "stdout", "") or "").strip()
+        except SystemdError as exc:
+            op.add_step("systemd.status", status="warning", detail=str(exc))
+            systemd_output = str(exc)
+
+        metadata = entry.get("metadata") if isinstance(entry, Mapping) else {}
+        diagnostics_meta = (
+            dict(metadata.get("diagnostics", {}))
+            if isinstance(metadata, Mapping)
+            else {}
+        )
+
+        payload = {
+            "name": name,
+            "state": status_info.state,
+            "detail": status_info.detail,
+            "registry_status": registry_status,
+            "systemd_output": systemd_output,
+            "diagnostics": diagnostics_meta,
+            "paths": entry.get("paths", {}),
+        }
+
+        if json_output:
+            console.print_json(data=payload)
+        else:
+            table = Table(show_header=False)
+            table.add_row("State", status_info.state)
+            table.add_row("Registry", registry_status)
+            if status_info.detail:
+                table.add_row("Detail", status_info.detail)
+            if systemd_output:
+                table.add_row("systemd", systemd_output)
+            systemd_diag = diagnostics_meta.get("systemd")
+            if isinstance(systemd_diag, Mapping):
+                enabled_flag = systemd_diag.get("enabled")
+                if enabled_flag is not None:
+                    table.add_row("systemd Enabled", str(enabled_flag))
+                unit_exists = systemd_diag.get("unit_exists")
+                if unit_exists is not None:
+                    table.add_row("Unit Exists", str(unit_exists))
+            nginx_diag = diagnostics_meta.get("nginx")
+            if isinstance(nginx_diag, Mapping):
+                enabled_flag = nginx_diag.get("enabled")
+                if enabled_flag is not None:
+                    table.add_row("nginx Enabled", str(enabled_flag))
+            console.print(table)
+
+        _record_instance_state(
+            runtime,
+            name,
+            paths=paths,
+            systemd_state=status_info.state,
+            metadata={"last_status_check": datetime.now(UTC).isoformat()},
+            update_last_changed=False,
+        )
+
+        op.success("Reported instance status.", changed=0)
 
 
 @instances_app.command("delete")
 def instance_delete(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Name of the instance to delete."),
+    purge_data: bool = typer.Option(
+        False,
+        "--purge-data",
+        help="Also remove the instance data directory (default: keep data).",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Report the actions that would be taken without applying changes.",
+    ),
     no_backup: bool = typer.Option(
         False,
         "--no-backup",
@@ -1957,12 +3025,35 @@ def instance_delete(
     runtime = _get_runtime(ctx)
     with runtime.logger.operation(
         "instance delete",
-        args={"name": name},
+        args={
+            "name": name,
+            "purge_data": purge_data,
+            "dry_run": dry_run,
+        },
         target={"kind": "instance", "name": name},
     ) as op:
         with runtime.locks.mutate_instances([name]) as bundle:
             op.set_lock_wait_ms(bundle.wait_ms)
-            _require_instance(runtime, name, op)
+            entry = _require_instance(runtime, name, op)
+            paths = _instance_paths_from_entry(runtime.config, name, entry)
+
+            if dry_run:
+                op.add_step("backup.prompt", status="skipped", detail="dry-run")
+                op.add_step("systemd.stop", status="skipped", detail="dry-run")
+                op.add_step("systemd.disable", status="skipped", detail="dry-run")
+                op.add_step("nginx.disable", status="skipped", detail="dry-run")
+                op.add_step("systemd.remove", status="skipped", detail="dry-run")
+                op.add_step("nginx.remove", status="skipped", detail="dry-run")
+                op.add_step("filesystem.cleanup", status="skipped", detail="dry-run")
+                op.add_step("registry.remove", status="skipped", detail="dry-run")
+                op.add_step("ports.release", status="skipped", detail="dry-run")
+                message = (
+                    f"[yellow]Dry run[/yellow]: Instance '{name}' would be deleted "
+                    f"({'including data' if purge_data else 'preserving data'})."
+                )
+                console.print(message)
+                op.success("Instance delete dry-run complete.", changed=0)
+                return
 
             backup_ids: list[str] = []
 
@@ -1987,30 +3078,74 @@ def instance_delete(
                 backup_message=backup_message,
                 on_accept=_handle_instance_delete,
             )
+
+            was_running = str(entry.get("status", "")).lower() == "running"
             try:
-                runtime.systemd_provider.stop(name)
-                op.add_step("systemd.stop", status="success")
+                if was_running:
+                    stop_result = runtime.systemd_provider.stop(name)
+                    op.add_step(
+                        "systemd.stop",
+                        status="success",
+                        detail=_format_systemd_detail(stop_result, dry_run=False),
+                    )
+                else:
+                    op.add_step("systemd.stop", status="skipped", detail="not-running")
             except SystemdError:
                 # Non-fatal if service isn't running.
                 op.add_step("systemd.stop", status="warning", detail="service-not-running")
             try:
-                runtime.systemd_provider.disable(name)
-                op.add_step("systemd.disable", status="success")
+                disable_result = runtime.systemd_provider.disable(name)
+                op.add_step(
+                    "systemd.disable",
+                    status="success",
+                    detail=_format_systemd_detail(disable_result, dry_run=False),
+                )
             except SystemdError as exc:
-                _provider_error(op, f"systemd disable failed: {exc}")
+                op.add_step("systemd.disable", status="warning", detail=str(exc))
             try:
                 runtime.nginx_provider.disable(name)
                 op.add_step("nginx.disable", status="success")
             except NginxError as exc:
-                _provider_error(op, f"nginx disable failed: {exc}")
+                op.add_step("nginx.disable", status="warning", detail=str(exc))
             runtime.systemd_provider.remove(name)
             op.add_step("systemd.remove", status="success")
             runtime.nginx_provider.remove(name)
             op.add_step("nginx.remove", status="success")
+
+            # Filesystem cleanup -------------------------------------------------
+            removed_paths: list[str] = []
+            for directory in [paths.runtime, paths.logs, paths.state]:
+                if directory.exists():
+                    shutil.rmtree(directory, ignore_errors=True)
+                    removed_paths.append(str(directory))
+            if purge_data:
+                if paths.root.exists():
+                    shutil.rmtree(paths.root, ignore_errors=True)
+                    removed_paths.append(str(paths.root))
+                else:
+                    op.add_step("filesystem.purge", status="warning", detail="root-missing")
+            else:
+                op.add_step(
+                    "filesystem.purge",
+                    status="skipped",
+                    detail="data-retained",
+                )
+
+            if removed_paths:
+                op.add_step("filesystem.cleanup", status="success", detail=", ".join(removed_paths))
+
             runtime.registry.remove_instance(name)
             op.add_step("registry.remove", status="success")
-            console.print(f"[yellow]Instance '{name}' removed.[/yellow]")
-            op.success("Instance deleted.", changed=6, backups=backup_ids)
+            try:
+                runtime.ports.release(name)
+                op.add_step("ports.release", status="success")
+            except PortsRegistryError:
+                op.add_step("ports.release", status="warning", detail="not-found")
+            console.print(
+                f"[yellow]Instance '{name}' removed"
+                f"{' and data purged' if purge_data else ''}.[/yellow]"
+            )
+            op.success("Instance deleted.", changed=8, backups=backup_ids)
 @versions_app.command("list")
 def version_list(
     ctx: typer.Context,
@@ -2882,3 +4017,1005 @@ def backup_restore(
             changed=0,
             context=result_payload,
         )
+@instances_app.command("logs")
+def instance_logs(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="Name of the instance to read logs for."),
+    lines: int | None = typer.Option(
+        None,
+        "--lines",
+        "-n",
+        min=1,
+        help="Show the last N log lines (default: systemd journal default).",
+    ),
+    since: str | None = typer.Option(
+        None,
+        "--since",
+        help="Show logs since the given timestamp (passed to journalctl).",
+    ),
+) -> None:
+    """Tail the systemd journal for an instance."""
+    runtime = _get_runtime(ctx)
+    with runtime.logger.operation(
+        "instance logs",
+        args={"name": name, "lines": lines, "since": since},
+        target={"kind": "instance", "name": name},
+    ) as op:
+        _require_instance(runtime, name, op)
+        try:
+            result = runtime.systemd_provider.logs(
+                name,
+                lines=lines,
+                since=since,
+                follow=False,
+            )
+        except SystemdError as exc:
+            _provider_error(op, f"systemd logs failed: {exc}")
+
+        op.add_step(
+            "systemd.logs",
+            status="success",
+            detail=_format_systemd_detail(result, dry_run=False),
+        )
+
+        stdout = (getattr(result, "stdout", "") or "").rstrip()
+        stderr = (getattr(result, "stderr", "") or "").rstrip()
+        if stdout:
+            console.print(stdout)
+        if stderr:
+            console.print(stderr, style="red")
+
+        _record_instance_state(
+            runtime,
+            name,
+            metadata={"last_logs_at": datetime.now(UTC).isoformat()},
+            update_last_changed=False,
+        )
+
+        op.success("Fetched instance logs.", changed=0)
+@instances_app.command("env")
+def instance_env(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="Instance to describe."),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit environment variables as JSON object.",
+    ),
+) -> None:
+    """Print environment variables for an instance."""
+    runtime = _get_runtime(ctx)
+    with runtime.logger.operation(
+        "instance env",
+        args={"name": name, "json": json_output},
+        target={"kind": "instance", "name": name},
+    ) as op:
+        entry = _require_instance(runtime, name, op)
+        paths = _instance_paths_from_entry(runtime.config, name, entry)
+        config_payload = _read_instance_config(paths)
+
+        port_value: object = entry.get("port")
+        if port_value in (None, "", 0):
+            reserved = runtime.ports.get_port(name)
+            port_value = reserved if reserved is not None else config_payload.get("port")
+        port_int = _coerce_port(port_value, runtime.config.ports.base)
+
+        domain_value = str(entry.get("domain") or "").strip()
+        if not domain_value:
+            instance_section = config_payload.get("instance")
+            if isinstance(instance_section, Mapping):
+                domain_value = str(instance_section.get("domain", "")).strip()
+        if not domain_value:
+            domain_value = _default_instance_domain(runtime.config, name)
+
+        version_value = (
+            str(entry.get("version") or "").strip()
+            or runtime.config.default_version
+        )
+
+        exec_path = _resolve_exec_path(runtime, version_value)
+        systemd_context = _build_systemd_context(
+            runtime.config,
+            name,
+            port=port_int,
+            domain=domain_value,
+            paths=paths,
+            exec_path=exec_path,
+            version=version_value,
+        )
+        env_raw = systemd_context.get("environment", [])
+        env_list = list(env_raw) if isinstance(env_raw, list) else []
+        env_mapping: dict[str, str] = {}
+        for item in env_list:
+            if not isinstance(item, str):
+                continue
+            key, _, value = item.partition("=")
+            env_mapping[key] = value
+
+        op.add_step("environment.build", status="success", detail=str(len(env_mapping)))
+
+        if json_output:
+            console.print_json(data=env_mapping)
+        else:
+            for key, value in sorted(env_mapping.items()):
+                console.print(f"{key}={value}")
+
+        op.success("Reported instance environment variables.", changed=0)
+
+
+@instances_app.command("set-fqdn")
+def instance_set_fqdn(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="Instance to update."),
+    fqdn: str = typer.Argument(..., help="New fully qualified domain name."),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Report the actions that would be taken without applying changes.",
+    ),
+    no_backup: bool = typer.Option(
+        False,
+        "--no-backup",
+        help="Skip the safety prompt to run a backup before continuing.",
+    ),
+    backup_message: str | None = typer.Option(
+        None,
+        "--backup-message",
+        help="Annotate the recommended backup with a custom message.",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        help="Auto-confirm backup prompts (non-interactive mode).",
+    ),
+) -> None:
+    """Update the instance domain and re-render nginx assets."""
+    runtime = _get_runtime(ctx)
+    with runtime.logger.operation(
+        "instance set-fqdn",
+        args={"name": name, "fqdn": fqdn, "dry_run": dry_run},
+        target={"kind": "instance", "name": name},
+    ) as op:
+        new_domain: str
+        try:
+            new_domain = _validate_domain(fqdn)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            op.error(str(exc), errors=[str(exc)], rc=1)
+            raise typer.Exit(code=1) from exc
+
+        with runtime.locks.mutate_instances([name]) as bundle:
+            op.set_lock_wait_ms(bundle.wait_ms)
+            entry = _require_instance(runtime, name, op)
+            current_domain = str(entry.get("domain") or "").strip()
+            if current_domain == new_domain:
+                console.print("[yellow]Domain unchanged; nothing to do.[/yellow]")
+                op.success("Domain unchanged.", changed=0)
+                return
+
+            paths = _instance_paths_from_entry(runtime.config, name, entry)
+            config_payload = _read_instance_config(paths)
+            port_value: object = entry.get("port")
+            if port_value in (None, "", 0):
+                port_value = runtime.ports.get_port(name)
+            port_int = _coerce_port(port_value, runtime.config.ports.base)
+
+            if dry_run:
+                op.add_step("backup.prompt", status="skipped", detail="dry-run")
+                op.add_step("config.write", status="skipped", detail="dry-run")
+                op.add_step("nginx.render_site", status="skipped", detail="dry-run")
+                op.add_step("registry.update", status="skipped", detail="dry-run")
+                console.print(
+                    f"[yellow]Dry run[/yellow]: Instance '{name}' domain would be updated "
+                    f"from '{current_domain or '(default)'}' to '{new_domain}'."
+                )
+                op.success("Domain update dry-run complete.", changed=0)
+                return
+
+            _maybe_prompt_backup(
+                operation="instance set-fqdn",
+                op=op,
+                skip_backup=no_backup,
+                auto_confirm=yes,
+                backup_message=backup_message,
+                on_accept=lambda scope: None,
+            )
+
+            instance_section = config_payload.setdefault("instance", {})
+            if not isinstance(instance_section, dict):
+                instance_section = {}
+                config_payload["instance"] = instance_section
+            instance_section["domain"] = new_domain
+
+            server_section = config_payload.setdefault("server", {})
+            if not isinstance(server_section, dict):
+                server_section = {}
+                config_payload["server"] = server_section
+            upstream = server_section.setdefault("upstream", {})
+            if not isinstance(upstream, dict):
+                upstream = {}
+                server_section["upstream"] = upstream
+            upstream["port"] = port_int
+            upstream.setdefault("host", "127.0.0.1")
+            server_section["public_url"] = f"https://{new_domain}"
+            server_section.setdefault(
+                "version",
+                entry.get("version", runtime.config.default_version),
+            )
+
+            _write_instance_config(paths, config_payload)
+            op.add_step("config.write", status="success", detail=str(paths.config_file))
+
+            nginx_context = _build_nginx_context(
+                runtime.config,
+                name,
+                domain=new_domain,
+                port=port_int,
+            )
+            nginx_result = runtime.nginx_provider.render_site(name, nginx_context)
+            if nginx_result.validation_error:
+                _provider_error(
+                    op,
+                    f"nginx validation failed for '{name}': {nginx_result.validation_error}",
+                )
+            op.add_step(
+                "nginx.render_site",
+                status="success" if nginx_result.changed else "noop",
+                detail=str(runtime.nginx_provider.site_path(name)),
+            )
+            if nginx_result.validation is not None:
+                op.add_step(
+                    "nginx.validate",
+                    status="success",
+                    detail=_format_nginx_detail(nginx_result.validation),
+                )
+            if nginx_result.reload is not None:
+                op.add_step(
+                    "nginx.reload",
+                    status="success",
+                    detail=_format_nginx_detail(nginx_result.reload),
+                )
+
+            runtime.nginx_provider.enable(name)
+            op.add_step(
+                "nginx.enable",
+                status="success",
+                detail=str(runtime.nginx_provider.enabled_path(name)),
+            )
+
+            _record_instance_state(
+                runtime,
+                name,
+                domain=new_domain,
+                metadata={"domain_changed_at": datetime.now(UTC).isoformat()},
+                nginx_enabled=True,
+            )
+            op.add_step("registry.update", status="success", detail=f"domain={new_domain}")
+
+            console.print(
+                f"[green]Updated domain for instance '{name}' to {new_domain}.[/green]"
+            )
+            op.success("Instance domain updated.", changed=3)
+@instances_app.command("set-port")
+def instance_set_port(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="Instance to update."),
+    port: int = typer.Argument(..., min=1, help="New port to bind to Actual."),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Report the actions that would be taken without applying changes.",
+    ),
+    no_backup: bool = typer.Option(
+        False,
+        "--no-backup",
+        help="Skip the safety prompt to run a backup before continuing.",
+    ),
+    backup_message: str | None = typer.Option(
+        None,
+        "--backup-message",
+        help="Annotate the recommended backup with a custom message.",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        help="Auto-confirm backup prompts (non-interactive mode).",
+    ),
+) -> None:
+    """Update the instance port, re-render providers, and restart if needed."""
+    runtime = _get_runtime(ctx)
+    with runtime.logger.operation(
+        "instance set-port",
+        args={"name": name, "port": port, "dry_run": dry_run},
+        target={"kind": "instance", "name": name},
+    ) as op:
+        if port < runtime.config.ports.base:
+            message = (
+                f"Port {port} is below the configured base {runtime.config.ports.base}."
+            )
+            console.print(f"[red]{message}[/red]")
+            op.error(message, errors=[message], rc=1)
+            raise typer.Exit(code=1)
+
+        with runtime.locks.mutate_instances([name]) as bundle:
+            op.set_lock_wait_ms(bundle.wait_ms)
+            entry = _require_instance(runtime, name, op)
+
+            current_port_raw: object = entry.get("port")
+            if current_port_raw in (None, "", 0):
+                current_port_raw = runtime.ports.get_port(name)
+            current_port = _coerce_port(current_port_raw, runtime.config.ports.base)
+
+            if current_port == port:
+                console.print("[yellow]Port unchanged; nothing to do.[/yellow]")
+                op.success("Port unchanged.", changed=0)
+                return
+
+            existing_ports = runtime.ports.list_entries()
+            conflict = next(
+                (item for item in existing_ports if item["port"] == port and item["name"] != name),
+                None,
+            )
+            if conflict:
+                message = (
+                    f"Port {port} is already reserved by instance '{conflict['name']}'."
+                )
+                console.print(f"[red]{message}[/red]")
+                op.error(message, errors=[message], rc=1)
+                raise typer.Exit(code=1)
+
+            paths = _instance_paths_from_entry(runtime.config, name, entry)
+            config_payload = _read_instance_config(paths)
+            version_value = (
+                str(entry.get("version") or "").strip()
+                or runtime.config.default_version
+            )
+            domain_value = str(entry.get("domain") or "").strip() or _default_instance_domain(
+                runtime.config, name
+            )
+
+            if dry_run:
+                op.add_step("backup.prompt", status="skipped", detail="dry-run")
+                op.add_step("ports.release", status="skipped", detail="dry-run")
+                op.add_step("ports.reserve", status="skipped", detail="dry-run")
+                op.add_step("config.write", status="skipped", detail="dry-run")
+                op.add_step("systemd.render_unit", status="skipped", detail="dry-run")
+                op.add_step("nginx.render_site", status="skipped", detail="dry-run")
+                op.add_step("registry.update", status="skipped", detail="dry-run")
+                console.print(
+                    f"[yellow]Dry run[/yellow]: Instance '{name}' would be moved from port "
+                    f"{current_port} to {port}."
+                )
+                op.success("Port update dry-run complete.", changed=0)
+                return
+
+            _maybe_prompt_backup(
+                operation="instance set-port",
+                op=op,
+                skip_backup=no_backup,
+                auto_confirm=yes,
+                backup_message=backup_message,
+                on_accept=lambda scope: None,
+            )
+
+            was_running = str(entry.get("status", "")).lower() == "running"
+
+            try:
+                stop_result: subprocess.CompletedProcess[str] | None = None
+                if was_running:
+                    stop_result = runtime.systemd_provider.stop(name)
+                    op.add_step(
+                        "systemd.stop",
+                        status="success",
+                        detail=_format_systemd_detail(stop_result, dry_run=False),
+                    )
+                else:
+                    op.add_step("systemd.stop", status="skipped", detail="not-running")
+
+                try:
+                    runtime.ports.release(name)
+                    op.add_step("ports.release", status="success", detail=str(current_port))
+                except PortsRegistryError:
+                    op.add_step("ports.release", status="warning", detail="not-found")
+
+                try:
+                    runtime.ports.reserve(name, requested_port=port)
+                    op.add_step("ports.reserve", status="success", detail=str(port))
+                except PortsRegistryError as exc:
+                    # Attempt to restore previous reservation before aborting.
+                    try:
+                        runtime.ports.reserve(name, requested_port=current_port)
+                    except PortsRegistryError:
+                        pass
+                    message = str(exc)
+                    console.print(f"[red]{message}[/red]")
+                    op.error(message, errors=[message], rc=1)
+                    raise typer.Exit(code=1) from None
+
+                server_section = config_payload.setdefault("server", {})
+                if not isinstance(server_section, dict):
+                    server_section = {}
+                    config_payload["server"] = server_section
+                upstream = server_section.setdefault("upstream", {})
+                if not isinstance(upstream, dict):
+                    upstream = {}
+                    server_section["upstream"] = upstream
+                upstream["port"] = port
+                upstream.setdefault("host", "127.0.0.1")
+                _write_instance_config(paths, config_payload)
+                op.add_step("config.write", status="success", detail=str(paths.config_file))
+
+                exec_path = _resolve_exec_path(runtime, version_value)
+                systemd_context = _build_systemd_context(
+                    runtime.config,
+                    name,
+                    port=port,
+                    domain=domain_value,
+                    paths=paths,
+                    exec_path=exec_path,
+                    version=version_value,
+                )
+                unit_changed = runtime.systemd_provider.render_unit(name, systemd_context)
+                op.add_step(
+                    "systemd.render_unit",
+                    status="success" if unit_changed else "noop",
+                    detail=str(runtime.systemd_provider.unit_path(name)),
+                )
+
+                nginx_context = _build_nginx_context(
+                    runtime.config,
+                    name,
+                    domain=domain_value,
+                    port=port,
+                )
+                nginx_result = runtime.nginx_provider.render_site(name, nginx_context)
+                if nginx_result.validation_error:
+                    _provider_error(
+                        op,
+                        f"nginx validation failed for '{name}': {nginx_result.validation_error}",
+                    )
+                op.add_step(
+                    "nginx.render_site",
+                    status="success" if nginx_result.changed else "noop",
+                    detail=str(runtime.nginx_provider.site_path(name)),
+                )
+                if nginx_result.validation is not None:
+                    op.add_step(
+                        "nginx.validate",
+                        status="success",
+                        detail=_format_nginx_detail(nginx_result.validation),
+                    )
+                if nginx_result.reload is not None:
+                    op.add_step(
+                        "nginx.reload",
+                        status="success",
+                        detail=_format_nginx_detail(nginx_result.reload),
+                    )
+                runtime.nginx_provider.enable(name)
+                op.add_step(
+                    "nginx.enable",
+                    status="success",
+                    detail=str(runtime.nginx_provider.enabled_path(name)),
+                )
+
+                if was_running:
+                    start_result = runtime.systemd_provider.start(name)
+                    op.add_step(
+                        "systemd.start",
+                        status="success",
+                        detail=_format_systemd_detail(start_result, dry_run=False),
+                    )
+                    final_status = "running"
+                else:
+                    final_status = str(entry.get("status", "enabled") or "enabled")
+                    op.add_step("systemd.start", status="skipped", detail="not-running")
+
+                metadata_updates = {"port_changed_at": datetime.now(UTC).isoformat()}
+                _record_instance_state(
+                    runtime,
+                    name,
+                    status=final_status,
+                    port=port,
+                    domain=domain_value,
+                    systemd_state="running" if final_status == "running" else final_status,
+                    systemd_enabled=final_status != "disabled",
+                    nginx_enabled=True,
+                    metadata=metadata_updates,
+                )
+                op.add_step("registry.update", status="success", detail=f"port={port}")
+
+                console.print(
+                    "[green]Updated port for instance "
+                    f"'{name}' from {current_port} to {port}.[/green]"
+                )
+                op.success("Instance port updated.", changed=6 if was_running else 5)
+            except (SystemdError, NginxError) as exc:
+                _provider_error(op, f"Port update failed: {exc}")
+@instances_app.command("set-version")
+def instance_set_version(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="Instance to update."),
+    version: str = typer.Argument(..., help="Version identifier or 'current'."),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Report the actions that would be taken without applying changes.",
+    ),
+    no_backup: bool = typer.Option(
+        False,
+        "--no-backup",
+        help="Skip the safety prompt to run a backup before continuing.",
+    ),
+    backup_message: str | None = typer.Option(
+        None,
+        "--backup-message",
+        help="Annotate the recommended backup with a custom message.",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        help="Auto-confirm backup prompts (non-interactive mode).",
+    ),
+) -> None:
+    """Bind the instance to a specific installed version and restart if needed."""
+    runtime = _get_runtime(ctx)
+    with runtime.logger.operation(
+        "instance set-version",
+        args={"name": name, "version": version, "dry_run": dry_run},
+        target={"kind": "instance", "name": name},
+    ) as op:
+        normalized_version = version.strip()
+        if not normalized_version:
+            message = "Version must be a non-empty string."
+            console.print(f"[red]{message}[/red]")
+            op.error(message, errors=[message], rc=1)
+            raise typer.Exit(code=1)
+
+        with runtime.locks.mutate_instances([name]) as bundle:
+            op.set_lock_wait_ms(bundle.wait_ms)
+            entry = _require_instance(runtime, name, op)
+
+            current_version = (
+                str(entry.get("version") or "").strip()
+                or runtime.config.default_version
+            )
+            if current_version == normalized_version:
+                console.print("[yellow]Version unchanged; nothing to do.[/yellow]")
+                op.success("Version unchanged.", changed=0)
+                return
+
+            version_entry = None
+            if normalized_version != "current":
+                version_entry = runtime.registry.get_version(normalized_version)
+                if version_entry is None:
+                    message = f"Version '{normalized_version}' is not registered."
+                    console.print(f"[red]{message}[/red]")
+                    op.error(message, errors=[message], rc=1)
+                    raise typer.Exit(code=1)
+
+            paths = _instance_paths_from_entry(runtime.config, name, entry)
+            config_payload = _read_instance_config(paths)
+            port_value: object = entry.get("port")
+            if port_value in (None, "", 0):
+                port_value = runtime.ports.get_port(name)
+            port_int = _coerce_port(port_value, runtime.config.ports.base)
+            domain_value = str(entry.get("domain") or "").strip() or _default_instance_domain(
+                runtime.config, name
+            )
+
+            if dry_run:
+                op.add_step("backup.prompt", status="skipped", detail="dry-run")
+                op.add_step("config.write", status="skipped", detail="dry-run")
+                op.add_step("systemd.render_unit", status="skipped", detail="dry-run")
+                op.add_step("systemd.restart", status="skipped", detail="dry-run")
+                op.add_step("registry.update", status="skipped", detail="dry-run")
+                console.print(
+                    f"[yellow]Dry run[/yellow]: Instance '{name}' would switch "
+                    f"from version '{current_version}' to '{normalized_version}'."
+                )
+                op.success("Version update dry-run complete.", changed=0)
+                return
+
+            _maybe_prompt_backup(
+                operation="instance set-version",
+                op=op,
+                skip_backup=no_backup,
+                auto_confirm=yes,
+                backup_message=backup_message,
+                on_accept=lambda scope: None,
+            )
+
+            was_running = str(entry.get("status", "")).lower() == "running"
+
+            try:
+                if was_running:
+                    stop_result = runtime.systemd_provider.stop(name)
+                    op.add_step(
+                        "systemd.stop",
+                        status="success",
+                        detail=_format_systemd_detail(stop_result, dry_run=False),
+                    )
+                else:
+                    op.add_step("systemd.stop", status="skipped", detail="not-running")
+
+                server_section = config_payload.setdefault("server", {})
+                if not isinstance(server_section, dict):
+                    server_section = {}
+                    config_payload["server"] = server_section
+                server_section["version"] = normalized_version
+                _write_instance_config(paths, config_payload)
+                op.add_step("config.write", status="success", detail=str(paths.config_file))
+
+                exec_path = _resolve_exec_path(runtime, normalized_version)
+                systemd_context = _build_systemd_context(
+                    runtime.config,
+                    name,
+                    port=port_int,
+                    domain=domain_value,
+                    paths=paths,
+                    exec_path=exec_path,
+                    version=normalized_version,
+                )
+                unit_changed = runtime.systemd_provider.render_unit(name, systemd_context)
+                op.add_step(
+                    "systemd.render_unit",
+                    status="success" if unit_changed else "noop",
+                    detail=str(runtime.systemd_provider.unit_path(name)),
+                )
+
+                if was_running:
+                    start_result = runtime.systemd_provider.start(name)
+                    op.add_step(
+                        "systemd.start",
+                        status="success",
+                        detail=_format_systemd_detail(start_result, dry_run=False),
+                    )
+                    final_status = "running"
+                else:
+                    final_status = str(entry.get("status", "enabled") or "enabled")
+                    op.add_step("systemd.start", status="skipped", detail="not-running")
+
+                metadata_updates = {"version_changed_at": datetime.now(UTC).isoformat()}
+                _record_instance_state(
+                    runtime,
+                    name,
+                    status=final_status,
+                    version=normalized_version,
+                    systemd_state="running" if final_status == "running" else final_status,
+                    systemd_enabled=final_status != "disabled",
+                    nginx_enabled=True,
+                    metadata=metadata_updates,
+                )
+                op.add_step(
+                    "registry.update",
+                    status="success",
+                    detail=f"version={normalized_version}",
+                )
+
+                console.print(
+                    f"[green]Updated version for instance '{name}' to {normalized_version}.[/green]"
+                )
+                op.success("Instance version updated.", changed=4 if was_running else 3)
+            except SystemdError as exc:
+                _provider_error(op, f"systemd operation failed: {exc}")
+
+
+@instances_app.command("rename")
+def instance_rename(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="Current instance name."),
+    new_name: str = typer.Argument(..., help="New instance name."),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Report the actions that would be taken without applying changes.",
+    ),
+    no_backup: bool = typer.Option(
+        False,
+        "--no-backup",
+        help="Skip the safety prompt to run a backup before continuing.",
+    ),
+    backup_message: str | None = typer.Option(
+        None,
+        "--backup-message",
+        help="Annotate the recommended backup with a custom message.",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        help="Auto-confirm backup prompts (non-interactive mode).",
+    ),
+) -> None:
+    """Rename an instance and associated assets."""
+    runtime = _get_runtime(ctx)
+    with runtime.logger.operation(
+        "instance rename",
+        args={"name": name, "new_name": new_name, "dry_run": dry_run},
+        target={"kind": "instance", "name": name},
+    ) as op:
+        try:
+            validated_new = _validate_instance_name(new_name)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            op.error(str(exc), errors=[str(exc)], rc=1)
+            raise typer.Exit(code=1) from exc
+
+        if validated_new == name:
+            console.print("[yellow]Name unchanged; nothing to do.[/yellow]")
+            op.success("Name unchanged.", changed=0)
+            return
+
+        with runtime.locks.mutate_instances([name, validated_new]) as bundle:
+            op.set_lock_wait_ms(bundle.wait_ms)
+            entry = _require_instance(runtime, name, op)
+            if runtime.registry.get_instance(validated_new) is not None:
+                message = f"Instance '{validated_new}' already exists."
+                console.print(f"[red]{message}[/red]")
+                op.error(message, errors=[message], rc=1)
+                raise typer.Exit(code=1)
+
+            paths = _instance_paths_from_entry(runtime.config, name, entry)
+            default_paths_old = _determine_instance_paths(runtime.config, name, None)
+            default_paths_new = _determine_instance_paths(runtime.config, validated_new, None)
+            supports_default_layout = (
+                paths.root == default_paths_old.root
+                and paths.runtime == default_paths_old.runtime
+                and paths.logs == default_paths_old.logs
+                and paths.state == default_paths_old.state
+            )
+            if not supports_default_layout:
+                message = (
+                    "Instance rename currently supports the default filesystem layout only."
+                )
+                console.print(f"[red]{message}[/red]")
+                op.error(message, errors=[message], rc=1)
+                raise typer.Exit(code=1)
+
+            config_payload = _read_instance_config(paths)
+            port_value: object = entry.get("port")
+            if port_value in (None, "", 0):
+                port_value = runtime.ports.get_port(name)
+            port_int = _coerce_port(port_value, runtime.config.ports.base)
+            domain_value = str(entry.get("domain") or "").strip() or _default_instance_domain(
+                runtime.config, name
+            )
+            version_value = (
+                str(entry.get("version") or "").strip()
+                or runtime.config.default_version
+            )
+
+            if dry_run:
+                op.add_step("backup.prompt", status="skipped", detail="dry-run")
+                op.add_step("systemd.stop", status="skipped", detail="dry-run")
+                op.add_step("systemd.disable", status="skipped", detail="dry-run")
+                op.add_step("nginx.disable", status="skipped", detail="dry-run")
+                op.add_step("filesystem.move", status="skipped", detail="dry-run")
+                op.add_step("ports.reserve", status="skipped", detail="dry-run")
+                op.add_step("registry.rename", status="skipped", detail="dry-run")
+                console.print(
+                    "[yellow]Dry run[/yellow]: Instance '"
+                    f"{name}' would be renamed to '{validated_new}'."
+                )
+                op.success("Instance rename dry-run complete.", changed=0)
+                return
+
+            _maybe_prompt_backup(
+                operation="instance rename",
+                op=op,
+                skip_backup=no_backup,
+                auto_confirm=yes,
+                backup_message=backup_message,
+                on_accept=lambda scope: None,
+            )
+
+            was_running = str(entry.get("status", "")).lower() == "running"
+
+            try:
+                if was_running:
+                    stop_result = runtime.systemd_provider.stop(name)
+                    op.add_step(
+                        "systemd.stop",
+                        status="success",
+                        detail=_format_systemd_detail(stop_result, dry_run=False),
+                    )
+                else:
+                    op.add_step("systemd.stop", status="skipped", detail="not-running")
+
+                try:
+                    disable_result = runtime.systemd_provider.disable(name)
+                    op.add_step(
+                        "systemd.disable",
+                        status="success",
+                        detail=_format_systemd_detail(disable_result, dry_run=False),
+                    )
+                except SystemdError:
+                    op.add_step("systemd.disable", status="warning", detail="not-enabled")
+
+                try:
+                    runtime.nginx_provider.disable(name)
+                    op.add_step("nginx.disable", status="success")
+                except NginxError:
+                    op.add_step("nginx.disable", status="warning", detail="not-enabled")
+
+                runtime.systemd_provider.remove(name)
+                op.add_step("systemd.remove", status="success")
+                runtime.nginx_provider.remove(name)
+                op.add_step("nginx.remove", status="success")
+
+                try:
+                    runtime.ports.release(name)
+                    op.add_step("ports.release", status="success", detail=str(port_int))
+                except PortsRegistryError:
+                    op.add_step("ports.release", status="warning", detail="not-found")
+                try:
+                    runtime.ports.reserve(validated_new, requested_port=port_int)
+                    op.add_step("ports.reserve", status="success", detail=str(port_int))
+                except PortsRegistryError as exc:
+                    message = str(exc)
+                    console.print(f"[red]{message}[/red]")
+                    op.error(message, errors=[message], rc=1)
+                    raise typer.Exit(code=1) from None
+
+                moves: list[tuple[Path, Path]] = [
+                    (paths.root, default_paths_new.root),
+                    (paths.runtime, default_paths_new.runtime),
+                    (paths.logs, default_paths_new.logs),
+                    (paths.state, default_paths_new.state),
+                ]
+                moved_paths: list[str] = []
+                for src, dest in moves:
+                    if not src.exists():
+                        continue
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(src), str(dest))
+                    moved_paths.append(f"{src} -> {dest}")
+
+                if moved_paths:
+                    op.add_step("filesystem.move", status="success", detail="; ".join(moved_paths))
+
+                instance_section = config_payload.setdefault("instance", {})
+                if not isinstance(instance_section, dict):
+                    instance_section = {}
+                    config_payload["instance"] = instance_section
+                instance_section["name"] = validated_new
+
+                paths_section = config_payload.setdefault("paths", {})
+                if not isinstance(paths_section, dict):
+                    paths_section = {}
+                    config_payload["paths"] = paths_section
+                paths_section["root"] = str(default_paths_new.root)
+                paths_section["data"] = str(default_paths_new.data)
+                paths_section["config"] = str(default_paths_new.config_file)
+
+                _write_instance_config(default_paths_new, config_payload)
+                op.add_step(
+                    "config.write",
+                    status="success",
+                    detail=str(default_paths_new.config_file),
+                )
+
+                exec_path = _resolve_exec_path(runtime, version_value)
+                systemd_context = _build_systemd_context(
+                    runtime.config,
+                    validated_new,
+                    port=port_int,
+                    domain=domain_value,
+                    paths=default_paths_new,
+                    exec_path=exec_path,
+                    version=version_value,
+                )
+                runtime.systemd_provider.render_unit(validated_new, systemd_context)
+                op.add_step(
+                    "systemd.render_unit",
+                    status="success",
+                    detail=str(runtime.systemd_provider.unit_path(validated_new)),
+                )
+                runtime.systemd_provider.enable(validated_new)
+                op.add_step("systemd.enable", status="success", detail=validated_new)
+
+                nginx_context = _build_nginx_context(
+                    runtime.config,
+                    validated_new,
+                    domain=domain_value,
+                    port=port_int,
+                )
+                nginx_result = runtime.nginx_provider.render_site(validated_new, nginx_context)
+                if nginx_result.validation_error:
+                    _provider_error(
+                        op,
+                        (
+                            "nginx validation failed for "
+                            f"'{validated_new}': {nginx_result.validation_error}"
+                        ),
+                    )
+                op.add_step(
+                    "nginx.render_site",
+                    status="success" if nginx_result.changed else "noop",
+                    detail=str(runtime.nginx_provider.site_path(validated_new)),
+                )
+                runtime.nginx_provider.enable(validated_new)
+                op.add_step(
+                    "nginx.enable",
+                    status="success",
+                    detail=str(runtime.nginx_provider.enabled_path(validated_new)),
+                )
+
+                if was_running:
+                    start_result = runtime.systemd_provider.start(validated_new)
+                    op.add_step(
+                        "systemd.start",
+                        status="success",
+                        detail=_format_systemd_detail(start_result, dry_run=False),
+                    )
+                    final_status = "running"
+                else:
+                    final_status = str(entry.get("status", "enabled") or "enabled")
+                    op.add_step("systemd.start", status="skipped", detail="not-running")
+
+                raw_instances = runtime.registry.read_instances().get("instances", [])
+                entries_iterable = raw_instances if isinstance(raw_instances, list) else []
+                updated_instances: list[object] = []
+                now_iso = datetime.now(UTC).isoformat()
+                for item in entries_iterable:
+                    if (
+                        isinstance(item, Mapping)
+                        and str(item.get("name", "")).strip() == name
+                    ):
+                        new_entry = dict(item)
+                        new_entry["name"] = validated_new
+                        new_entry["status"] = final_status
+                        new_entry["domain"] = domain_value
+                        new_entry["port"] = port_int
+                        new_entry["version"] = version_value
+                        new_entry["paths"] = {
+                            "root": str(default_paths_new.root),
+                            "data": str(default_paths_new.data),
+                            "config": str(default_paths_new.config_file),
+                            "runtime": str(default_paths_new.runtime),
+                            "logs": str(default_paths_new.logs),
+                            "state": str(default_paths_new.state),
+                            "systemd_unit": str(runtime.systemd_provider.unit_path(validated_new)),
+                            "nginx_site": str(runtime.nginx_provider.site_path(validated_new)),
+                            "nginx_enabled": str(
+                                runtime.nginx_provider.enabled_path(validated_new)
+                            ),
+                        }
+                        metadata = dict(new_entry.get("metadata", {}))
+                        metadata["renamed_at"] = now_iso
+                        metadata["last_changed"] = now_iso
+                        metadata["previous_name"] = name
+                        new_entry["metadata"] = metadata
+                        updated_instances.append(new_entry)
+                    else:
+                        updated_instances.append(item)
+
+                runtime.registry.write_instances(updated_instances)
+                op.add_step(
+                    "registry.rename",
+                    status="success",
+                    detail=f"{name}->{validated_new}",
+                )
+
+                _record_instance_state(
+                    runtime,
+                    validated_new,
+                    status=final_status,
+                    port=port_int,
+                    domain=domain_value,
+                    version=version_value,
+                    systemd_state="running" if was_running else final_status,
+                    systemd_enabled=final_status != "disabled",
+                    nginx_enabled=True,
+                    metadata={
+                        "renamed_at": now_iso,
+                        "previous_name": name,
+                    },
+                )
+
+                console.print(
+                    f"[green]Renamed instance '{name}' to '{validated_new}' "
+                    f"({'restarted' if was_running else 'stopped'}).[/green]"
+                )
+                op.success("Instance renamed.", changed=9 if was_running else 8)
+            except (SystemdError, NginxError) as exc:
+                _provider_error(op, f"Rename failed: {exc}")

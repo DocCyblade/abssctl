@@ -98,6 +98,10 @@ class StateRegistry:
         """Persist version entries to ``versions.yml``."""
         self.write("versions.yml", {"versions": list(versions)})
 
+    def write_ports(self, ports: Iterable[object]) -> None:
+        """Persist port reservations to ``ports.yml``."""
+        self.write("ports.yml", {"ports": list(ports)})
+
     # Version helpers -------------------------------------------------
     def get_version(self, version: str) -> dict[str, Any] | None:
         """Return the registry entry for *version* if present."""

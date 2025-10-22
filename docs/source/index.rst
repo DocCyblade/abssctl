@@ -11,9 +11,11 @@ Actual Budget Sync Server Control CLI (abssctl) Documentation Overview
 Documentation version: |release|
 
 Welcome to the documentation for ``abssctl``— the Actual Budget Sync Server admin
-CLI. The content reflects the Alpha foundations milestone: configuration,
-registry inspection, structured logging, locking, and templated provider
-scaffolding are available while mutating commands continue to mature.
+CLI. The Alpha core-features milestone now delivers full lifecycle management:
+configuration, registry inspection, structured logging, locking, templated
+providers, ports registry, version installs/switches, and instance
+provisioning/control. Upcoming Beta iterations will layer on doctor probes,
+support bundles, and restore workflows.
 
 .. toctree::
    :maxdepth: 1

@@ -5,121 +5,65 @@ Systemd & Nginx Provider Implementation Plan
 Provider Plan Status
 ====================
 
-- **Owner:** Alpha Foundations team (session 2025-10-08)
-- **Milestone:** Beta — Core Features
+- **Owner:** Alpha Foundations team (sessions 2025-10-08 → 2025-10-21)
+- **Milestone:** Alpha 5 — Core Features (Delivered)
 - **Related ADRs:** ADR-009, ADR-010, ADR-014, ADR-015, ADR-027, ADR-031, ADR-032
 
 Plan Purpose
 ============
 
-Outline the work required to evolve the current provider scaffolds into the
-fully-featured systemd and nginx integrations described in the requirements and
-ADRs. The plan focuses on Beta deliverables so mutating commands (instance
-create/enable/start/etc.) can safely manage real services on TurnKey Linux.
+Document the delivered scope for the systemd and nginx providers and track the
+remaining follow-up work targeted at the Beta milestone (health checks, TLS
+automation, reconcile tooling).
 
-Current State (Alpha Foundations)
-=================================
+Delivered Capabilities (Alpha 5)
+================================
 
-- Providers exist under ``src/abssctl/providers`` with template-backed render
-  helpers and thin wrappers around ``systemctl``/``nginx`` invocations.
-- ``instance create`` renders service and vhost files into the runtime overlay
-  directory and registers the instance but does not yet apply changes to the
-  live system.
-- Locks, structured logging, and registry updates are wired in the CLI so the
-  providers can be extended without changing command surfaces.
-- Template contexts are minimal: ports, domains, and log paths all rely on
-  placeholders instead of the final registry-driven values.
-- Tests cover template rendering and command wiring but do not exercise real
-  systemctl/nginx behaviours or failure paths.
+- Providers render templated units/sites into configurable directories, honour
+  change detection, and trigger ``systemctl daemon-reload`` / ``nginx -t`` +
+  reload when content changes.
+- ``instance create`` performs end-to-end provisioning: directory scaffolding,
+  port reservation, template rendering, validation, provider enablement, and
+  transactional rollback on failure.
+- Lifecycle commands (enable/disable/start/stop/restart/delete) respect locks,
+  record structured steps, surface provider failures, and support ``--dry-run``.
+- Ports registry integration ensures per-instance port metadata, history, and
+  release on delete/rollback.
+- Diagnostics helpers expose rendered paths, enablement flags, and journal log
+  access for ``instance status`` and ``instance logs``.
+- Tests cover provider behaviours (reload on change, validation rollback,
+  dry-run output) and CLI lifecycle flows including failure handling.
 
-Goals for Beta
-==============
+Beta Follow-Ups (Providers)
+===========================
 
-1. **Real system integration**
+1. **TLS-aware contexts**
 
-   - Render unit/vhost files into host directories (e.g. ``/etc/systemd/system``,
-     ``/etc/nginx/sites-available``) with safe permissions.
-   - Reload/validate services (`systemctl daemon-reload`, ``nginx -t`` +
-     reload) only when changes occur and roll back on validation failure.
+   - Extend nginx context builders to incorporate certificate provisioning
+     workflows (system certificates vs. instance-specific paths) once TLS
+     commands land.
 
-2. **Idempotent lifecycle operations**
+2. **Doctor & Support Bundle Integration**
 
-   - Ensure enable/disable/start/stop/restart/delete honour ADR-016 safety
-     guarantees, provide actionable logging, and map errors to exit codes.
-   - Support ``--dry-run``/``--yes`` once the global non-interactive policy lands.
+   - Expose richer diagnostics (e.g., unit state, validation output) for doctor
+     probes and bundle inclusion.
+   - Capture provider health data in structured form for future ``doctor --json``
+     responses.
 
-3. **Dynamic template contexts**
+3. **Runtime Optimisations**
 
-   - Inject instance-specific ports, domains, TLS configuration, and version
-     bindings based on registry + config data.
-   - Expose shared context builders so tests can validate rendered results.
+   - Consider batching reloads when multiple instances change during scripted
+     maintenance.
+   - Evaluate configurable timeouts for systemd/nginx subprocesses so doctor can
+     surface stalled calls explicitly.
 
-4. **Observability & diagnostics**
+4. **Testing Enhancements**
 
-   - Record operations in ``operations.jsonl`` with change counts and warnings.
-   - Surface `systemctl status`/``journalctl`` helpers (planned CLI commands like
-     ``instance logs``) to support troubleshooting.
+   - Introduce reusable fake binaries shared with upcoming doctor/support bundle
+     tests to simulate more intricate failure scenarios.
+   - Add golden-site assertions covering future TLS directives.
 
-5. **Robust testing story**
-
-   - Use fakes/subprocess shims to simulate systemctl/nginx and verify command
-     sequences without requiring real services.
-   - Add golden-file tests for rendered templates with varying TLS/port inputs.
-
-Implementation Roadmap
-======================
-
-1. **Template Context Enhancements**
-
-   - Extend ``_build_systemd_context``/``_build_nginx_context`` to accept registry
-     entries, selected ports, TLS cert paths, and log directories per ADR-031.
-   - Store context builders in a dedicated module for reuse by tests and future
-     commands (e.g. backup, doctor).
-
-2. **Systemd Provider Completion**
-
-   - Allow configuration of the systemd unit directory via ``AppConfig``.
-   - Add support helpers: ``daemon_reload()``, ``show_status()``, ``journal_logs()``,
-     and optional ``--dry-run`` mode that reports intended actions.
-   - Wrap ``subprocess.run`` calls with structured error messages that include
-     stdout/stderr, exit codes, and suggested remediation.
-   - Implement change detection so rendering returns ``changed=True`` only when
-     file content or permissions differ (TemplateEngine already supports this;
-     ensure we propagate signals and skip reload if unchanged).
-   - Update CLI flows (enable/start/stop/restart/delete) to call reload/status
-     helpers and map failures to exit code 4 (systemd/nginx errors) per ADR-013.
-
-3. **Nginx Provider Completion**
-
-   - Expand context to include HTTP/HTTPS blocks, upstream definitions, and TLS
-     selection logic (system cert vs instance-specific paths).
-   - Integrate ``nginx -t`` validation prior to enabling/reloading. On failure,
-     restore the previous config or remove partial artifacts and emit warnings.
-   - Add ``reload()`` and ``test_config()`` wrappers that bubble up structured
-     errors, including log file hints.
-   - Support future commands by exposing methods to compute server block names,
-     certificate paths, and log destinations.
-
-4. **Instance Command Enhancements**
-
-   - Wire dry-run and confirmation prompts into mutating commands; surface
-     planned actions without executing system calls when dry-run is active.
-   - For ``instance create``: after rendering, run validation (``nginx -t``) and
-     reload systemd/nginx only when templates changed; ensure rollback if any step
-     fails (remove newly created files, revert registry updates).
-   - For ``instance delete``: add purge modes that conditionally remove data
-     directories, ensure nginx/systemd reloads happen once at the end.
-
-5. **Testing Strategy**
-
-   - Introduce provider-specific unit tests that patch ``subprocess.run`` and
-     assert command invocation sequences, handling of non-zero exits, and error
-     messages.
-   - Add integration-style tests for CLI commands using temporary directories for
-     systemd/nginx paths; verify idempotency, rollback, and logging output.
-   - Update doctor tests (once implemented) to consume provider status helpers.
-
-6. **Documentation & Developer Experience**
+5. **Documentation & Developer Experience**
 
    - Document provider configuration knobs (paths, binaries) in README and the
      developer guide.

@@ -121,6 +121,23 @@ class BackupConfig:
 
 
 @dataclass(frozen=True)
+class SystemdConfig:
+    """Systemd integration configuration values."""
+
+    unit_dir: Path | None = None
+    systemctl_bin: str = "systemctl"
+    journalctl_bin: str = "journalctl"
+
+    def to_dict(self) -> dict[str, object]:
+        """Return a serialisable representation."""
+        return {
+            "unit_dir": str(self.unit_dir) if self.unit_dir is not None else None,
+            "systemctl_bin": self.systemctl_bin,
+            "journalctl_bin": self.journalctl_bin,
+        }
+
+
+@dataclass(frozen=True)
 class AppConfig:
     """Resolved configuration values for abssctl."""
 
@@ -140,6 +157,7 @@ class AppConfig:
     ports: PortsConfig
     tls: TLSConfig
     backups: BackupConfig
+    systemd: SystemdConfig
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-serialisable representation of the config."""
@@ -160,6 +178,7 @@ class AppConfig:
             "ports": self.ports.to_dict(),
             "tls": self.tls.to_dict(),
             "backups": self.backups.to_dict(),
+            "systemd": self.systemd.to_dict(),
         }
 
 
@@ -198,6 +217,11 @@ DEFAULTS: dict[str, object] = {
             "algorithm": "auto",
             "level": None,
         },
+    },
+    "systemd": {
+        "unit_dir": None,
+        "systemctl_bin": "systemctl",
+        "journalctl_bin": "journalctl",
     },
 }
 
@@ -337,6 +361,14 @@ def _validate_structure(raw: Mapping[str, object]) -> None:
                     f"Invalid integer for backups.compression.level: {level!r}."
                 ) from exc
 
+    systemd = raw.get("systemd")
+    if systemd is not None:
+        systemd_map = _as_dict(systemd, "systemd")
+        unknown = set(systemd_map.keys()) - {"unit_dir", "systemctl_bin", "journalctl_bin"}
+        if unknown:
+            joined = ", ".join(sorted(unknown))
+            raise ConfigError(f"Unknown systemd configuration keys: {joined}.")
+
 
 def _build_app_config(raw: Mapping[str, object]) -> AppConfig:
     config_file = _to_path(raw.get("config_file"))
@@ -400,6 +432,15 @@ def _build_app_config(raw: Mapping[str, object]) -> AppConfig:
         compression_level=compression_level,
     )
 
+    systemd_mapping = _as_dict(raw.get("systemd"), "systemd")
+    unit_dir_value = systemd_mapping.get("unit_dir")
+    systemd_unit_dir = _to_path(unit_dir_value) if unit_dir_value else None
+    systemd = SystemdConfig(
+        unit_dir=systemd_unit_dir,
+        systemctl_bin=str(systemd_mapping.get("systemctl_bin", "systemctl")),
+        journalctl_bin=str(systemd_mapping.get("journalctl_bin", "journalctl")),
+    )
+
     return AppConfig(
         config_file=config_file,
         install_root=install_root,
@@ -417,6 +458,7 @@ def _build_app_config(raw: Mapping[str, object]) -> AppConfig:
         ports=ports,
         tls=tls,
         backups=backups,
+        systemd=systemd,
     )
 
 
@@ -555,7 +597,9 @@ def _as_dict(value: object | None, label: str) -> dict[str, object]:
 __all__ = [
     "AppConfig",
     "ConfigError",
+    "BackupConfig",
     "PortsConfig",
+    "SystemdConfig",
     "TLSConfig",
     "TLSSystemConfig",
     "TLSLetsEncryptConfig",

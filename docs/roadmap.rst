@@ -45,15 +45,15 @@ Alpha 4 — Core Features 1
 Alpha 5 — Core Features 2
 =========================
 
-- [ ] Build the systemd provider to render/manage per-instance units (create,
+- [x] Build the systemd provider to render/manage per-instance units (create,
   enable/disable, start/stop/restart, logs) per ADR-009/ADR-010.
-- [ ] Build the nginx provider to render vhosts, run ``nginx -t``, manage
+- [x] Build the nginx provider to render vhosts, run ``nginx -t``, manage
   sites-available/sites-enabled symlinks, and handle HTTPS defaults/overrides
   with rollback (ADR-010/ADR-031/ADR-032).
-- [ ] Implement ``instance create`` with end-to-end provisioning: directory
+- [x] Implement ``instance create`` with end-to-end provisioning: directory
   layout, ``config.json``, port reservation, systemd unit, nginx vhost, optional
   auto-start, and rollback on failure.
-- [ ] Implement the remaining instance subcommands: ``env``,
+- [x] Implement the remaining instance subcommands: ``env``,
   ``start|stop|restart|enable|disable|status|logs``, ``set-fqdn``, ``set-port``,
   ``set-version``, ``rename``, and ``delete --purge-data``, incorporating
   ``--dry-run`` and safety prompts.
@@ -61,7 +61,7 @@ Alpha 5 — Core Features 2
 Beta — Basic Functions
 ======================
 
-- [ ] Implement port allocation and collision detection backed by ``ports.yml``,
+- [x] Implement port allocation and collision detection backed by ``ports.yml``,
   following ADR-015 (base port 5000, sequential strategy, locks).
 - [ ] Implement TLS subcommands (``tls verify``, ``tls install``,
   ``tls use-system``) including file validation, secure permissions, nginx
