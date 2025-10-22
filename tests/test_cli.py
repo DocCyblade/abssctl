@@ -56,6 +56,11 @@ def _prepare_environment(
     logs_dir = tmp_path / "logs"
     runtime_dir = tmp_path / "run"
     templates_dir = tmp_path / "templates"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    nginx_stub = bin_dir / "nginx"
+    nginx_stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    nginx_stub.chmod(0o755)
     config = {
         "state_dir": str(state_dir),
         "logs_dir": str(logs_dir),
@@ -64,8 +69,8 @@ def _prepare_environment(
         "instance_root": str(tmp_path / "instances"),
         "backups": {"root": str(tmp_path / "backups")},
         "systemd": {
-            "systemctl_bin": str(tmp_path / "bin" / "systemctl"),
-            "journalctl_bin": str(tmp_path / "bin" / "journalctl"),
+            "systemctl_bin": str(bin_dir / "systemctl"),
+            "journalctl_bin": str(bin_dir / "journalctl"),
         },
     }
     if config_overrides:
@@ -82,7 +87,10 @@ def _prepare_environment(
     if instances is not None:
         registry.write_instances(instances)
 
-    env = {"ABSSCTL_CONFIG_FILE": str(config_file)}
+    env = {
+        "ABSSCTL_CONFIG_FILE": str(config_file),
+        "PATH": f"{bin_dir}:{os.environ.get('PATH', '')}",
+    }
     if remote_versions is not None:
         cache_file = tmp_path / "remote.json"
         cache_file.write_text(json.dumps(remote_versions), encoding="utf-8")

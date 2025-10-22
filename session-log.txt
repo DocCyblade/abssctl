@@ -172,6 +172,7 @@
 - Verified the expanded coverage via `.venv/bin/python -m pytest tests/test_cli.py` and `make quick-tests` (ruff/mypy/pytest all green).
 - Updated `docs/roadmap.rst` to mark Alpha 5 lifecycle/provider milestones and port allocation work as complete.
 - Refreshed README + Sphinx guides (overview, quickstart, developer guide, provider/version plans, CLI reference, test strategy) to reflect delivered lifecycle/systemd/nginx functionality and removed stale Alpha-foundations language; `make docs` now builds cleanly.
+- Investigated GitHub CI failure caused by the runner shipping real `nginx`/`systemctl`; taught `_prepare_environment` test helper to prepend a fake `nginx` binary to `PATH` (keeping systemctl absent) so CLI tests behave consistently on CI and locally, with `make quick-tests` confirming green.
 
 ## Wrap up:
 - Session in progress.
