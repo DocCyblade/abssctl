@@ -20,15 +20,29 @@ Project Pillars
 - **Documentation First:** requirements, ADRs, and Sphinx-powered guides live in
   the repository to keep engineering and operations aligned.
 
+Current Status
+==============
+
+Alpha core features now include:
+
+- ``abssctl config show`` and the full registry-backed command set
+  (``version list``/``instance list``/``instance show``/``ports list``).
+- Version lifecycle commands (install/switch/uninstall) with integrity
+  recording, backup prompts, and lock coordination.
+- Instance lifecycle provisioning (create/enable/disable/start/stop/restart/
+  status/logs/env/set-fqdn/set-port/set-version/rename/delete) with transactional
+  rollback and dry-run support.
+- Structured logging, locking, templated provider integrations, and a ports
+  registry that keeps assignments consistent across failures.
+- A growing automated test suite covering success, dry-run, and failure cases.
+
 Next Steps
 ==========
 
-Alpha foundations now include ``abssctl config show``, read-only registry
-commands (``version list``/``instance list``/``instance show``),
-structured logging with JSONL operations, lock management, and templated
-systemd/nginx provider scaffolds. The near-term focus is on:
-
-- Finalising the provider implementation plan for systemd and nginx ahead of Beta.
-- Bringing version lifecycle commands (install/switch/uninstall) online.
-- Expanding automated tests that exercise mutating command flows and provider
-  interactions.
+- Deliver TLS workflows (install/verify/use-system) and integrate certificate
+  state into nginx contexts.
+- Implement backup restore/reconcile flows to round out disaster recovery.
+- Build the ``doctor`` and ``support-bundle`` commands on top of provider
+  diagnostics.
+- Harden integration tests and documentation ahead of the Release Candidate
+  milestone.
