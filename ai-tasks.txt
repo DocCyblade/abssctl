@@ -3,3 +3,41 @@
 #   file and try to recover where it was in the long task.
 #
 # - AI do not edit above this line! Keep this header!
+
+1. Implement TLS subcommands (`tls verify/install/use-system`) per ADR-031.
+   1. Review ADR-031 and current nginx context builder to confirm required inputs (cert/key locations, detection rules).
+   2. Extend configuration schema (AppConfig) to surface TLS certificate paths and validation knobs; add loader + docs updates.
+   3. Implement certificate validation helpers (permissions, ownership, key/cert pairing, Let's Encrypt auto-discovery) and wire into new CLI commands with safety prompts.
+   4. Update nginx rendering context to consume TLS selections, ensuring reloads/rollbacks behave consistently; add unit coverage for TLS-enabled templates.
+   5. Create CLI tests exercising success/failure/dry-run flows (fake certs, permission errors, Let's Encrypt detection).
+   6. Refresh documentation (README, guides, CLI reference) to describe TLS workflows and update roadmap/session log once complete.
+
+2. Implement backup restore & reconcile workflows (ADR-012/021/022 §5.8).
+   1. Design end-to-end restore plan: define archive structure expectations, target directory handling, registry updates, and prompts; capture in docs/plan if needed.
+   2. Implement `backup restore` with extraction, pre-flight checks (disk space, instance state), optional pre-restore backup, and rollback on failure.
+   3. Implement reconciliation tooling (`backup reconcile` or equivalent) to compare registry entries vs filesystem archives, emitting actionable reports.
+   4. Add metadata persistence (last restored timestamp, destination) and ensure registry/backups index stay consistent.
+   5. Write unit/CLI tests covering restore success, dry-run, missing files, checksum mismatch, and reconciliation reporting.
+   6. Document restore/reconcile usage and update roadmap/session artefacts.
+
+3. Ensure mutating commands honour `--dry-run`, `--yes`, backup prompts, and exit-code taxonomy (ADR-013/016/025/026).
+   1. Audit all mutating CLI commands to catalogue current behaviour vs ADR expectations (dry-run semantics, prompt messaging, exit codes).
+   2. Introduce shared helpers/utilities to enforce consistent prompt handling, dry-run step recording, and error-to-exit-code mapping.
+   3. Update commands to use helpers, guaranteeing no filesystem/provider calls occur during dry-run and that backup prompts respect `--yes`/`--no-backup`.
+   4. Validate exit codes align with ADR-013 across success, user abort, provider failure, and config errors; update operations log context accordingly.
+   5. Expand test coverage with scenarios for each command’s dry-run, confirmation, and error paths; add regression tests for exit codes.
+   6. Refresh documentation/CLI reference to clarify non-interactive flags and exit code guarantees.
+
+4. Deliver initial `doctor` command with environment/system probes (ADR-029).
+   1. Define probe set (config sanity, port availability, systemd unit state, nginx validation, filesystem permissions) and output schema (JSON + human summary).
+   2. Implement probe collection layer leveraging existing providers/registries, including error aggregation and severity classification.
+   3. Build CLI surface (`doctor`, optional filters/verbosity) producing structured logs and exit status reflecting overall health.
+   4. Create fake provider fixtures to simulate healthy/degraded states and write unit/CLI tests covering probe success/failure/dry-run.
+   5. Document doctor usage, probe list, expected outputs, and integrate into roadmap/session log.
+
+5. Flesh out automated tests for Beta features and idempotency guarantees.
+   1. Inventory coverage gaps across TLS, backup restore/reconcile, doctor, and lifecycle commands; prioritise scenarios lacking idempotency/regression tests.
+   2. Extend pytest fixtures (fake binaries, temp dirs, helper contexts) to support new integration scenarios efficiently.
+   3. Add targeted tests ensuring repeated command execution is idempotent (double restore, repeated enable, TLS install reruns, etc.).
+   4. Integrate slow/extended suites under markers so CI can run comprehensive checks while supporting quick local loops.
+   5. Track coverage metrics (pytest --cov, mutation tests if feasible) and document remaining risks for future milestones.

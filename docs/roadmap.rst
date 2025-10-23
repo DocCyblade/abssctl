@@ -23,40 +23,20 @@ Pre-Alpha — Repo Bootstrap
 Alpha 3 — Foundations
 =====================
 
-- [x] Implement the structured logging subsystem per ADR-014/ADR-028 (human
-  logs + ``operations.jsonl``) and integrate it with existing CLI commands.
-- [x] Implement global and per-instance locking primitives per ADR-027 and
-  ensure mutating commands acquire/release locks safely (with tests).
-- [x] Introduce the template rendering engine for systemd and nginx assets
-  (e.g., Jinja-based templates under ``src/abssctl/templates/``) per
-  ADR-009/ADR-010.
-- [x] Extend CI to publish dev builds to Test PyPI when tags matching ``v*.*.*-dev`` land (aligns
-  with the "Alpha Builds" release engineering goal).
+- No open TODOs; structured logging, locking, templating, and trusted dev publishing
+  capabilities are complete for this phase.
 
 Alpha 4 — Core Features 1
 =========================
 
-- [x] Implement ``version install``, ``version switch``, and ``version
-  uninstall`` flows that manage ``/srv/app/vX.Y.Z``, enforce integrity, update
-  ``versions.yml``, and honour safety prompts (ADR-011/ADR-017/ADR-026).
-- [x] Replace the placeholder ``version check-updates`` logic with real npm
-  metadata comparisons and JSON output.
+- No open TODOs; version lifecycle commands, registry helpers, and update checks
+  shipped as planned.
 
 Alpha 5 — Core Features 2
 =========================
 
-- [x] Build the systemd provider to render/manage per-instance units (create,
-  enable/disable, start/stop/restart, logs) per ADR-009/ADR-010.
-- [x] Build the nginx provider to render vhosts, run ``nginx -t``, manage
-  sites-available/sites-enabled symlinks, and handle HTTPS defaults/overrides
-  with rollback (ADR-010/ADR-031/ADR-032).
-- [x] Implement ``instance create`` with end-to-end provisioning: directory
-  layout, ``config.json``, port reservation, systemd unit, nginx vhost, optional
-  auto-start, and rollback on failure.
-- [x] Implement the remaining instance subcommands: ``env``,
-  ``start|stop|restart|enable|disable|status|logs``, ``set-fqdn``, ``set-port``,
-  ``set-version``, ``rename``, and ``delete --purge-data``, incorporating
-  ``--dry-run`` and safety prompts.
+- No open TODOs; systemd/nginx providers, instance lifecycle commands, and ports
+  registry are fully delivered.
 
 Beta — Basic Functions
 ======================
