@@ -20,7 +20,7 @@ parsed naturally. The resulting configuration is exposed as immutable
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping, MutableMapping
+from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -83,12 +83,60 @@ class TLSLetsEncryptConfig:
 
 
 @dataclass(frozen=True)
+class TLSPermissionSpec:
+    """Expected ownership and mode for a TLS-related file."""
+
+    owner: str
+    group: str | None
+    mode: int
+
+    def to_dict(self) -> dict[str, object]:
+        """Return a serialisable representation."""
+        return {
+            "owner": self.owner,
+            "group": self.group,
+            "mode": f"{self.mode:04o}",
+        }
+
+
+@dataclass(frozen=True)
+class TLSValidationConfig:
+    """TLS validation expectations (permissions, expiry thresholds)."""
+
+    warn_expiry_days: int = 30
+    key_permissions: tuple[TLSPermissionSpec, ...] = (
+        TLSPermissionSpec(owner="root", group="ssl-cert", mode=0o640),
+        TLSPermissionSpec(owner="root", group="root", mode=0o600),
+    )
+    cert_permissions: TLSPermissionSpec = TLSPermissionSpec(
+        owner="root",
+        group="root",
+        mode=0o644,
+    )
+    chain_permissions: TLSPermissionSpec = TLSPermissionSpec(
+        owner="root",
+        group="root",
+        mode=0o644,
+    )
+
+    def to_dict(self) -> dict[str, object]:
+        """Return a serialisable representation."""
+        return {
+            "warn_expiry_days": self.warn_expiry_days,
+            "key_permissions": [permission.to_dict() for permission in self.key_permissions],
+            "cert_permissions": self.cert_permissions.to_dict(),
+            "chain_permissions": self.chain_permissions.to_dict(),
+        }
+
+
+@dataclass(frozen=True)
 class TLSConfig:
     """Aggregated TLS configuration values."""
 
     enabled: bool = True
     system: TLSSystemConfig = TLSSystemConfig()
     lets_encrypt: TLSLetsEncryptConfig = TLSLetsEncryptConfig()
+    validation: TLSValidationConfig = TLSValidationConfig()
 
     def to_dict(self) -> dict[str, object]:
         """Return a serialisable representation."""
@@ -96,6 +144,7 @@ class TLSConfig:
             "enabled": self.enabled,
             "system": self.system.to_dict(),
             "lets_encrypt": self.lets_encrypt.to_dict(),
+            "validation": self.validation.to_dict(),
         }
 
 
@@ -209,6 +258,15 @@ DEFAULTS: dict[str, object] = {
         "lets_encrypt": {
             "live_dir": "/etc/letsencrypt/live",
         },
+        "validation": {
+            "warn_expiry_days": 30,
+            "key_permissions": [
+                {"owner": "root", "group": "ssl-cert", "mode": "0640"},
+                {"owner": "root", "group": "root", "mode": "0600"},
+            ],
+            "cert_permissions": {"owner": "root", "group": "root", "mode": "0644"},
+            "chain_permissions": {"owner": "root", "group": "root", "mode": "0644"},
+        },
     },
     "backups": {
         "root": "/srv/backups",
@@ -312,7 +370,7 @@ def _validate_structure(raw: Mapping[str, object]) -> None:
     tls = raw.get("tls")
     if tls is not None:
         tls_map = _as_dict(tls, "tls")
-        unknown = set(tls_map.keys()) - {"enabled", "system", "lets_encrypt"}
+        unknown = set(tls_map.keys()) - {"enabled", "system", "lets_encrypt", "validation"}
         if unknown:
             joined = ", ".join(sorted(unknown))
             raise ConfigError(f"Unknown TLS configuration keys: {joined}.")
@@ -328,6 +386,39 @@ def _validate_structure(raw: Mapping[str, object]) -> None:
         if unknown_lets:
             joined = ", ".join(sorted(unknown_lets))
             raise ConfigError(f"Unknown TLS lets_encrypt keys: {joined}.")
+
+        validation_map = _as_dict(tls_map.get("validation"), "tls.validation")
+        unknown_validation = set(validation_map.keys()) - {
+            "warn_expiry_days",
+            "key_permissions",
+            "cert_permissions",
+            "chain_permissions",
+        }
+        if unknown_validation:
+            joined = ", ".join(sorted(unknown_validation))
+            raise ConfigError(f"Unknown TLS validation keys: {joined}.")
+
+        warn_value = validation_map.get("warn_expiry_days")
+        if warn_value is not None:
+            warn_days = _expect_int(warn_value, "tls.validation.warn_expiry_days", default=30)
+            if warn_days < 0:
+                raise ConfigError("tls.validation.warn_expiry_days must be non-negative.")
+
+        key_permissions_raw = validation_map.get("key_permissions")
+        if key_permissions_raw is not None:
+            key_permissions = _as_sequence(key_permissions_raw, "tls.validation.key_permissions")
+            for index, entry in enumerate(key_permissions):
+                mapping = _as_dict(entry, f"tls.validation.key_permissions[{index}]")
+                _validate_tls_permission_mapping(
+                    mapping,
+                    f"tls.validation.key_permissions[{index}]",
+                )
+
+        for field in ("cert_permissions", "chain_permissions"):
+            permission_raw = validation_map.get(field)
+            if permission_raw is not None:
+                permission_map = _as_dict(permission_raw, f"tls.validation.{field}")
+                _validate_tls_permission_mapping(permission_map, f"tls.validation.{field}")
 
     backups = raw.get("backups")
     if backups is not None:
@@ -393,6 +484,67 @@ def _build_app_config(raw: Mapping[str, object]) -> AppConfig:
     tls_enabled = bool(tls_mapping.get("enabled", True))
     system_mapping = _as_dict(tls_mapping.get("system"), "tls.system")
     lets_mapping = _as_dict(tls_mapping.get("lets_encrypt"), "tls.lets_encrypt")
+    validation_mapping = _as_dict(tls_mapping.get("validation"), "tls.validation")
+
+    default_validation = TLSValidationConfig()
+    warn_expiry_days = _expect_int(
+        validation_mapping.get("warn_expiry_days"),
+        "tls.validation.warn_expiry_days",
+        default=default_validation.warn_expiry_days,
+    )
+    if warn_expiry_days < 0:
+        raise ConfigError("tls.validation.warn_expiry_days must be non-negative.")
+
+    raw_key_permissions = validation_mapping.get("key_permissions")
+    key_permission_specs: tuple[TLSPermissionSpec, ...]
+    if raw_key_permissions is None:
+        key_permission_specs = default_validation.key_permissions
+    else:
+        sequence = list(_as_sequence(raw_key_permissions, "tls.validation.key_permissions"))
+        if not sequence:
+            key_permission_specs = default_validation.key_permissions
+        else:
+            parsed_permissions: list[TLSPermissionSpec] = []
+            for index, entry in enumerate(sequence):
+                mapping = _as_dict(entry, f"tls.validation.key_permissions[{index}]")
+                default_entry = (
+                    default_validation.key_permissions[index]
+                    if index < len(default_validation.key_permissions)
+                    else default_validation.key_permissions[-1]
+                )
+                parsed_permissions.append(
+                    _build_tls_permission(
+                        mapping,
+                        default_owner=default_entry.owner,
+                        default_group=default_entry.group,
+                        default_mode=default_entry.mode,
+                        context=f"tls.validation.key_permissions[{index}]",
+                    )
+                )
+            key_permission_specs = tuple(parsed_permissions)
+
+    cert_permissions = _build_tls_permission(
+        _as_dict(validation_mapping.get("cert_permissions"), "tls.validation.cert_permissions"),
+        default_owner=default_validation.cert_permissions.owner,
+        default_group=default_validation.cert_permissions.group,
+        default_mode=default_validation.cert_permissions.mode,
+        context="tls.validation.cert_permissions",
+    )
+
+    chain_permissions = _build_tls_permission(
+        _as_dict(validation_mapping.get("chain_permissions"), "tls.validation.chain_permissions"),
+        default_owner=default_validation.chain_permissions.owner,
+        default_group=default_validation.chain_permissions.group,
+        default_mode=default_validation.chain_permissions.mode,
+        context="tls.validation.chain_permissions",
+    )
+
+    validation = TLSValidationConfig(
+        warn_expiry_days=warn_expiry_days,
+        key_permissions=key_permission_specs,
+        cert_permissions=cert_permissions,
+        chain_permissions=chain_permissions,
+    )
 
     tls = TLSConfig(
         enabled=tls_enabled,
@@ -403,6 +555,7 @@ def _build_app_config(raw: Mapping[str, object]) -> AppConfig:
         lets_encrypt=TLSLetsEncryptConfig(
             live_dir=_to_path(lets_mapping.get("live_dir", "/etc/letsencrypt/live")),
         ),
+        validation=validation,
     )
 
     backups_mapping = _as_dict(raw.get("backups"), "backups")
@@ -515,6 +668,88 @@ def _deep_copy(source: Mapping[str, object]) -> dict[str, object]:
     return result
 
 
+def _as_sequence(value: object, label: str) -> Sequence[object]:
+    if isinstance(value, (str, bytes)):
+        raise ConfigError(f"Expected {label} to be a sequence. Got {type(value).__name__}.")
+    if not isinstance(value, Sequence):
+        raise ConfigError(f"Expected {label} to be a sequence. Got {type(value).__name__}.")
+    return value
+
+
+def _validate_tls_permission_mapping(mapping: Mapping[str, object], context: str) -> None:
+    unknown = set(mapping.keys()) - {"owner", "group", "mode"}
+    if unknown:
+        joined = ", ".join(sorted(unknown))
+        raise ConfigError(f"Unknown keys for {context}: {joined}.")
+
+    owner = mapping.get("owner")
+    if owner is not None and not isinstance(owner, str):
+        raise ConfigError(f"{context}.owner must be a string when provided.")
+
+    group = mapping.get("group")
+    if group is not None and not isinstance(group, str):
+        raise ConfigError(f"{context}.group must be a string or null.")
+
+    if "mode" in mapping:
+        _parse_permission_mode(mapping["mode"], f"{context}.mode")
+
+
+def _parse_permission_mode(value: object, label: str) -> int:
+    if value is None:
+        raise ConfigError(f"{label} must be specified.")
+    if isinstance(value, bool):
+        raise ConfigError(f"{label} must be an octal integer string. Got boolean {value!r}.")
+    if isinstance(value, int):
+        mode = value
+    elif isinstance(value, str):
+        text = value.strip().lower()
+        if not text:
+            raise ConfigError(f"{label} must be an octal integer string.")
+        if text.startswith("0o"):
+            text = text[2:]
+        try:
+            mode = int(text, 8)
+        except ValueError as exc:
+            raise ConfigError(f"{label} must be an octal integer string.") from exc
+    else:
+        raise ConfigError(f"{label} must be an octal integer or string.")
+    if mode < 0 or mode > 0o777:
+        raise ConfigError(f"{label} must be between 0000 and 0777 inclusive.")
+    return mode
+
+
+def _build_tls_permission(
+    mapping: Mapping[str, object],
+    *,
+    default_owner: str,
+    default_group: str | None,
+    default_mode: int,
+    context: str,
+) -> TLSPermissionSpec:
+    owner_value = mapping.get("owner")
+    if owner_value is None:
+        owner = default_owner
+    elif isinstance(owner_value, str):
+        owner = owner_value.strip()
+        if not owner:
+            raise ConfigError(f"{context}.owner must be a non-empty string.")
+    else:
+        raise ConfigError(f"{context}.owner must be a string.")
+
+    group_value = mapping.get("group", default_group)
+    if group_value is None or group_value == "":
+        group = None
+    elif isinstance(group_value, str):
+        group = group_value
+    else:
+        raise ConfigError(f"{context}.group must be a string or null.")
+
+    mode_value = mapping.get("mode", f"{default_mode:04o}")
+    mode = _parse_permission_mode(mode_value, f"{context}.mode")
+
+    return TLSPermissionSpec(owner=owner, group=group, mode=mode)
+
+
 def _coerce_value(raw: str) -> object:
     raw = raw.strip()
     try:
@@ -600,6 +835,8 @@ __all__ = [
     "BackupConfig",
     "PortsConfig",
     "SystemdConfig",
+    "TLSValidationConfig",
+    "TLSPermissionSpec",
     "TLSConfig",
     "TLSSystemConfig",
     "TLSLetsEncryptConfig",

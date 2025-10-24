@@ -35,7 +35,7 @@ from .backups import (
     BackupsRegistry,
     copy_into,
 )
-from .config import ALLOWED_BACKUP_COMPRESSION, AppConfig, load_config
+from .config import ALLOWED_BACKUP_COMPRESSION, AppConfig, TLSPermissionSpec, load_config
 from .locking import LockManager
 from .logging import OperationScope, StructuredLogger
 from .ports import PortsRegistry, PortsRegistryError
@@ -52,6 +52,13 @@ from .providers import (
 )
 from .state import StateRegistry, StateRegistryError
 from .templates import TemplateEngine
+from .tls import (
+    TLSConfigurationError,
+    TLSInspector,
+    TLSValidationReport,
+    TLSValidationSeverity,
+    TLSValidator,
+)
 
 console = Console()
 
@@ -99,6 +106,53 @@ NO_START_OPTION = typer.Option(
     help="Provision without starting the systemd service.",
 )
 
+TLS_VERIFY_INSTANCE_OPTION = typer.Option(
+    None,
+    "--instance",
+    help="Instance name to verify (omit to supply --cert/--key manually).",
+)
+TLS_VERIFY_CERT_OPTION = typer.Option(
+    None,
+    "--cert",
+    help="Path to the certificate (PEM). Required when --instance is omitted.",
+)
+TLS_VERIFY_KEY_OPTION = typer.Option(
+    None,
+    "--key",
+    help="Path to the private key (PEM). Required when --instance is omitted.",
+)
+TLS_VERIFY_CHAIN_OPTION = typer.Option(
+    None,
+    "--chain",
+    help="Optional chain bundle to verify.",
+)
+TLS_SOURCE_OPTION = typer.Option(
+    "auto",
+    "--source",
+    help="TLS source to inspect (auto|system|custom|lets-encrypt).",
+)
+TLS_JSON_OPTION = typer.Option(
+    False,
+    "--json",
+    help="Emit the validation report as JSON.",
+)
+
+TLS_INSTALL_CERT_OPTION = typer.Option(
+    ...,
+    "--cert",
+    help="Source certificate (PEM).",
+)
+TLS_INSTALL_KEY_OPTION = typer.Option(
+    ...,
+    "--key",
+    help="Source private key (PEM).",
+)
+TLS_INSTALL_CHAIN_OPTION = typer.Option(
+    None,
+    "--chain",
+    help="Optional chain bundle (PEM).",
+)
+
 app = typer.Typer(
     add_completion=False,
     help=textwrap.dedent(
@@ -129,6 +183,8 @@ class RuntimeContext:
     systemd_provider: SystemdProvider
     nginx_provider: NginxProvider
     backups: BackupsRegistry
+    tls_inspector: TLSInspector
+    tls_validator: TLSValidator
 
 
 @dataclass(slots=True)
@@ -389,6 +445,8 @@ def _ensure_runtime(
     )
     backups_registry = BackupsRegistry(config.backups.root, config.backups.index)
     backups_registry.ensure_root()
+    tls_inspector = TLSInspector(config)
+    tls_validator = TLSValidator(config.tls.validation)
     runtime = RuntimeContext(
         config=config,
         registry=registry,
@@ -402,6 +460,8 @@ def _ensure_runtime(
         systemd_provider=systemd_provider,
         nginx_provider=nginx_provider,
         backups=backups_registry,
+        tls_inspector=tls_inspector,
+        tls_validator=tls_validator,
     )
     ctx.obj = runtime
     return runtime
@@ -654,6 +714,51 @@ def _format_nginx_detail(result: subprocess.CompletedProcess[str]) -> str:
     if stderr:
         detail += f" stderr={stderr}"
     return detail
+
+
+def _format_tls_status(severity: TLSValidationSeverity) -> str:
+    if severity is TLSValidationSeverity.OK:
+        return "[green]OK[/green]"
+    if severity is TLSValidationSeverity.WARNING:
+        return "[yellow]WARN[/yellow]"
+    return "[red]ERROR[/red]"
+
+
+def _render_tls_report(report: TLSValidationReport, *, json_output: bool) -> None:
+    if json_output:
+        console.print(json.dumps(report.to_dict(), indent=2))
+        return
+
+    header = (
+        f"TLS validation (requested={report.selection.requested}, "
+        f"resolved={report.selection.resolved})"
+    )
+    console.print(f"[bold]{header}[/bold]")
+
+    status_table = Table("Scope", "Check", "Status", "Details")
+    for finding in report.findings:
+        status_table.add_row(
+            finding.scope,
+            finding.check,
+            _format_tls_status(finding.severity),
+            finding.message,
+        )
+    console.print(status_table)
+
+    material = report.selection.material
+    console.print(
+        f"Certificate: {material.certificate}\n"
+        f"Key: {material.key}"
+        + (
+            f"\nChain: {material.chain}"
+            if material.chain is not None
+            else ""
+        )
+    )
+    if report.not_valid_before is not None:
+        console.print(f"Not valid before: {report.not_valid_before.isoformat()}")
+    if report.not_valid_after is not None:
+        console.print(f"Not valid after: {report.not_valid_after.isoformat()}")
 
 
 def _build_tls_context(config: AppConfig, domain: str) -> dict[str, object]:
@@ -925,6 +1030,8 @@ def _provider_error(op: OperationScope, message: str) -> None:
     raise typer.Exit(code=1)
 
 
+
+
 @app.command()
 def doctor(ctx: typer.Context) -> None:
     """Run environment and service health checks (coming soon)."""
@@ -962,12 +1069,406 @@ ports_app = typer.Typer(help="Inspect and manage port reservations.")
 versions_app = typer.Typer(help="Manage installed Sync Server versions.")
 backups_app = typer.Typer(help="Create and reconcile instance backups.")
 config_app = typer.Typer(help="Inspect and manage global configuration.")
+tls_app = typer.Typer(help="Manage TLS certificates and validation.")
 
 app.add_typer(instances_app, name="instance")
 app.add_typer(ports_app, name="ports")
 app.add_typer(versions_app, name="version")
 app.add_typer(backups_app, name="backup")
 app.add_typer(config_app, name="config")
+app.add_typer(tls_app, name="tls")
+
+
+@tls_app.command("verify")
+def tls_verify(
+    ctx: typer.Context,
+    instance: str | None = TLS_VERIFY_INSTANCE_OPTION,
+    cert: Path | None = TLS_VERIFY_CERT_OPTION,
+    key: Path | None = TLS_VERIFY_KEY_OPTION,
+    chain: Path | None = TLS_VERIFY_CHAIN_OPTION,
+    source: str = TLS_SOURCE_OPTION,
+    json_output: bool = TLS_JSON_OPTION,
+) -> None:
+    """Validate TLS assets for an instance or manual paths."""
+    runtime = _get_runtime(ctx)
+    normalized_source = (source or "auto").strip().lower()
+    allowed_sources = {"auto", "system", "custom", "lets-encrypt", "manual"}
+    if normalized_source not in allowed_sources:
+        message = (
+            f"Unsupported TLS source '{source}'. "
+            "Allowed values: auto, system, custom, lets-encrypt."
+        )
+        console.print(f"[red]{message}[/red]")
+        raise typer.Exit(code=1)
+
+    args = {
+        "instance": instance,
+        "cert": str(cert) if cert else None,
+        "key": str(key) if key else None,
+        "chain": str(chain) if chain else None,
+        "source": normalized_source,
+        "json": json_output,
+    }
+    target = (
+        {"kind": "instance", "name": instance}
+        if instance
+        else {"kind": "tls", "scope": "manual"}
+    )
+
+    with runtime.logger.operation("tls verify", args=args, target=target) as op:
+        try:
+            if instance:
+                entry = _require_instance(runtime, instance, op)
+                source_override = (
+                    None
+                    if normalized_source in {"auto", "lets-encrypt"}
+                    else normalized_source
+                )
+                selection = runtime.tls_inspector.resolve_for_instance(
+                    instance,
+                    entry,
+                    source_override=source_override,
+                    certificate=cert,
+                    key=key,
+                    chain=chain,
+                )
+                if normalized_source == "lets-encrypt" and selection.resolved != "lets-encrypt":
+                    message = (
+                        "Let's Encrypt assets were not detected for the instance "
+                        f"(resolved source: {selection.resolved})."
+                    )
+                    console.print(f"[red]{message}[/red]")
+                    op.error(message, rc=1)
+                    raise typer.Exit(code=1)
+            else:
+                if cert is None or key is None:
+                    message = "Provide --cert and --key when verifying without --instance."
+                    console.print(f"[red]{message}[/red]")
+                    op.error(message, rc=1)
+                    raise typer.Exit(code=1)
+                selection = runtime.tls_inspector.resolve_manual(
+                    certificate=cert,
+                    key=key,
+                    chain=chain,
+                    source=normalized_source,
+                )
+
+            report = runtime.tls_validator.validate(selection)
+            _render_tls_report(report, json_output=json_output)
+
+            errors = [
+                f"{finding.scope}:{finding.check} {finding.message}"
+                for finding in report.findings
+                if finding.severity is TLSValidationSeverity.ERROR
+            ]
+            warnings = [
+                f"{finding.scope}:{finding.check} {finding.message}"
+                for finding in report.findings
+                if finding.severity is TLSValidationSeverity.WARNING
+            ]
+            context = {"report": report.to_dict()}
+            if errors:
+                op.error(
+                    "TLS validation failed.",
+                    errors=errors,
+                    warnings=warnings,
+                    rc=2,
+                    context=context,
+                )
+                raise typer.Exit(code=2)
+            if warnings:
+                op.warning(
+                    "TLS validation completed with warnings.",
+                    warnings=warnings,
+                    context=context,
+                )
+                return
+            op.success("TLS validation successful.", context=context)
+        except TLSConfigurationError as exc:
+            console.print(f"[red]{exc}[/red]")
+            op.error(str(exc), rc=1)
+            raise typer.Exit(code=1) from exc
+
+
+@tls_app.command("install")
+def tls_install(
+    ctx: typer.Context,
+    instance: str = typer.Argument(..., help="Instance to install TLS assets for."),
+    cert: Path = TLS_INSTALL_CERT_OPTION,
+    key: Path = TLS_INSTALL_KEY_OPTION,
+    chain: Path | None = TLS_INSTALL_CHAIN_OPTION,
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Show planned actions without copying files.",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        help="Skip confirmation prompt and proceed non-interactively.",
+    ),
+) -> None:
+    """Install custom TLS assets for an instance."""
+    runtime = _get_runtime(ctx)
+    normalized_name = _validate_instance_name(instance)
+    args = {
+        "instance": normalized_name,
+        "cert": str(cert),
+        "key": str(key),
+        "chain": str(chain) if chain else None,
+        "dry_run": dry_run,
+    }
+    with runtime.logger.operation(
+        "tls install",
+        args=args,
+        target={"kind": "instance", "name": normalized_name},
+    ) as op:
+        with runtime.locks.mutate_instances([normalized_name]) as bundle:
+            op.set_lock_wait_ms(bundle.wait_ms)
+            _require_instance(runtime, normalized_name, op)
+
+            selection = runtime.tls_inspector.resolve_manual(
+                certificate=cert.expanduser(),
+                key=key.expanduser(),
+                chain=chain.expanduser() if chain else None,
+                source="custom",
+            )
+            report = runtime.tls_validator.validate(selection)
+            errors = [
+                f"{finding.scope}:{finding.check} {finding.message}"
+                for finding in report.findings
+                if finding.severity is TLSValidationSeverity.ERROR
+            ]
+            if errors:
+                _render_tls_report(report, json_output=False)
+                op.error(
+                    "TLS validation failed; aborting install.",
+                    errors=errors,
+                    rc=2,
+                    context={"report": report.to_dict()},
+                )
+                raise typer.Exit(code=2)
+
+            destination = runtime.tls_inspector.destination_for_instance(normalized_name)
+            console.print(
+                f"Installing TLS assets for [bold]{normalized_name}[/bold]:\n"
+                f"  Source certificate: {selection.material.certificate}\n"
+                f"  Source key: {selection.material.key}\n"
+                + (
+                    f"  Source chain: {selection.material.chain}\n"
+                    if selection.material.chain is not None
+                    else ""
+                )
+                + f"  Destination certificate: {destination.certificate}\n"
+                f"  Destination key: {destination.key}"
+                + (
+                    f"\n  Destination chain: {destination.chain}"
+                    if selection.material.chain is not None
+                    else ""
+                )
+            )
+
+            if dry_run:
+                op.add_step("tls.copy.cert", status="skipped", detail="dry-run")
+                op.add_step("tls.copy.key", status="skipped", detail="dry-run")
+                if selection.material.chain is not None:
+                    op.add_step("tls.copy.chain", status="skipped", detail="dry-run")
+                console.print("[yellow]Dry run[/yellow]: no files were copied.")
+                op.success(
+                    "TLS install dry-run complete.",
+                    changed=0,
+                    context={"report": report.to_dict()},
+                )
+                return
+
+            if not yes:
+                confirmed = typer.confirm(
+                    f"Proceed with installing TLS assets for '{normalized_name}'?",
+                    default=True,
+                )
+                if not confirmed:
+                    console.print("[yellow]TLS install cancelled.[/yellow]")
+                    op.warning(
+                        "TLS install cancelled by operator.",
+                        warnings=["user-cancelled"],
+                    )
+                    return
+
+            validation = runtime.config.tls.validation
+            timestamp = datetime.now(UTC)
+            change_count = 0
+            copied_paths: list[str] = []
+
+            def _copy_file(
+                label: str,
+                src: Path,
+                dest: Path,
+                perm: TLSPermissionSpec,
+            ) -> None:
+                nonlocal change_count
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                backup_path: Path | None = None
+                if dest.exists():
+                    suffix = dest.suffix + f".bak-{timestamp:%Y%m%d%H%M%S}"
+                    backup_path = dest.with_suffix(suffix)
+                    shutil.copy2(dest, backup_path)
+                    copied_paths.append(str(backup_path))
+                    op.add_step(
+                        f"tls.backup.{label}",
+                        status="success",
+                        detail=f"{dest} -> {backup_path}",
+                    )
+                shutil.copy2(src, dest)
+                os.chmod(dest, perm.mode)
+                try:
+                    shutil.chown(dest, perm.owner, perm.group)
+                except (LookupError, PermissionError) as exc:
+                    message = f"Failed to adjust ownership for {dest}: {exc}"
+                    console.print(f"[red]{message}[/red]")
+                    op.error(message, errors=[message], rc=1)
+                    raise typer.Exit(code=1) from exc
+                change_count += 1
+                detail = f"{src} -> {dest}"
+                op.add_step(f"tls.copy.{label}", status="success", detail=detail)
+
+            _copy_file(
+                "key",
+                selection.material.key,
+                destination.key,
+                validation.key_permissions[0],
+            )
+            _copy_file(
+                "cert",
+                selection.material.certificate,
+                destination.certificate,
+                validation.cert_permissions,
+            )
+            if selection.material.chain is not None and destination.chain is not None:
+                _copy_file(
+                    "chain",
+                    selection.material.chain,
+                    destination.chain,
+                    validation.chain_permissions,
+                )
+
+            tls_payload: dict[str, object] = {
+                "source": "custom",
+                "cert": str(destination.certificate),
+                "key": str(destination.key),
+            }
+            if selection.material.chain is not None and destination.chain is not None:
+                tls_payload["chain"] = str(destination.chain)
+
+            _update_instance_registry(
+                runtime,
+                normalized_name,
+                {"tls": tls_payload},
+                metadata={
+                    "tls_source": "custom",
+                    "tls_updated_at": timestamp.isoformat(),
+                },
+            )
+            op.add_step("registry.update", status="success", detail="tls")
+
+            _record_instance_state(
+                runtime,
+                normalized_name,
+                update_last_changed=True,
+                metadata={"tls_source": "custom"},
+            )
+
+            op.success(
+                "TLS assets installed.",
+                changed=change_count,
+                backups=copied_paths,
+                context={"tls": tls_payload},
+            )
+
+
+@tls_app.command("use-system")
+def tls_use_system(
+    ctx: typer.Context,
+    instance: str = typer.Argument(..., help="Instance to switch back to system TLS."),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Show the actions without updating the registry.",
+    ),
+) -> None:
+    """Switch an instance back to the system TLS defaults."""
+    runtime = _get_runtime(ctx)
+    normalized_name = _validate_instance_name(instance)
+    args = {"instance": normalized_name, "dry_run": dry_run}
+    with runtime.logger.operation(
+        "tls use-system",
+        args=args,
+        target={"kind": "instance", "name": normalized_name},
+    ) as op:
+        with runtime.locks.mutate_instances([normalized_name]) as bundle:
+            op.set_lock_wait_ms(bundle.wait_ms)
+            entry = _require_instance(runtime, normalized_name, op)
+
+            selection = runtime.tls_inspector.resolve_for_instance(
+                normalized_name,
+                entry,
+                source_override="system",
+            )
+            report = runtime.tls_validator.validate(selection)
+            errors = [
+                f"{finding.scope}:{finding.check} {finding.message}"
+                for finding in report.findings
+                if finding.severity is TLSValidationSeverity.ERROR
+            ]
+            if errors:
+                _render_tls_report(report, json_output=False)
+                op.error(
+                    "System TLS validation failed; refusing to switch.",
+                    errors=errors,
+                    rc=2,
+                    context={"report": report.to_dict()},
+                )
+                raise typer.Exit(code=2)
+
+            _render_tls_report(report, json_output=False)
+
+            if dry_run:
+                op.add_step("registry.update", status="skipped", detail="dry-run")
+                console.print("[yellow]Dry run[/yellow]: registry unchanged.")
+                op.success(
+                    "TLS use-system dry-run complete.",
+                    changed=0,
+                    context={"report": report.to_dict()},
+                )
+                return
+
+            timestamp = datetime.now(UTC)
+            tls_payload = {
+                "source": "system",
+                "cert": str(runtime.config.tls.system.cert),
+                "key": str(runtime.config.tls.system.key),
+            }
+            _update_instance_registry(
+                runtime,
+                normalized_name,
+                {"tls": tls_payload},
+                metadata={
+                    "tls_source": "system",
+                    "tls_updated_at": timestamp.isoformat(),
+                },
+            )
+            op.add_step("registry.update", status="success", detail="tls")
+
+            _record_instance_state(
+                runtime,
+                normalized_name,
+                update_last_changed=True,
+                metadata={"tls_source": "system"},
+            )
+
+            op.success(
+                "Instance configured to use system TLS defaults.",
+                context={"tls": tls_payload},
+            )
 
 
 @ports_app.command("list")

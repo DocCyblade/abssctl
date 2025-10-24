@@ -2,15 +2,21 @@
 from __future__ import annotations
 
 import base64
+import grp
 import hashlib
 import json
 import os
+import pwd
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 import yaml
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 from typer.testing import CliRunner
 
 from abssctl import __version__
@@ -23,6 +29,38 @@ from abssctl.providers.version_provider import VersionProvider
 from abssctl.state import StateRegistry
 
 runner = CliRunner()
+
+
+def _create_tls_fixture(tmp_path: Path, name: str = "alpha.example") -> tuple[Path, Path]:
+    """Create a self-signed certificate/key pair for testing."""
+    now = datetime.now(UTC)
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, name)])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(days=1))
+        .not_valid_after(now + timedelta(days=60))
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .sign(key, hashes.SHA256())
+    )
+    safe = name.replace(".", "_")
+    cert_path = tmp_path / f"{safe}.pem"
+    key_path = tmp_path / f"{safe}.key"
+    cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(
+        key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+    )
+    cert_path.chmod(0o644)
+    key_path.chmod(0o600)
+    return cert_path, key_path
 
 _TARBALL_DIGEST_BYTES = bytes(range(64))
 FAKE_CLI_SHASUM = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -61,6 +99,11 @@ def _prepare_environment(
     nginx_stub = bin_dir / "nginx"
     nginx_stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     nginx_stub.chmod(0o755)
+    owner = pwd.getpwuid(os.getuid()).pw_name
+    group = grp.getgrgid(os.getgid()).gr_name
+    tls_root = tmp_path / "tls"
+    tls_root.mkdir(parents=True, exist_ok=True)
+    system_cert, system_key = _create_tls_fixture(tls_root, name="system-cert")
     config = {
         "state_dir": str(state_dir),
         "logs_dir": str(logs_dir),
@@ -71,6 +114,32 @@ def _prepare_environment(
         "systemd": {
             "systemctl_bin": str(bin_dir / "systemctl"),
             "journalctl_bin": str(bin_dir / "journalctl"),
+        },
+        "tls": {
+            "system": {
+                "cert": str(system_cert),
+                "key": str(system_key),
+            },
+            "lets_encrypt": {
+                "live_dir": str(tls_root / "le"),
+            },
+            "validation": {
+                "warn_expiry_days": 30,
+                "key_permissions": [
+                    {"owner": owner, "group": group, "mode": "0600"},
+                    {"owner": owner, "group": group, "mode": "0640"},
+                ],
+                "cert_permissions": {
+                    "owner": owner,
+                    "group": group,
+                    "mode": "0644",
+                },
+                "chain_permissions": {
+                    "owner": owner,
+                    "group": group,
+                    "mode": "0644",
+                },
+            },
         },
     }
     if config_overrides:
@@ -231,6 +300,90 @@ def test_version_list_json(tmp_path: Path) -> None:
     assert payload["versions"][1]["integrity"]["npm"]["shasum"] == "12345"
     last_backup = payload["versions"][0]["metadata"].get("last_backup")
     assert last_backup and last_backup["id"] == "20250101-alpha-abc123"
+
+
+def test_tls_verify_manual_reports_success(tmp_path: Path) -> None:
+    """`tls verify` validates manual certificate paths."""
+    env, _ = _prepare_environment(tmp_path)
+    cert_path, key_path = _create_tls_fixture(tmp_path)
+
+    result = runner.invoke(
+        app,
+        [
+            "tls",
+            "verify",
+            "--cert",
+            str(cert_path),
+            "--key",
+            str(key_path),
+        ],
+        env=env,
+    )
+
+    assert result.exit_code == 0
+    assert "TLS validation" in result.stdout
+    assert "OK" in result.stdout
+
+
+def test_tls_install_updates_registry(tmp_path: Path) -> None:
+    """`tls install` copies files and records registry state."""
+    instances = [{"name": "alpha", "port": 5000, "version": "current"}]
+    env, state_dir = _prepare_environment(tmp_path, instances=instances)
+    cert_path, key_path = _create_tls_fixture(tmp_path, name="alpha.example")
+
+    result = runner.invoke(
+        app,
+        [
+            "tls",
+            "install",
+            "alpha",
+            "--cert",
+            str(cert_path),
+            "--key",
+            str(key_path),
+            "--yes",
+        ],
+        env=env,
+    )
+
+    assert result.exit_code == 0
+    registry = StateRegistry(state_dir / "registry")
+    entry = registry.get_instance("alpha")
+    assert entry is not None
+    tls_block = entry.get("tls", {})
+    assert tls_block.get("source") == "custom"
+    assert Path(str(tls_block.get("cert"))).exists()
+    assert Path(str(tls_block.get("key"))).exists()
+
+
+def test_tls_use_system_switches_source(tmp_path: Path) -> None:
+    """`tls use-system` updates TLS source metadata."""
+    instances = [{"name": "alpha", "port": 5000, "version": "current"}]
+    env, state_dir = _prepare_environment(tmp_path, instances=instances)
+    cert_path, key_path = _create_tls_fixture(tmp_path, name="alpha.example")
+    runner.invoke(
+        app,
+        [
+            "tls",
+            "install",
+            "alpha",
+            "--cert",
+            str(cert_path),
+            "--key",
+            str(key_path),
+            "--yes",
+        ],
+        env=env,
+    )
+
+    result = runner.invoke(app, ["tls", "use-system", "alpha"], env=env)
+
+    assert result.exit_code == 0
+    registry = StateRegistry(state_dir / "registry")
+    entry = registry.get_instance("alpha")
+    assert entry is not None
+    tls_block = entry.get("tls", {})
+    assert tls_block.get("source") == "system"
 
 
 def test_backup_create_generates_archive(tmp_path: Path) -> None:

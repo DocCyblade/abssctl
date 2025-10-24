@@ -189,9 +189,29 @@ Non‑Goals for v1.0
 
 5.5 Configuration & State
 - Global config /etc/abssctl/config.yml keys:
-  npm_package_name, install_root: /srv/app, instance_root: /srv, service_user: actual-sync, reverse_proxy: nginx,
-  tls: {enabled: true, system: {cert: /etc/ssl/private/cert.pem, key: /etc/ssl/private/cert.key}, lets_encrypt: {live_dir: /etc/letsencrypt/live}},
-  ports: {base: 5000, strategy: sequential}, state_dir: /var/lib/abssctl, default_version: current.
+
+  - ``npm_package_name``
+  - ``install_root``: /srv/app
+  - ``instance_root``: /srv
+  - ``service_user``: actual-sync
+  - ``reverse_proxy``: nginx
+  - ``tls`` controls certificate detection and validation:
+
+    - ``enabled``: default ``true``.
+    - ``system.cert`` / ``system.key``: default `/etc/ssl/private/cert.pem` and
+      `/etc/ssl/private/cert.key`.
+    - ``lets_encrypt.live_dir``: default `/etc/letsencrypt/live`.
+    - ``validation.warn_expiry_days``: 30-day warning threshold for certificate
+      expiry (values <0 rejected).
+    - ``validation.key_permissions``: accepted owner/group/mode combinations for
+      private keys (defaults: ``root:ssl-cert`` ``0640`` plus ``root:root``
+      ``0600``).
+    - ``validation.cert_permissions`` and ``validation.chain_permissions``:
+      defaults ``root:root`` ``0644``.
+
+  - ``ports``: {base: 5000, strategy: sequential}
+  - ``state_dir``: /var/lib/abssctl (registry defaults to ``state_dir/registry``)
+  - ``default_version``: current.
 - Config precedence: CLI flags > environment variables > /etc/abssctl/config.yml > built-in defaults. Environment variables use the ABSSCTL_* namespace (documented in --help).
 - Registry /var/lib/abssctl/registry/instances.yml: name, domain, port, version_binding (current|X.Y.Z), data_dir, created_at, last_changed, notes.
 - Optional port registry /var/lib/abssctl/registry/ports.yml: records reserved ports with owner instance and timestamp.

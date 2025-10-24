@@ -13,7 +13,8 @@ Project Pillars
 
 - **Deterministic Deployments:** consistent filesystem layout, version pinning,
   and repeatable provisioning steps.
-- **Operational Safety:** built-in validations, backup prompts, and dry-run
+- **Operational Safety:** built-in validations (configurable TLS expiry and
+  permission checks), backup prompts, and dry-run
   support across mutating commands.
 - **Observability:** structured logs, health-check probes, and diagnostic bundle
   generation.

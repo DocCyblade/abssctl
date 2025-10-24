@@ -121,6 +121,31 @@ All mutators honour locks, safety prompts, and support ``--dry-run`` to preview 
    actions without changing state. When the operator accepts the safety prompt,
    the command runs ``backup create`` before proceeding.
 
+TLS Commands
+============
+
+``abssctl tls verify [--instance NAME] [--cert PATH --key PATH --chain PATH] [--source {auto,system,custom,lets-encrypt}] [--json]``
+   Validates certificate/key pairs from the registry or explicit paths. The
+   command checks readability, owner/group/mode against configuration policy,
+   certificate expiry, and key↔cert pairing. ``--instance`` inspects the
+   registered TLS source for an instance (auto-detecting Let's Encrypt or
+   falling back to system defaults), while manual verification requires
+   ``--cert`` and ``--key``. ``--json`` emits a structured report suitable for
+   automation; otherwise a Rich table summarises each check.
+
+``abssctl tls install <name> --cert PATH --key PATH [--chain PATH] [--dry-run] [--yes]``
+   Copies operator-provided TLS assets into the configured destinations (defaulting
+   to sibling paths of the system certificate/key), enforcing secure permissions
+   and creating timestamped backups of any overwritten files. Validation runs
+   before copying; ``--dry-run`` previews the plan, and ``--yes`` skips the
+   interactive confirmation. Successful installs update the registry so future
+   renders use the new ``custom`` source.
+
+``abssctl tls use-system <name> [--dry-run]``
+   Switches an instance back to the system TLS defaults after validating the
+   configured certificate/key pair. ``--dry-run`` reports the planned registry
+   update without persisting changes.
+
 System Diagnostics & Backups
 ============================
 

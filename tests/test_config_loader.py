@@ -20,6 +20,13 @@ def test_load_config_defaults_when_file_missing(tmp_path: Path) -> None:
     assert config.backups.root == Path("/srv/backups")
     assert config.backups.index == Path("/srv/backups/backups.json")
     assert config.backups.compression == "auto"
+    validation = config.tls.validation
+    assert validation.warn_expiry_days == 30
+    assert validation.key_permissions[0].mode == 0o640
+    assert validation.key_permissions[0].group == "ssl-cert"
+    assert validation.key_permissions[1].mode == 0o600
+    assert validation.cert_permissions.mode == 0o644
+    assert validation.chain_permissions.mode == 0o644
 
 
 def test_load_config_reads_yaml_file(tmp_path: Path) -> None:
@@ -50,12 +57,47 @@ def test_load_config_reads_yaml_file(tmp_path: Path) -> None:
     assert config.backups.compression == "gzip"
 
 
+def test_load_config_parses_tls_validation_block(tmp_path: Path) -> None:
+    """TLS validation block is parsed with sensible defaults."""
+    cfg = tmp_path / "config.yml"
+    cfg.write_text(
+        "tls:\n"
+        "  validation:\n"
+        "    warn_expiry_days: 10\n"
+        "    key_permissions:\n"
+        "      - owner: root\n"
+        "        group: ssl-cert\n"
+        '        mode: "0640"\n'
+        "      - owner: admin\n"
+        "        group: admin\n"
+        '        mode: "0644"\n'
+        "    cert_permissions:\n"
+        "      group: ssl-cert\n"
+        '      mode: "0640"\n'
+    )
+
+    config = load_config(config_file=cfg, env={})
+
+    validation = config.tls.validation
+    assert validation.warn_expiry_days == 10
+    assert validation.key_permissions[0].group == "ssl-cert"
+    assert validation.key_permissions[1].owner == "admin"
+    assert validation.key_permissions[1].mode == 0o644
+    assert validation.cert_permissions.group == "ssl-cert"
+    assert validation.cert_permissions.mode == 0o640
+    # chain permissions default should remain root/root 0644
+    assert validation.chain_permissions.mode == 0o644
+
+
 def test_env_overrides_take_precedence(tmp_path: Path) -> None:
     """Environment variables override defaults and file settings."""
     state_dir = tmp_path / "state"
     env = {
         "ABSSCTL_PORTS__BASE": "6500",
         "ABSSCTL_TLS__ENABLED": "false",
+        "ABSSCTL_TLS__VALIDATION__WARN_EXPIRY_DAYS": "45",
+        "ABSSCTL_TLS__VALIDATION__CERT_PERMISSIONS__MODE": "0640",
+        "ABSSCTL_TLS__VALIDATION__CERT_PERMISSIONS__GROUP": "ssl-cert",
         "ABSSCTL_STATE_DIR": str(state_dir),
         "ABSSCTL_LOCK_TIMEOUT": "45",
         "ABSSCTL_TEMPLATES_DIR": str(tmp_path / "templates"),
@@ -76,6 +118,9 @@ def test_env_overrides_take_precedence(tmp_path: Path) -> None:
     assert config.backups.index == (tmp_path / "bk" / "backups.json")
     assert config.backups.compression == "none"
     assert config.backups.compression_level == 5
+    assert config.tls.validation.warn_expiry_days == 45
+    assert config.tls.validation.cert_permissions.mode == 0o640
+    assert config.tls.validation.cert_permissions.group == "ssl-cert"
 
 
 def test_env_can_select_config_file(tmp_path: Path) -> None:
@@ -130,6 +175,33 @@ def test_unknown_tls_nested_keys_raise(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ConfigError, match="Unknown TLS configuration keys"):
+        load_config(config_file=cfg, env={})
+
+
+def test_tls_validation_negative_warn_days_raises(tmp_path: Path) -> None:
+    """Negative TLS warn_expiry_days is rejected."""
+    cfg = tmp_path / "config.yml"
+    cfg.write_text(
+        "tls:\n"
+        "  validation:\n"
+        "    warn_expiry_days: -5\n"
+    )
+
+    with pytest.raises(ConfigError, match="warn_expiry_days must be non-negative"):
+        load_config(config_file=cfg, env={})
+
+
+def test_tls_validation_invalid_permission_mode_raises(tmp_path: Path) -> None:
+    """Invalid TLS permission modes raise a ConfigError."""
+    cfg = tmp_path / "config.yml"
+    cfg.write_text(
+        "tls:\n"
+        "  validation:\n"
+        "    cert_permissions:\n"
+        "      mode: invalid\n"
+    )
+
+    with pytest.raises(ConfigError, match="must be an octal integer"):
         load_config(config_file=cfg, env={})
 
 
