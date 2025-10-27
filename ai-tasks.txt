@@ -4,11 +4,6 @@
 #
 # - AI do not edit above this line! Keep this header!
 
-1. Implement TLS subcommands (`tls verify/install/use-system`) per ADR-031.
-   4. Update nginx rendering context to consume TLS selections, ensuring reloads/rollbacks behave consistently; add unit coverage for TLS-enabled templates.
-   5. Create CLI tests exercising success/failure/dry-run flows (fake certs, permission errors, Let's Encrypt detection).
-   6. Refresh documentation (README, guides, CLI reference) to describe TLS workflows and update roadmap/session log once complete.
-
 2. Implement backup restore & reconcile workflows (ADR-012/021/022 §5.8).
    1. Design end-to-end restore plan: define archive structure expectations, target directory handling, registry updates, and prompts; capture in docs/plan if needed.
    2. Implement `backup restore` with extraction, pre-flight checks (disk space, instance state), optional pre-restore backup, and rollback on failure.

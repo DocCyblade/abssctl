@@ -183,6 +183,9 @@
 - Reviewed ADR-031 alongside current TLS/nginx context to map required config inputs for upcoming TLS tooling.
 - Extended TLS config schema with validation/perms knobs, refreshed requirements/docs, and added loader tests (`pytest tests/test_config_loader.py`).
 - Implemented TLS inspector/validator helpers plus `tls verify/install/use-system` CLI flows with registry updates and new coverage (`pytest tests/test_tls.py tests/test_cli.py`).
+- Updated nginx rendering to consume per-instance TLS selections, re-rendering sites after TLS install/use-system and surfacing configuration errors during instance mutations.
+- Added targeted CLI coverage for TLS dry-run, permission failures, and Let's Encrypt detection while asserting nginx configs pick up custom/system certificates.
+- Refreshed CLI reference docs to describe the new TLS workflows and nginx reload behaviour.
 - Session kickoff for Beta roadmap work; focus will shift to TLS tooling, backup restore, doctor probes, and consistency audits per `ai-tasks.txt`.
 
 ## Wrap up:

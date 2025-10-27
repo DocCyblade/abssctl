@@ -55,6 +55,7 @@ from .templates import TemplateEngine
 from .tls import (
     TLSConfigurationError,
     TLSInspector,
+    TLSSourceSelection,
     TLSValidationReport,
     TLSValidationSeverity,
     TLSValidator,
@@ -761,17 +762,53 @@ def _render_tls_report(report: TLSValidationReport, *, json_output: bool) -> Non
         console.print(f"Not valid after: {report.not_valid_after.isoformat()}")
 
 
-def _build_tls_context(config: AppConfig, domain: str) -> dict[str, object]:
+def _build_tls_context(
+    runtime: RuntimeContext,
+    instance: str,
+    *,
+    domain: str,
+    entry: Mapping[str, object] | None = None,
+    selection: TLSSourceSelection | None = None,
+) -> dict[str, object]:
+    """Return the nginx TLS context for *instance* using resolved material."""
+    config = runtime.config
     tls_config = config.tls
-    mode = "system" if tls_config.enabled else "disabled"
-    certificate = tls_config.system.cert
-    key = tls_config.system.key
+    entry_data = dict(entry or runtime.registry.get_instance(instance) or {})
+
+    if not tls_config.enabled:
+        certificate = selection.material.certificate if selection else tls_config.system.cert
+        key = selection.material.key if selection else tls_config.system.key
+        chain = selection.material.chain if selection else None
+        return {
+            "enabled": False,
+            "mode": "disabled",
+            "domain": domain,
+            "source": "disabled",
+            "requested": selection.requested if selection else "disabled",
+            "certificate": str(certificate),
+            "certificate_key": str(key),
+            "certificate_chain": str(chain) if chain else None,
+            "system": {
+                "cert": str(tls_config.system.cert),
+                "key": str(tls_config.system.key),
+            },
+            "lets_encrypt": {
+                "live_dir": str(tls_config.lets_encrypt.live_dir),
+            },
+        }
+
+    resolved = selection or runtime.tls_inspector.resolve_for_instance(instance, entry_data)
+    material = resolved.material
+    chain = material.chain
     return {
-        "enabled": tls_config.enabled,
-        "mode": mode,
+        "enabled": True,
+        "mode": resolved.resolved,
+        "source": resolved.resolved,
+        "requested": resolved.requested,
         "domain": domain,
-        "certificate": str(certificate),
-        "certificate_key": str(key),
+        "certificate": str(material.certificate),
+        "certificate_key": str(material.key),
+        "certificate_chain": str(chain) if chain else None,
         "system": {
             "cert": str(tls_config.system.cert),
             "key": str(tls_config.system.key),
@@ -783,14 +820,24 @@ def _build_tls_context(config: AppConfig, domain: str) -> dict[str, object]:
 
 
 def _build_nginx_context(
-    config: AppConfig,
+    runtime: RuntimeContext,
     instance: str,
     *,
     domain: str,
     port: int,
+    entry: Mapping[str, object] | None = None,
+    selection: TLSSourceSelection | None = None,
 ) -> dict[str, object]:
+    """Return render context for nginx including TLS selection."""
+    config = runtime.config
     log_prefix = config.logs_dir / instance
-    tls_context = _build_tls_context(config, domain)
+    tls_context = _build_tls_context(
+        runtime,
+        instance,
+        domain=domain,
+        entry=entry,
+        selection=selection,
+    )
     return {
         "http_listen_port": 80,
         "https_listen_port": 443,
@@ -1377,6 +1424,69 @@ def tls_install(
                 metadata={"tls_source": "custom"},
             )
 
+            entry_after_raw = runtime.registry.get_instance(normalized_name)
+            entry_for_nginx = (
+                dict(entry_after_raw)
+                if isinstance(entry_after_raw, Mapping)
+                else {}
+            )
+            domain_value = str(
+                entry_for_nginx.get("domain")
+                or _default_instance_domain(runtime.config, normalized_name)
+            )
+            port_value_raw: object | None = entry_for_nginx.get("port")
+            if port_value_raw in (None, "", 0):
+                port_value_raw = runtime.ports.get_port(normalized_name)
+            port_int = _coerce_port(port_value_raw, runtime.config.ports.base)
+            entry_for_nginx["domain"] = domain_value
+            entry_for_nginx["port"] = port_int
+            try:
+                nginx_context = _build_nginx_context(
+                    runtime,
+                    normalized_name,
+                    domain=domain_value,
+                    port=port_int,
+                    entry=entry_for_nginx,
+                )
+            except TLSConfigurationError as exc:
+                console.print(f"[red]{exc}[/red]")
+                op.error(str(exc), errors=[str(exc)], rc=1)
+                raise typer.Exit(code=1) from exc
+
+            nginx_result = runtime.nginx_provider.render_site(normalized_name, nginx_context)
+            if nginx_result.validation_error is not None:
+                _provider_error(
+                    op,
+                    (
+                        f"nginx validation failed for '{normalized_name}': "
+                        f"{nginx_result.validation_error}"
+                    ),
+                )
+            op.add_step(
+                "nginx.render_site",
+                status="success" if nginx_result.changed else "noop",
+                detail=str(runtime.nginx_provider.site_path(normalized_name)),
+            )
+            if nginx_result.validation is not None:
+                op.add_step(
+                    "nginx.validate",
+                    status="success",
+                    detail=_format_nginx_detail(nginx_result.validation),
+                )
+            if nginx_result.reload is not None:
+                op.add_step(
+                    "nginx.reload",
+                    status="success",
+                    detail=_format_nginx_detail(nginx_result.reload),
+                )
+            runtime.nginx_provider.enable(normalized_name)
+            op.add_step(
+                "nginx.enable",
+                status="success",
+                detail=str(runtime.nginx_provider.enabled_path(normalized_name)),
+            )
+            change_count += int(nginx_result.changed)
+
             op.success(
                 "TLS assets installed.",
                 changed=change_count,
@@ -1463,6 +1573,69 @@ def tls_use_system(
                 normalized_name,
                 update_last_changed=True,
                 metadata={"tls_source": "system"},
+            )
+
+            entry_after_raw = runtime.registry.get_instance(normalized_name)
+            entry_for_nginx = (
+                dict(entry_after_raw)
+                if isinstance(entry_after_raw, Mapping)
+                else {}
+            )
+            domain_value = str(
+                entry_for_nginx.get("domain")
+                or _default_instance_domain(runtime.config, normalized_name)
+            )
+            port_value_raw: object | None = entry_for_nginx.get("port")
+            if port_value_raw in (None, "", 0):
+                port_value_raw = runtime.ports.get_port(normalized_name)
+            port_int = _coerce_port(port_value_raw, runtime.config.ports.base)
+            entry_for_nginx["domain"] = domain_value
+            entry_for_nginx["port"] = port_int
+            try:
+                nginx_context = _build_nginx_context(
+                    runtime,
+                    normalized_name,
+                    domain=domain_value,
+                    port=port_int,
+                    entry=entry_for_nginx,
+                    selection=selection,
+                )
+            except TLSConfigurationError as exc:
+                console.print(f"[red]{exc}[/red]")
+                op.error(str(exc), errors=[str(exc)], rc=1)
+                raise typer.Exit(code=1) from exc
+
+            nginx_result = runtime.nginx_provider.render_site(normalized_name, nginx_context)
+            if nginx_result.validation_error is not None:
+                _provider_error(
+                    op,
+                    (
+                        f"nginx validation failed for '{normalized_name}': "
+                        f"{nginx_result.validation_error}"
+                    ),
+                )
+            op.add_step(
+                "nginx.render_site",
+                status="success" if nginx_result.changed else "noop",
+                detail=str(runtime.nginx_provider.site_path(normalized_name)),
+            )
+            if nginx_result.validation is not None:
+                op.add_step(
+                    "nginx.validate",
+                    status="success",
+                    detail=_format_nginx_detail(nginx_result.validation),
+                )
+            if nginx_result.reload is not None:
+                op.add_step(
+                    "nginx.reload",
+                    status="success",
+                    detail=_format_nginx_detail(nginx_result.reload),
+                )
+            runtime.nginx_provider.enable(normalized_name)
+            op.add_step(
+                "nginx.enable",
+                status="success",
+                detail=str(runtime.nginx_provider.enabled_path(normalized_name)),
             )
 
             op.success(
@@ -3002,11 +3175,13 @@ def instance_create(
                     )
                     systemd_started = not systemctl_missing
 
+                entry_for_nginx = runtime.registry.get_instance(name) or registry_entry
                 nginx_context = _build_nginx_context(
-                    runtime.config,
+                    runtime,
                     name,
                     domain=domain_value,
                     port=port_value,
+                    entry=entry_for_nginx if isinstance(entry_for_nginx, Mapping) else None,
                 )
                 nginx_result = runtime.nginx_provider.render_site(name, nginx_context)
                 if nginx_result.validation_error is not None:
@@ -3112,7 +3287,7 @@ def instance_create(
                 console.print(f"[red]{exc}[/red]")
                 op.error(str(exc), errors=[str(exc)], rc=1)
                 raise typer.Exit(code=1) from exc
-            except (SystemdError, NginxError) as exc:
+            except (SystemdError, NginxError, TLSConfigurationError) as exc:
                 _cleanup_instance_create(
                     runtime,
                     name,
@@ -4747,12 +4922,19 @@ def instance_set_fqdn(
             _write_instance_config(paths, config_payload)
             op.add_step("config.write", status="success", detail=str(paths.config_file))
 
-            nginx_context = _build_nginx_context(
-                runtime.config,
-                name,
-                domain=new_domain,
-                port=port_int,
-            )
+            entry_for_nginx = dict(entry)
+            entry_for_nginx["domain"] = new_domain
+            entry_for_nginx["port"] = port_int
+            try:
+                nginx_context = _build_nginx_context(
+                    runtime,
+                    name,
+                    domain=new_domain,
+                    port=port_int,
+                    entry=entry_for_nginx,
+                )
+            except TLSConfigurationError as exc:
+                _provider_error(op, f"TLS configuration invalid for '{name}': {exc}")
             nginx_result = runtime.nginx_provider.render_site(name, nginx_context)
             if nginx_result.validation_error:
                 _provider_error(
@@ -4963,11 +5145,14 @@ def instance_set_port(
                     detail=str(runtime.systemd_provider.unit_path(name)),
                 )
 
+                entry_for_nginx = dict(entry)
+                entry_for_nginx["port"] = port
                 nginx_context = _build_nginx_context(
-                    runtime.config,
+                    runtime,
                     name,
                     domain=domain_value,
                     port=port,
+                    entry=entry_for_nginx,
                 )
                 nginx_result = runtime.nginx_provider.render_site(name, nginx_context)
                 if nginx_result.validation_error:
@@ -5030,7 +5215,7 @@ def instance_set_port(
                     f"'{name}' from {current_port} to {port}.[/green]"
                 )
                 op.success("Instance port updated.", changed=6 if was_running else 5)
-            except (SystemdError, NginxError) as exc:
+            except (SystemdError, NginxError, TLSConfigurationError) as exc:
                 _provider_error(op, f"Port update failed: {exc}")
 @instances_app.command("set-version")
 def instance_set_version(
@@ -5414,11 +5599,16 @@ def instance_rename(
                 runtime.systemd_provider.enable(validated_new)
                 op.add_step("systemd.enable", status="success", detail=validated_new)
 
+                entry_for_nginx = dict(entry)
+                entry_for_nginx["name"] = validated_new
+                entry_for_nginx["domain"] = domain_value
+                entry_for_nginx["port"] = port_int
                 nginx_context = _build_nginx_context(
-                    runtime.config,
+                    runtime,
                     validated_new,
                     domain=domain_value,
                     port=port_int,
+                    entry=entry_for_nginx,
                 )
                 nginx_result = runtime.nginx_provider.render_site(validated_new, nginx_context)
                 if nginx_result.validation_error:
@@ -5518,5 +5708,5 @@ def instance_rename(
                     f"({'restarted' if was_running else 'stopped'}).[/green]"
                 )
                 op.success("Instance renamed.", changed=9 if was_running else 8)
-            except (SystemdError, NginxError) as exc:
+            except (SystemdError, NginxError, TLSConfigurationError) as exc:
                 _provider_error(op, f"Rename failed: {exc}")

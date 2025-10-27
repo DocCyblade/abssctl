@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import pwd
+import shutil
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -355,6 +356,13 @@ def test_tls_install_updates_registry(tmp_path: Path) -> None:
     assert Path(str(tls_block.get("cert"))).exists()
     assert Path(str(tls_block.get("key"))).exists()
 
+    runtime_dir = tmp_path / "run"
+    site_path = runtime_dir / "nginx" / "sites-available" / "abssctl-alpha.conf"
+    assert site_path.exists()
+    contents = site_path.read_text(encoding="utf-8")
+    assert f"ssl_certificate {tls_block['cert']};" in contents
+    assert f"ssl_certificate_key {tls_block['key']};" in contents
+
 
 def test_tls_use_system_switches_source(tmp_path: Path) -> None:
     """`tls use-system` updates TLS source metadata."""
@@ -384,6 +392,107 @@ def test_tls_use_system_switches_source(tmp_path: Path) -> None:
     assert entry is not None
     tls_block = entry.get("tls", {})
     assert tls_block.get("source") == "system"
+    runtime_dir = tmp_path / "run"
+    site_path = runtime_dir / "nginx" / "sites-available" / "abssctl-alpha.conf"
+    contents = site_path.read_text(encoding="utf-8")
+    assert f"ssl_certificate {tls_block['cert']};" in contents
+    assert f"ssl_certificate_key {tls_block['key']};" in contents
+
+
+def test_tls_install_dry_run_skips_changes(tmp_path: Path) -> None:
+    """Dry-run install previews actions without copying or updating the registry."""
+    instances = [{"name": "alpha", "port": 5000, "version": "current"}]
+    env, state_dir = _prepare_environment(tmp_path, instances=instances)
+    cert_path, key_path = _create_tls_fixture(tmp_path, name="alpha.example")
+
+    result = runner.invoke(
+        app,
+        [
+            "tls",
+            "install",
+            "alpha",
+            "--cert",
+            str(cert_path),
+            "--key",
+            str(key_path),
+            "--dry-run",
+        ],
+        env=env,
+    )
+
+    assert result.exit_code == 0
+    registry = StateRegistry(state_dir / "registry")
+    entry = registry.get_instance("alpha")
+    assert entry is not None
+    assert "tls" not in entry
+
+    tls_root = tmp_path / "tls"
+    assert not (tls_root / "abssctl-alpha.pem").exists()
+    assert not (tls_root / "abssctl-alpha.key").exists()
+
+
+def test_tls_install_permission_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ownership adjustment failures abort the install."""
+    instances = [{"name": "alpha", "port": 5000, "version": "current"}]
+    env, state_dir = _prepare_environment(tmp_path, instances=instances)
+    cert_path, key_path = _create_tls_fixture(tmp_path, name="alpha.example")
+
+    def fail_chown(path: str | os.PathLike[str], user: str, group: str) -> None:
+        raise PermissionError("simulated")
+
+    monkeypatch.setattr(shutil, "chown", fail_chown)
+
+    result = runner.invoke(
+        app,
+        [
+            "tls",
+            "install",
+            "alpha",
+            "--cert",
+            str(cert_path),
+            "--key",
+            str(key_path),
+            "--yes",
+        ],
+        env=env,
+    )
+
+    assert result.exit_code == 1
+    assert "Failed to adjust ownership" in result.stdout
+    registry = StateRegistry(state_dir / "registry")
+    entry = registry.get_instance("alpha")
+    assert entry is not None
+    assert "tls" not in entry
+
+
+def test_tls_verify_detects_lets_encrypt(tmp_path: Path) -> None:
+    """`tls verify` can target detected Let's Encrypt assets."""
+    instances = [
+        {"name": "alpha", "port": 5000, "version": "current", "domain": "alpha.example"}
+    ]
+    env, _ = _prepare_environment(tmp_path, instances=instances)
+
+    config_path = Path(env["ABSSCTL_CONFIG_FILE"])
+    config_data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    live_dir = Path(config_data["tls"]["lets_encrypt"]["live_dir"]) / "alpha.example"
+    live_dir.mkdir(parents=True, exist_ok=True)
+
+    fullchain_src, key_src = _create_tls_fixture(tmp_path, name="alpha.example")
+    shutil.copy2(fullchain_src, live_dir / "fullchain.pem")
+    shutil.copy2(fullchain_src, live_dir / "chain.pem")
+    shutil.copy2(key_src, live_dir / "privkey.pem")
+    (live_dir / "fullchain.pem").chmod(0o644)
+    (live_dir / "chain.pem").chmod(0o644)
+    (live_dir / "privkey.pem").chmod(0o640)
+
+    result = runner.invoke(
+        app,
+        ["tls", "verify", "--instance", "alpha", "--source", "lets-encrypt"],
+        env=env,
+    )
+
+    assert result.exit_code == 0
+    assert "resolved=lets-encrypt" in result.stdout
 
 
 def test_backup_create_generates_archive(tmp_path: Path) -> None:

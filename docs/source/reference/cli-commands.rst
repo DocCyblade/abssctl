@@ -128,23 +128,26 @@ TLS Commands
    Validates certificate/key pairs from the registry or explicit paths. The
    command checks readability, owner/group/mode against configuration policy,
    certificate expiry, and key↔cert pairing. ``--instance`` inspects the
-   registered TLS source for an instance (auto-detecting Let's Encrypt or
-   falling back to system defaults), while manual verification requires
-   ``--cert`` and ``--key``. ``--json`` emits a structured report suitable for
-   automation; otherwise a Rich table summarises each check.
+   registered TLS source for an instance, honouring ``--source`` overrides
+   (``lets-encrypt`` requires a matching live certificate); manual verification
+   requires ``--cert`` and ``--key``. ``--json`` emits a structured report
+   suitable for automation; otherwise a Rich table summarises each check.
 
 ``abssctl tls install <name> --cert PATH --key PATH [--chain PATH] [--dry-run] [--yes]``
    Copies operator-provided TLS assets into the configured destinations (defaulting
    to sibling paths of the system certificate/key), enforcing secure permissions
    and creating timestamped backups of any overwritten files. Validation runs
-   before copying; ``--dry-run`` previews the plan, and ``--yes`` skips the
-   interactive confirmation. Successful installs update the registry so future
-   renders use the new ``custom`` source.
+   before copying; ``--dry-run`` previews the plan without touching the filesystem
+   or registry, and ``--yes`` skips the interactive confirmation. Successful
+   installs update the registry, re-render the nginx site with the new ``custom``
+   material, validate via ``nginx -t``, and reload nginx when the configuration
+   changes.
 
 ``abssctl tls use-system <name> [--dry-run]``
    Switches an instance back to the system TLS defaults after validating the
-   configured certificate/key pair. ``--dry-run`` reports the planned registry
-   update without persisting changes.
+   configured certificate/key pair. The command re-renders the nginx site (with
+   validation/reload) to pick up the restored system paths. ``--dry-run`` reports
+   the planned registry update without persisting changes.
 
 System Diagnostics & Backups
 ============================
