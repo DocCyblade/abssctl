@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import tempfile
@@ -2514,6 +2515,163 @@ def _verify_backup_entry(
     return result
 
 
+def _infer_backup_algorithm(entry: Mapping[str, object], archive_path: Path) -> str:
+    """Return the archive compression algorithm for *entry*/*archive_path*."""
+    algorithm_value = str(entry.get("algorithm", "") or "").strip().lower()
+    if algorithm_value in {"gzip", "zstd", "tar"}:
+        return algorithm_value
+    suffix = "".join(archive_path.suffixes).lower()
+    if suffix.endswith(".tar.zst"):
+        return "zstd"
+    if suffix.endswith(".tar.gz"):
+        return "gzip"
+    return "tar"
+
+
+def _is_data_only(entry: Mapping[str, object]) -> bool:
+    """Return True when the backup entry was created with --data-only."""
+    metadata = entry.get("metadata")
+    if isinstance(metadata, Mapping):
+        return bool(metadata.get("data_only"))
+    return False
+
+
+def _ensure_disk_space_available(target: Path, required_bytes: int) -> None:
+    """Raise BackupError if *target* lacks *required_bytes* free space."""
+    check_path = target
+    if not check_path.exists():
+        check_path.mkdir(parents=True, exist_ok=True)
+    usage = shutil.disk_usage(check_path)
+    if usage.free < required_bytes:
+        raise BackupError(
+            f"Insufficient free space under {check_path} (need {required_bytes} bytes, "
+            f"have {usage.free})."
+        )
+
+
+def _extract_backup_archive(
+    archive_path: Path,
+    *,
+    algorithm: str,
+    staging_root: Path,
+    expected_root: str,
+) -> Path:
+    """Extract *archive_path* into *staging_root* and return the payload directory."""
+    tar_bin = shutil.which("tar")
+    if tar_bin is None:
+        raise BackupError("The 'tar' command is required to restore backups.")
+
+    extraction_dir = staging_root / "extracted"
+    extraction_dir.mkdir(parents=True, exist_ok=True)
+
+    cmd: list[str] = [tar_bin]
+    if algorithm == "zstd":
+        cmd.extend(["--zstd", "-xf", str(archive_path)])
+    elif algorithm == "gzip":
+        cmd.extend(["-xzf", str(archive_path)])
+    else:
+        cmd.extend(["-xf", str(archive_path)])
+    cmd.extend(["-C", str(extraction_dir)])
+
+    result = subprocess.run(  # noqa: S603, S607 - controlled command
+        cmd,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        message = (result.stderr or result.stdout or "tar extraction failed").strip()
+        raise BackupError(f"Failed to extract backup archive: {message}")
+
+    payload_root = extraction_dir / expected_root
+    if not payload_root.exists():
+        candidates = [item for item in extraction_dir.iterdir() if item.is_dir()]
+        if len(candidates) == 1:
+            payload_root = candidates[0]
+        else:
+            raise BackupError(
+                "Backup archive did not contain the expected payload directory."
+            )
+    return payload_root
+
+
+def _load_backup_instance_snapshot(payload_root: Path) -> dict[str, object]:
+    """Return the instance snapshot stored in the payload (empty mapping if absent)."""
+    snapshot_path = payload_root / "metadata" / "instance.json"
+    if not snapshot_path.exists():
+        return {}
+    try:
+        data = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    return dict(data) if isinstance(data, Mapping) else {}
+
+
+def _format_restore_suffix(timestamp: datetime) -> str:
+    """Return a unique suffix for temporary restore artefacts."""
+    return f"{timestamp:%Y%m%d%H%M%S}-{secrets.token_hex(2)}"
+
+
+def _backup_and_copy_file(
+    source: Path,
+    destination: Path,
+    *,
+    timestamp: datetime,
+    label: str,
+    op: OperationScope,
+    backups: list[tuple[Path, Path]],
+) -> None:
+    """Copy *source* to *destination*, keeping a backup for rollback."""
+    if not source.exists():
+        return
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    backup_path: Path | None = None
+    if destination.exists():
+        suffix = _format_restore_suffix(timestamp)
+        backup_path = destination.with_suffix(destination.suffix + f".pre-restore-{suffix}")
+        shutil.copy2(destination, backup_path)
+        backups.append((destination, backup_path))
+        op.add_step(
+            f"backup.restore.backup.{label}",
+            status="success",
+            detail=f"{destination} -> {backup_path}",
+        )
+    shutil.copy2(source, destination)
+    op.add_step(
+        f"backup.restore.copy.{label}",
+        status="success",
+        detail=f"{source} -> {destination}",
+    )
+
+
+def _discover_backup_archives(root: Path, instance_filter: str | None = None) -> list[Path]:
+    """Return a list of archive paths under *root* optionally filtered by instance."""
+    archives: list[Path] = []
+    if not root.exists():
+        return archives
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        lowered = "".join(path.suffixes).lower()
+        if lowered.endswith(".sha256"):
+            continue
+        if not (
+            lowered.endswith(".tar")
+            or lowered.endswith(".tar.gz")
+            or lowered.endswith(".tar.zst")
+        ):
+            continue
+        if instance_filter:
+            try:
+                relative = path.relative_to(root)
+            except ValueError:
+                continue
+            if not relative.parts or relative.parts[0] != instance_filter:
+                continue
+        archives.append(path)
+    return archives
+
+
 def _run_instance_backups(
     runtime: RuntimeContext,
     instances: Sequence[str],
@@ -4332,6 +4490,149 @@ def backup_verify(
         op.success(summary_message, changed=changed, context={"results": results})
 
 
+@backups_app.command("reconcile")
+def backup_reconcile(
+    ctx: typer.Context,
+    instance: str | None = typer.Option(
+        None,
+        "--instance",
+        "-i",
+        help="Limit reconciliation to a specific instance.",
+    ),
+    apply_changes: bool = typer.Option(
+        False,
+        "--apply",
+        help="Update index metadata for missing archives.",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit reconciliation results as JSON.",
+    ),
+) -> None:
+    """Compare backup index entries with on-disk archives."""
+    runtime = _get_runtime(ctx)
+    instance_filter = instance.strip() if instance and instance.strip() else None
+    with runtime.logger.operation(
+        "backup reconcile",
+        args={
+            "instance": instance_filter,
+            "apply": apply_changes,
+            "json": json_output,
+        },
+        target={"kind": "backup", "scope": "reconcile"},
+    ) as op:
+        try:
+            entries = runtime.backups.list_entries()
+        except BackupRegistryError as exc:
+            console.print(f"[red]{exc}[/red]")
+            op.error("Failed to read backup index.", errors=[str(exc)], rc=2)
+            raise typer.Exit(code=2) from exc
+
+        filtered_entries = [
+            entry
+            for entry in entries
+            if not instance_filter
+            or str(entry.get("instance", "")).strip() == instance_filter
+        ]
+
+        existing_path_map: dict[str, dict[str, object]] = {}
+        missing: list[dict[str, object]] = []
+        mismatched: list[dict[str, object]] = []
+        updates_applied = 0
+        reconciled_at = _iso_now()
+
+        for entry in filtered_entries:
+            entry_id = str(entry.get("id", "")).strip()
+            path_value = entry.get("path")
+            entry_path = Path(str(path_value)).expanduser() if path_value else None
+            status_value = str(entry.get("status", "") or "")
+            if entry_path is None:
+                missing.append({"id": entry_id, "reason": "no-path"})
+                continue
+            normalized_path = str(entry_path)
+            existing_path_map[normalized_path] = entry
+            if not entry_path.exists():
+                missing.append({"id": entry_id, "path": normalized_path})
+                if apply_changes:
+                    def mutator(payload: dict[str, object]) -> None:
+                        payload["status"] = "missing"
+                        metadata = payload.get("metadata")
+                        metadata_map = dict(metadata) if isinstance(metadata, Mapping) else {}
+                        metadata_map["reconciled_at"] = reconciled_at
+                        metadata_map["reconcile_reason"] = "archive-missing"
+                        payload["metadata"] = metadata_map
+
+                    runtime.backups.update_entry(entry_id, mutator)
+                    updates_applied += 1
+                continue
+            if status_value in {"missing", "removed"}:
+                mismatched.append(
+                    {"id": entry_id, "path": normalized_path, "status": status_value}
+                )
+
+        archives_on_disk = _discover_backup_archives(runtime.backups.root, instance_filter)
+        orphaned: list[dict[str, object]] = []
+        for archive_path in archives_on_disk:
+            normalized_path = str(archive_path)
+            if normalized_path in existing_path_map:
+                continue
+            try:
+                relative = archive_path.relative_to(runtime.backups.root)
+                instance_name = relative.parts[0] if relative.parts else ""
+            except ValueError:
+                instance_name = ""
+            orphaned.append(
+                {
+                    "path": normalized_path,
+                    "instance": instance_name,
+                    "size_bytes": archive_path.stat().st_size,
+                }
+            )
+
+        result_payload = {
+            "missing": missing,
+            "mismatched": mismatched,
+            "orphaned": orphaned,
+            "updates_applied": updates_applied,
+        }
+
+        if json_output:
+            console.print_json(data=result_payload)
+        else:
+            if not missing and not mismatched and not orphaned:
+                console.print("[green]No backup discrepancies detected.[/green]")
+            else:
+                if missing:
+                    console.print("[yellow]Missing archives:[/yellow]")
+                    for item in missing:
+                        path_or_reason = item.get("path") or item.get("reason")
+                        console.print(f"  - {item.get('id')} ({path_or_reason})")
+                if mismatched:
+                    console.print("[yellow]Index status mismatches:[/yellow]")
+                    for item in mismatched:
+                        console.print(
+                            f"  - {item['id']} ({item['path']}) recorded status={item['status']}"
+                        )
+                if orphaned:
+                    console.print("[yellow]Orphaned archives (not in index):[/yellow]")
+                    for item in orphaned:
+                        console.print(
+                            f"  - {item['path']} (instance={item.get('instance','') or 'unknown'})"
+                        )
+                if apply_changes and updates_applied:
+                    console.print(
+                        f"[green]Updated {updates_applied} index entr"
+                        "ies with status=missing.[/green]"
+                    )
+
+        op.success(
+            "Backup reconciliation completed.",
+            changed=updates_applied,
+            context=result_payload,
+        )
+
+
 @backups_app.command("prune")
 def backup_prune(
     ctx: typer.Context,
@@ -4616,24 +4917,81 @@ def backup_restore(
             op.error(message, errors=[message], rc=2)
             raise typer.Exit(code=2)
 
-        archive_path = Path(str(archive_path_value))
-        destination_dir = destination or (runtime.config.instance_root / backup_instance)
+        archive_path = Path(str(archive_path_value)).expanduser()
+        if not archive_path.exists():
+            message = f"Archive {archive_path} not found."
+            console.print(f"[red]{message}[/red]")
+            op.error(message, errors=[message], rc=2)
+            raise typer.Exit(code=2)
+
+        algorithm = _infer_backup_algorithm(entry, archive_path)
+        data_only = _is_data_only(entry)
+        checksum_map = entry.get("checksum") if isinstance(entry.get("checksum"), Mapping) else {}
+        expected_checksum = ""
+        if isinstance(checksum_map, Mapping):
+            expected_checksum = str(checksum_map.get("value", "") or "")
+
+        computed_checksum = _compute_checksum(archive_path)
+        if expected_checksum and computed_checksum != expected_checksum:
+            message = (
+                "Checksum mismatch: archive contents differ from the recorded checksum."
+            )
+            console.print(f"[red]{message}[/red]")
+            op.error(message, errors=[message], rc=2)
+            raise typer.Exit(code=2)
+
+        archive_size = archive_path.stat().st_size
+        default_destination = (runtime.config.instance_root / backup_instance).expanduser()
+        destination_dir = (destination or default_destination).expanduser()
+        destination_parent = destination_dir.parent
+
+        try:
+            destination_is_live = destination_dir.resolve() == default_destination.resolve()
+        except FileNotFoundError:
+            destination_is_live = destination_dir == default_destination
+
+        required_space = max(int(archive_size * 2.0), 50 * 1024 * 1024)
+        try:
+            _ensure_disk_space_available(destination_parent, required_space)
+        except BackupError as exc:
+            console.print(f"[red]{exc}[/red]")
+            op.error(str(exc), errors=[str(exc)], rc=2)
+            raise typer.Exit(code=2) from exc
+
+        plan_actions: list[str] = [
+            "verify-checksum",
+            "extract-archive",
+            "swap-data",
+        ]
+        if destination_is_live and not data_only:
+            plan_actions.append("restore-service-assets")
+        if destination_is_live:
+            plan_actions.append("restart-service")
 
         plan: dict[str, object] = {
             "id": backup_id,
             "instance": backup_instance,
             "archive": str(archive_path),
+            "algorithm": algorithm,
+            "checksum": expected_checksum or computed_checksum,
             "destination": str(destination_dir),
+            "data_only": data_only,
             "status": "planned" if dry_run else "pending",
+            "actions": plan_actions,
             "metadata": entry.get("metadata", {}),
         }
 
-        with runtime.locks.mutate_instances([backup_instance]) as bundle:
-            op.set_lock_wait_ms(bundle.wait_ms)
-            _require_instance(runtime, backup_instance, op)
+        try:
+            with runtime.locks.mutate_instances([backup_instance]) as bundle:
+                op.set_lock_wait_ms(bundle.wait_ms)
+                instance_entry = _require_instance(runtime, backup_instance, op)
+                initial_status = str(instance_entry.get("status", "") or "").lower()
+                should_restart = destination_is_live and initial_status in {"running"}
+
+            created_backups: list[str] = []
 
             def _handle_pre_restore(scope: OperationScope) -> None:
-                _run_instance_backups(
+                ids = _run_instance_backups(
                     runtime,
                     [backup_instance],
                     operation="backup restore",
@@ -4641,6 +4999,7 @@ def backup_restore(
                     op=scope,
                     acquire_locks=False,
                 )
+                created_backups.extend(ids)
 
             _maybe_prompt_backup(
                 operation="backup restore",
@@ -4650,6 +5009,14 @@ def backup_restore(
                 backup_message=backup_message,
                 on_accept=_handle_pre_restore,
             )
+
+            if created_backups:
+                plan["pre_restore_backups"] = list(created_backups)
+                op.add_step(
+                    "backup.restore.pre_backup",
+                    status="success",
+                    detail=",".join(created_backups),
+                )
 
             op.add_step("backup.restore.plan", status="info", detail=str(plan))
 
@@ -4662,37 +5029,256 @@ def backup_restore(
                     console.print(plan)
                 op.success("Backup restore dry-run completed.", changed=0, context={"plan": plan})
                 return
+            timestamp = datetime.now(UTC)
+            suffix = _format_restore_suffix(timestamp)
+            try:
+                staging_root_path = tempfile.mkdtemp(
+                    prefix=f".abssctl-restore-{backup_id}-",
+                    dir=str(destination_parent),
+                )
+            except (FileNotFoundError, PermissionError):
+                staging_root_path = tempfile.mkdtemp(
+                    prefix=f".abssctl-restore-{backup_id}-",
+                )
+            staging_root = Path(staging_root_path)
+            data_backup_dir: Path | None = None
+            file_backups: list[tuple[Path, Path]] = []
+            restore_changed = 0
+            try:
+                payload_root = _extract_backup_archive(
+                    archive_path,
+                    algorithm=algorithm,
+                    staging_root=staging_root,
+                    expected_root=backup_id,
+                )
+                op.add_step(
+                    "backup.restore.extract",
+                    status="success",
+                    detail=str(payload_root),
+                )
 
-            plan["status"] = "restored"
-            message = (
-                "Archive extraction not yet implemented; this skeleton records the plan."
-            )
-            console.print(
-                "[yellow]Restore placeholder[/yellow]: "
-                f"would extract {archive_path} into {destination_dir}."
-            )
+                data_source = payload_root / "data"
+                if not data_source.exists():
+                    raise BackupError("Backup archive is missing the 'data' directory.")
 
-            restored_at = _iso_now()
+                if destination_is_live:
+                    try:
+                        stop_result = runtime.systemd_provider.stop(backup_instance)
+                        op.add_step(
+                            "systemd.stop",
+                            status="success",
+                            detail=_format_systemd_detail(stop_result, dry_run=False),
+                        )
+                    except SystemdError as exc:
+                        op.add_step(
+                            "systemd.stop",
+                            status="warning",
+                            detail=str(exc),
+                        )
 
-            def mutator(payload: dict[str, object]) -> None:
-                raw_metadata = payload.get("metadata")
-                metadata = raw_metadata if isinstance(raw_metadata, Mapping) else {}
-                meta_copy: dict[str, object] = dict(metadata)
-                meta_copy["last_restore_destination"] = str(destination_dir)
-                meta_copy["last_restore_notes"] = message
-                payload["metadata"] = meta_copy
-                payload["last_restored_at"] = restored_at
+                destination_parent.mkdir(parents=True, exist_ok=True)
+                if destination_dir.exists():
+                    backup_suffix = f"{destination_dir.name}.pre-restore-{suffix}"
+                    data_backup_dir = destination_dir.parent / backup_suffix
+                    destination_dir.rename(data_backup_dir)
+                    op.add_step(
+                        "backup.restore.stage.original",
+                        status="success",
+                        detail=str(data_backup_dir),
+                    )
 
-            runtime.backups.update_entry(backup_id, mutator)
+                copy_into(data_source, destination_dir)
+                restore_changed += 1
+                op.add_step(
+                    "backup.restore.copy.data",
+                    status="success",
+                    detail=f"{data_source} -> {destination_dir}",
+                )
 
-        result_payload = {"plan": plan, "message": message, "restored_at": restored_at}
-        if json_output:
-            console.print_json(data=result_payload)
-        op.success(
-            "Backup restore placeholder completed.",
-            changed=0,
-            context=result_payload,
-        )
+                payload_snapshot = _load_backup_instance_snapshot(payload_root)
+
+                if destination_is_live and not data_only:
+                    systemd_dir = payload_root / "systemd"
+                    if systemd_dir.exists():
+                        for item in systemd_dir.iterdir():
+                            if not item.is_file():
+                                continue
+                            unit_parent = runtime.systemd_provider.unit_path(backup_instance).parent
+                            dest_path = unit_parent / item.name
+                            _backup_and_copy_file(
+                                item,
+                                dest_path,
+                                timestamp=timestamp,
+                                label="systemd",
+                                op=op,
+                                backups=file_backups,
+                            )
+                            restore_changed += 1
+                    nginx_dir = payload_root / "nginx"
+                    if nginx_dir.exists():
+                        for item in nginx_dir.iterdir():
+                            if not item.is_file():
+                                continue
+                            nginx_parent = runtime.nginx_provider.site_path(backup_instance).parent
+                            dest_path = nginx_parent / item.name
+                            _backup_and_copy_file(
+                                item,
+                                dest_path,
+                                timestamp=timestamp,
+                                label="nginx",
+                                op=op,
+                                backups=file_backups,
+                            )
+                            restore_changed += 1
+
+                if destination_is_live and not data_only:
+                    try:
+                        runtime.nginx_provider.enable(backup_instance)
+                        op.add_step(
+                            "nginx.enable",
+                            status="success",
+                            detail=str(runtime.nginx_provider.enabled_path(backup_instance)),
+                        )
+                        validation = runtime.nginx_provider.test_config()
+                        op.add_step(
+                            "nginx.validate",
+                            status="success",
+                            detail=_format_nginx_detail(validation),
+                        )
+                        reload_result = runtime.nginx_provider.reload()
+                        op.add_step(
+                            "nginx.reload",
+                            status="success",
+                            detail=_format_nginx_detail(reload_result),
+                        )
+                    except NginxError as exc:
+                        raise BackupError(f"Failed to validate nginx configuration: {exc}") from exc
+
+                final_status = "stopped"
+                if destination_is_live:
+                    try:
+                        enable_result = runtime.systemd_provider.enable(backup_instance)
+                        op.add_step(
+                            "systemd.enable",
+                            status="success",
+                            detail=_format_systemd_detail(enable_result, dry_run=False),
+                        )
+                    except SystemdError as exc:
+                        op.add_step(
+                            "systemd.enable",
+                            status="warning",
+                            detail=str(exc),
+                        )
+                    if should_restart:
+                        try:
+                            start_result = runtime.systemd_provider.start(backup_instance)
+                            op.add_step(
+                                "systemd.start",
+                                status="success",
+                                detail=_format_systemd_detail(start_result, dry_run=False),
+                            )
+                            final_status = "running"
+                        except SystemdError as exc:
+                            raise BackupError(f"Failed to restart systemd unit: {exc}") from exc
+                    else:
+                        final_status = initial_status or "enabled"
+                        op.add_step(
+                            "systemd.start",
+                            status="skipped",
+                            detail="service not restarted",
+                        )
+                else:
+                    final_status = initial_status or "unknown"
+
+                restored_at = _iso_now()
+                plan["status"] = "restored"
+                plan["restored_at"] = restored_at
+                plan["final_status"] = final_status
+
+                registry_updates: dict[str, object] = {}
+                for key in ("version", "domain", "port", "paths"):
+                    value = payload_snapshot.get(key)
+                    if value is not None:
+                        registry_updates[key] = value
+                registry_updates["status"] = final_status
+                metadata_updates: dict[str, object] = {
+                    "last_restored_at": restored_at,
+                    "last_restore_source": backup_id,
+                    "last_restore_destination": str(destination_dir),
+                }
+                actor_value = op.actor
+                if isinstance(actor_value, Mapping):
+                    metadata_updates["last_restore_actor"] = dict(actor_value)
+
+                _update_instance_registry(
+                    runtime,
+                    backup_instance,
+                    registry_updates,
+                    metadata=metadata_updates,
+                )
+
+                metadata_raw = entry.get("metadata")
+                if isinstance(metadata_raw, Mapping):
+                    restore_metadata: dict[str, object] = {
+                        str(key): value for key, value in metadata_raw.items()
+                    }
+                else:
+                    restore_metadata = {}
+                restore_metadata["last_restore_destination"] = str(destination_dir)
+                restore_metadata["last_restored_at"] = restored_at
+                if isinstance(actor_value, Mapping):
+                    restore_metadata["last_restore_actor"] = dict(actor_value)
+                restore_metadata.pop("verification_error", None)
+
+                def mutator(payload: dict[str, object]) -> None:
+                    payload["last_restored_at"] = restored_at
+                    payload["status"] = payload.get("status") or "available"
+                    payload["metadata"] = dict(restore_metadata)
+
+                runtime.backups.update_entry(backup_id, mutator)
+
+                if data_backup_dir and destination_dir.exists():
+                    shutil.rmtree(data_backup_dir, ignore_errors=True)
+                for _dest_path, backup_path in file_backups:
+                    backup_path.unlink(missing_ok=True)
+
+                console.print(
+                    f"[green]Restored backup '{backup_id}' to {destination_dir} "
+                    f"(instance {backup_instance}).[/green]"
+                )
+                result_payload = {
+                    "plan": plan,
+                    "restored_at": restored_at,
+                    "restart_performed": should_restart,
+                    "destination": str(destination_dir),
+                }
+                if json_output:
+                    console.print_json(data=result_payload)
+                op.success(
+                    "Backup restore completed.",
+                    changed=restore_changed,
+                    context=result_payload,
+                )
+            except Exception:
+                if destination_dir.exists() and data_backup_dir is not None:
+                    shutil.rmtree(destination_dir, ignore_errors=True)
+                if data_backup_dir is not None and data_backup_dir.exists():
+                    data_backup_dir.rename(destination_dir)
+                for _dest_path, backup_path in file_backups:
+                    if backup_path.exists():
+                        shutil.copy2(backup_path, _dest_path)
+                        backup_path.unlink(missing_ok=True)
+                raise
+            finally:
+                shutil.rmtree(staging_root, ignore_errors=True)
+        except BackupError as exc:
+            console.print(f"[red]Restore failed: {exc}[/red]")
+            op.error("Backup restore failed.", errors=[str(exc)], rc=4)
+            raise typer.Exit(code=4) from exc
+        except Exception as exc:
+            console.print(f"[red]Unexpected restore failure: {exc}[/red]")
+            op.error("Backup restore failed unexpectedly.", errors=[str(exc)], rc=4)
+            raise typer.Exit(code=4) from exc
 @instances_app.command("logs")
 def instance_logs(
     ctx: typer.Context,

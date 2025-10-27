@@ -63,6 +63,42 @@ def _create_tls_fixture(tmp_path: Path, name: str = "alpha.example") -> tuple[Pa
     key_path.chmod(0o600)
     return cert_path, key_path
 
+
+def _create_backup(
+    env: dict[str, str],
+    instance: str,
+    *,
+    compression: str = "none",
+) -> tuple[str, dict[str, object]]:
+    """Run ``backup create`` and return (backup_id, payload)."""
+    result = runner.invoke(
+        app,
+        [
+            "backup",
+            "create",
+            instance,
+            "--compression",
+            compression,
+            "--json",
+        ],
+        env=env,
+    )
+
+    assert result.exit_code == 0, result.stdout
+    payload = _extract_json(result.stdout)
+    result_block = payload.get("result") or {}
+    backup_id = result_block.get("id") or payload.get("plan", {}).get("id")
+    assert backup_id, "backup create did not return an id"
+    return backup_id, payload
+
+
+def _extract_json(output: str) -> dict[str, object]:
+    """Extract the first JSON object embedded in *output*."""
+    start = output.find("{")
+    end = output.rfind("}")
+    assert start != -1 and end != -1, f"No JSON payload found in output: {output}"
+    return json.loads(output[start : end + 1])
+
 _TARBALL_DIGEST_BYTES = bytes(range(64))
 FAKE_CLI_SHASUM = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 FAKE_CLI_INTEGRITY = f"sha512-{base64.b64encode(_TARBALL_DIGEST_BYTES).decode('ascii')}"
@@ -71,6 +107,40 @@ FAKE_INTEGRITY_PAYLOAD = {
     "npm": {"shasum": FAKE_CLI_SHASUM, "integrity": FAKE_CLI_INTEGRITY},
     "tarball": {"algorithm": "sha512", "digest": FAKE_CLI_DIGEST_HEX},
 }
+
+
+def _stub_restore_providers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stub systemd/nginx provider methods used during restore."""
+    monkeypatch.setattr(
+        SystemdProvider,
+        "stop",
+        lambda self, name: _fake_systemctl("stop", name),
+    )
+    monkeypatch.setattr(
+        SystemdProvider,
+        "start",
+        lambda self, name: _fake_systemctl("start", name),
+    )
+    monkeypatch.setattr(
+        SystemdProvider,
+        "enable",
+        lambda self, name: _fake_systemctl("enable", name),
+    )
+    monkeypatch.setattr(
+        SystemdProvider,
+        "status",
+        lambda self, name: _fake_systemctl("status", name),
+    )
+    monkeypatch.setattr(
+        NginxProvider,
+        "test_config",
+        lambda self: _fake_completed(["nginx", "-t"]),
+    )
+    monkeypatch.setattr(
+        NginxProvider,
+        "reload",
+        lambda self: _fake_completed(["nginx", "-s", "reload"]),
+    )
 
 
 def _fake_systemctl(action: str, name: str) -> subprocess.CompletedProcess:
@@ -211,7 +281,7 @@ def test_config_show_json(tmp_path: Path) -> None:
     result = runner.invoke(app, ["config", "show", "--json"], env=env)
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout)
+    payload = _extract_json(result.stdout)
     assert payload["install_root"] == "/opt/abssctl"
     assert payload["state_dir"] == str(state_dir)
 
@@ -295,7 +365,7 @@ def test_version_list_json(tmp_path: Path) -> None:
     result = runner.invoke(app, ["version", "list", "--json"], env=env)
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout)
+    payload = _extract_json(result.stdout)
     assert payload["versions"][0]["version"] == "25.8.0"
     assert payload["versions"][1]["metadata"]["source"] == "local"
     assert payload["versions"][1]["integrity"]["npm"]["shasum"] == "12345"
@@ -577,7 +647,7 @@ def test_backup_create_dry_run(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout)
+    payload = _extract_json(result.stdout)
     assert payload["plan"]["status"] == "planned"
     backup_dir = tmp_path / "backups" / "beta"
     if backup_dir.exists():
@@ -622,7 +692,7 @@ def test_backup_create_json_payload(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout)
+    payload = _extract_json(result.stdout)
     plan = payload["plan"]
     result_meta = payload["result"]
     assert plan["status"] == "created"
@@ -715,7 +785,7 @@ def test_backup_verify_reports_status(tmp_path: Path) -> None:
 
     result = runner.invoke(app, ["backup", "verify", backup_id, "--json"], env=env)
     assert result.exit_code == 0
-    payload = json.loads(result.stdout)
+    payload = _extract_json(result.stdout)
     assert payload["results"][0]["status"] == "available"
 
 
@@ -739,7 +809,7 @@ def test_backup_verify_detects_missing_archive(tmp_path: Path) -> None:
 
     result = runner.invoke(app, ["backup", "verify", backup_id, "--json"], env=env)
     assert result.exit_code == 0
-    payload = json.loads(result.stdout)
+    payload = _extract_json(result.stdout)
     assert payload["results"][0]["status"] == "missing"
 
 
@@ -773,7 +843,7 @@ def test_backup_prune_dry_run(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout)
+    payload = _extract_json(result.stdout)
     assert payload["results"][0]["status"] == "planned"
 
 
@@ -813,28 +883,22 @@ def test_backup_prune_removes_archives(tmp_path: Path) -> None:
     assert checksum_path.exists() is False
 
 
-def test_backup_restore_dry_run(tmp_path: Path) -> None:
-    """`backup restore --dry-run` emits a plan."""
+def test_backup_restore_dry_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`backup restore --dry-run` emits a plan without touching data."""
     env, _ = _prepare_environment(
         tmp_path,
-        instances=[{"name": "alpha", "version": "25.8.0", "port": 5000}],
+        instances=[{"name": "alpha", "version": "current", "port": 5000, "status": "running"}],
     )
-    backups_root = tmp_path / "backups"
-    registry = BackupsRegistry(backups_root, backups_root / "backups.json")
-    registry.ensure_root()
+    data_dir = tmp_path / "instances" / "alpha"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    db_file = data_dir / "db.sqlite"
+    db_file.write_text("original", encoding="utf-8")
 
-    archive = backups_root / "alpha" / "restore.tar.gz"
-    archive.parent.mkdir(parents=True, exist_ok=True)
-    archive.write_bytes(b"data")
-    checksum = hashlib.sha256(b"data").hexdigest()
-    backup_id = "20240107-alpha-restore"
-    _create_backup_entry(
-        registry,
-        instance="alpha",
-        backup_id=backup_id,
-        archive_path=archive,
-        checksum=checksum,
-    )
+    backup_id, _ = _create_backup(env, "alpha")
+
+    db_file.write_text("mutated", encoding="utf-8")
+
+    _stub_restore_providers(monkeypatch)
 
     result = runner.invoke(
         app,
@@ -850,65 +914,118 @@ def test_backup_restore_dry_run(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout)
+    payload = _extract_json(result.stdout)
     assert payload["plan"]["status"] == "planned"
-    assert payload["plan"]["id"] == backup_id
+    assert "extract-archive" in payload["plan"]["actions"]
+    assert db_file.read_text(encoding="utf-8") == "mutated"
+    assert not list(data_dir.parent.glob("alpha.pre-restore-*"))
 
 
-def test_backup_restore_placeholder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """`backup restore` placeholder succeeds and updates index."""
+def test_backup_restore_restores_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`backup restore` rehydrates instance data and updates metadata."""
     env, state_dir = _prepare_environment(
         tmp_path,
-        instances=[{"name": "alpha", "version": "25.8.0", "port": 5000}],
+        instances=[{"name": "alpha", "version": "current", "port": 5000, "status": "running"}],
     )
-    backups_root = tmp_path / "backups"
-    registry = BackupsRegistry(backups_root, backups_root / "backups.json")
-    registry.ensure_root()
+    data_dir = tmp_path / "instances" / "alpha"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    db_file = data_dir / "db.sqlite"
+    db_file.write_text("original", encoding="utf-8")
+    extra_file = data_dir / "extra.txt"
+    extra_file.write_text("extra", encoding="utf-8")
 
-    archive = backups_root / "alpha" / "restore.tar.gz"
-    archive.parent.mkdir(parents=True, exist_ok=True)
-    archive.write_bytes(b"data")
-    checksum = hashlib.sha256(b"data").hexdigest()
-    backup_id = "20240108-alpha-restore"
-    _create_backup_entry(
-        registry,
-        instance="alpha",
-        backup_id=backup_id,
-        archive_path=archive,
-        checksum=checksum,
-    )
+    backup_id, _ = _create_backup(env, "alpha")
 
-    monkeypatch.setattr(
-        SystemdProvider,
-        "stop",
-        lambda self, name: _fake_systemctl("stop", name),
-    )
-    monkeypatch.setattr(
-        SystemdProvider,
-        "disable",
-        lambda self, name: _fake_systemctl("disable", name),
-    )
-    monkeypatch.setattr(SystemdProvider, "remove", lambda self, name: None)
-    monkeypatch.setattr(NginxProvider, "disable", lambda self, name: None)
-    monkeypatch.setattr(NginxProvider, "remove", lambda self, name: None)
+    db_file.write_text("mutated", encoding="utf-8")
+    extra_file.unlink()
+    (data_dir / "after.txt").write_text("after", encoding="utf-8")
+
+    _stub_restore_providers(monkeypatch)
 
     result = runner.invoke(
         app,
-        [
-            "backup",
-            "restore",
-            backup_id,
-            "--no-pre-backup",
-            "--dest",
-            str(tmp_path / "restore-target"),
-        ],
+        ["backup", "restore", backup_id, "--no-pre-backup", "--json"],
         env=env,
     )
 
     assert result.exit_code == 0
-    updated = registry.find_by_id(backup_id)
+    payload = _extract_json(result.stdout)
+    assert payload["plan"]["status"] == "restored"
+    assert db_file.read_text(encoding="utf-8") == "original"
+    assert extra_file.exists()
+    assert not (data_dir / "after.txt").exists()
+    assert not list(data_dir.parent.glob("alpha.pre-restore-*"))
+
+    registry = StateRegistry(state_dir / "registry")
+    entry = registry.get_instance("alpha")
+    assert entry is not None
+    metadata = entry.get("metadata", {})
+    assert metadata.get("last_restored_at")
+
+    backups_root = tmp_path / "backups"
+    registry_index = BackupsRegistry(backups_root, backups_root / "backups.json")
+    updated = registry_index.find_by_id(backup_id)
     assert updated is not None
     assert updated.get("last_restored_at")
+    assert updated.get("metadata", {}).get("last_restore_destination")
+
+
+def test_backup_reconcile_reports_mismatches(tmp_path: Path) -> None:
+    """`backup reconcile` surfaces missing entries and orphaned archives."""
+    env, _ = _prepare_environment(tmp_path)
+    backups_root = tmp_path / "backups"
+    registry = BackupsRegistry(backups_root, backups_root / "backups.json")
+    registry.ensure_root()
+
+    missing_id = "20240101-alpha-missing"
+    archive_path = backups_root / "alpha" / "missing.tar.gz"
+    _create_backup_entry(
+        registry,
+        instance="alpha",
+        backup_id=missing_id,
+        archive_path=archive_path,
+        checksum="deadbeef" * 8,
+    )
+
+    orphan_path = backups_root / "alpha" / "orphan.tar.gz"
+    orphan_path.parent.mkdir(parents=True, exist_ok=True)
+    orphan_path.write_bytes(b"orphan")
+
+    result = runner.invoke(app, ["backup", "reconcile", "--json"], env=env)
+
+    assert result.exit_code == 0
+    payload = _extract_json(result.stdout)
+    assert any(item["id"] == missing_id for item in payload["missing"])
+    assert any(str(orphan_path) == item["path"] for item in payload["orphaned"])
+
+
+def test_backup_reconcile_apply_updates_index(tmp_path: Path) -> None:
+    """`backup reconcile --apply` updates index status for missing archives."""
+    env, _ = _prepare_environment(tmp_path)
+    backups_root = tmp_path / "backups"
+    registry = BackupsRegistry(backups_root, backups_root / "backups.json")
+    registry.ensure_root()
+
+    missing_id = "20240102-alpha-missing"
+    archive_path = backups_root / "alpha" / "missing.tar.gz"
+    _create_backup_entry(
+        registry,
+        instance="alpha",
+        backup_id=missing_id,
+        archive_path=archive_path,
+        checksum="cafebabe" * 8,
+    )
+
+    result = runner.invoke(app, ["backup", "reconcile", "--apply"], env=env)
+
+    assert result.exit_code == 0
+    updated = registry.find_by_id(missing_id)
+    assert updated is not None
+    assert updated.get("status") == "missing"
+    metadata = updated.get("metadata", {})
+    assert metadata.get("reconciled_at")
 
 
 def test_instance_delete_triggers_backup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

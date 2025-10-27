@@ -183,10 +183,18 @@ System Diagnostics & Backups
    verification status. ``--all`` verifies every entry in ``backups.json``.
 
 ``abssctl backup restore <ID> [--instance NAME] [--dest PATH] [--dry-run] [--json] [--no-pre-backup] [--backup-message TEXT] [--yes]``
-   Restores the specified backup archive back into an instance data directory. The current
-   implementation validates the archive, records the intended destination, and captures
-   metadata in the index; actual extraction will arrive in a later iteration. ``--dry-run``
-   previews the plan, and ``--no-pre-backup`` skips the optional pre-restore safeguard.
+   Restores the specified backup archive into the instance data directory (or an alternate
+   ``--dest``). The command verifies the checksum, extracts the payload into a staging
+   directory, atomically swaps the data directory, and rehydrates systemd/nginx assets when
+   they were captured. Services are stopped during the swap and restarted if they were
+   previously running. ``--dry-run`` previews the plan, while ``--json`` emits a structured
+   payload showing actions taken. ``--no-pre-backup`` skips the optional safety prompt.
+
+``abssctl backup reconcile [--instance NAME] [--apply] [--json]``
+   Compares the backup index against on-disk archives, reporting missing entries, index
+   status mismatches, and orphaned archives that lack metadata. ``--apply`` updates the
+   index to mark missing archives and records a reconciliation timestamp. ``--json`` emits
+   the findings for automation.
 
 ``abssctl backup prune [--instance NAME] [--keep N] [--older-than DAYS] [--dry-run] [--json]``
    Removes old backups according to simple retention policies. ``--keep`` retains the most

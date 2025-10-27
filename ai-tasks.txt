@@ -4,14 +4,6 @@
 #
 # - AI do not edit above this line! Keep this header!
 
-2. Implement backup restore & reconcile workflows (ADR-012/021/022 §5.8).
-   1. Design end-to-end restore plan: define archive structure expectations, target directory handling, registry updates, and prompts; capture in docs/plan if needed.
-   2. Implement `backup restore` with extraction, pre-flight checks (disk space, instance state), optional pre-restore backup, and rollback on failure.
-   3. Implement reconciliation tooling (`backup reconcile` or equivalent) to compare registry entries vs filesystem archives, emitting actionable reports.
-   4. Add metadata persistence (last restored timestamp, destination) and ensure registry/backups index stay consistent.
-   5. Write unit/CLI tests covering restore success, dry-run, missing files, checksum mismatch, and reconciliation reporting.
-   6. Document restore/reconcile usage and update roadmap/session artefacts.
-
 3. Ensure mutating commands honour `--dry-run`, `--yes`, backup prompts, and exit-code taxonomy (ADR-013/016/025/026).
    1. Audit all mutating CLI commands to catalogue current behaviour vs ADR expectations (dry-run semantics, prompt messaging, exit codes).
    2. Introduce shared helpers/utilities to enforce consistent prompt handling, dry-run step recording, and error-to-exit-code mapping.

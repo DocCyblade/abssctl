@@ -124,9 +124,13 @@ Backups
   operators can browse recent backups or drill into a specific archive via JSON.
 - ``abssctl backup verify`` recomputes SHA-256 digests to highlight missing or
   corrupt archives.
-- ``abssctl backup restore <id>`` (placeholder) validates the backup archive,
-  offers a pre-restore safeguard, and records the planned restore destination
-  (extraction logic arrives in a later iteration).
+- ``abssctl backup restore <id>`` verifies the archive checksum, extracts the
+  payload, swaps the instance data directory, and rehydrates systemd/nginx
+  assets (restarting services when they were previously running). ``--dry-run``
+  previews the plan, and ``--dest`` supports staging restores.
+- ``abssctl backup reconcile`` compares the backup index with on-disk archives,
+  reporting missing entries, mismatched statuses, and orphaned files. Use
+  ``--apply`` to tag missing entries directly in ``backups.json``.
 - ``abssctl backup prune`` removes old backups using ``--keep`` / ``--older-than``
   policies (with ``--dry-run`` support) and updates the registry accordingly.
 - Version lifecycle commands and ``instance delete`` honour safety prompts by
