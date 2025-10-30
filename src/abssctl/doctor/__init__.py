@@ -1,0 +1,35 @@
+"""Doctor command infrastructure."""
+
+from __future__ import annotations
+
+from .engine import DoctorEngine, create_probe_context, run_probes
+from .models import (
+    DoctorImpact,
+    DoctorReport,
+    DoctorSummary,
+    ProbeCategory,
+    ProbeContext,
+    ProbeDefinition,
+    ProbeExecutorOptions,
+    ProbeResult,
+    ProbeStatus,
+    aggregate_results,
+    build_report,
+)
+
+__all__ = [
+    "DoctorEngine",
+    "DoctorImpact",
+    "DoctorReport",
+    "DoctorSummary",
+    "ProbeCategory",
+    "ProbeContext",
+    "ProbeDefinition",
+    "ProbeExecutorOptions",
+    "ProbeResult",
+    "ProbeStatus",
+    "aggregate_results",
+    "build_report",
+    "create_probe_context",
+    "run_probes",
+]

@@ -198,10 +198,25 @@
 
 -----------------------------------------
 
+# 2025-10-30 Beta1.0 Session2 (OPEN)
+- Session opened per primer; focusing on doctor command delivery per ai-tasks item 4.
+- Reviewed ADR-029 and requirements spec to confirm probe catalogue, severities, and execution constraints for 4.2 groundwork.
+- Implemented doctor probe data models (status/impact enums, result/report structures, aggregation helpers) plus probe execution options context.
+- Added concurrency-aware probe execution harness with runtime-to-probe context adapter and defensive failure handling.
+- Authored unit tests covering aggregation, ordering, and error capture for the doctor engine; `.venv/bin/python -m pytest tests/test_doctor_engine.py` passes.
+- Ran `make quick-tests` to keep lint/mypy/pytest coverage green after the doctor infrastructure landed.
+
+## Wrap up:
+- In progress.
+
+-----------------------------------------
+
 ----------------------- Sessions logging above this line only ----------------------
 
 # Next Steps / TODO:
-- Carry Beta Phase items (doctor command delivery, idempotency test expansion) forward via `ai-tasks.txt`.
+- Item 4.3: build the doctor CLI surface (filters/verbosity, structured output, ADR-013 exit codes).
+- Item 4.4: prepare fake provider fixtures and integration tests to exercise healthy/degraded doctor runs.
+- Item 4.5: document doctor usage and update roadmap/session log once CLI/tests land.
 
 # Next Session Primer
-- Open new session "Beta1.0 Session2", give me the next three things on our todo list/roadmap/tasks
+- Continue Beta1.0 Session2: move into ai-tasks item 4.3 (doctor CLI surface) and stage fixtures/tests for 4.4.

@@ -7,6 +7,12 @@ read the file ai-directives.txt this has all the info you need to get started.
 
 AI Directives for chats for this repo/project
 
+- Coding Standards (must confirm before editing code):
+  1. Treat `make quick-tests` as the acceptance gate. Run it after any code change and resolve every issue (lint, mypy, pytest) before replying that work is done.
+  2. Follow repo conventions proactively: sorted imports (ruff I001), module/class/function docstrings, and TypeVar/type-hint cleanliness. When adding new files, include module docstrings and keep TYPE_CHECKING imports tidy.
+  3. Use formatters/lint fixes locally (`.venv/bin/python -m ruff check --fix …`, `ruff format`, etc.) instead of leaving cleanup to quick-tests.
+  4. Call out remaining quick-tests failures explicitly if they exist and outline the plan before pausing or handing off.
+
 - All source of truth documents are located:
    - docs/requirements/*
    - docs/adrs/*
