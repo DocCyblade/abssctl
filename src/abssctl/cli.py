@@ -18,7 +18,7 @@ import tempfile
 import textwrap
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, NoReturn, cast
@@ -37,6 +37,17 @@ from .backups import (
     copy_into,
 )
 from .config import ALLOWED_BACKUP_COMPRESSION, AppConfig, TLSPermissionSpec, load_config
+from .doctor import (
+    PROBE_CATEGORY_VALUES,
+    DoctorEngine,
+    DoctorImpact,
+    DoctorReport,
+    ProbeExecutorOptions,
+    ProbeResult,
+    ProbeStatus,
+    collect_probes,
+    create_probe_context,
+)
 from .locking import LockManager
 from .logging import OperationScope, StructuredLogger
 from .ports import PortsRegistry, PortsRegistryError
@@ -154,6 +165,183 @@ TLS_INSTALL_CHAIN_OPTION = typer.Option(
     "--chain",
     help="Optional chain bundle (PEM).",
 )
+
+_PROBE_CATEGORY_NAMES = ", ".join(PROBE_CATEGORY_VALUES)
+
+DOCTOR_JSON_OPTION = typer.Option(
+    False,
+    "--json",
+    help="Emit a JSON doctor report.",
+)
+DOCTOR_ONLY_OPTION = typer.Option(
+    None,
+    "--only",
+    metavar="CATEGORY[,CATEGORY...]",
+    help=f"Comma-separated probe categories to include ({_PROBE_CATEGORY_NAMES}).",
+)
+DOCTOR_EXCLUDE_OPTION = typer.Option(
+    None,
+    "--exclude",
+    metavar="CATEGORY[,CATEGORY...]",
+    help=f"Comma-separated probe categories to exclude ({_PROBE_CATEGORY_NAMES}).",
+)
+DOCTOR_TIMEOUT_MS_OPTION = typer.Option(
+    None,
+    "--timeout-ms",
+    min=0,
+    help="Override probe timeout in milliseconds (applies to exec and request probes).",
+)
+DOCTOR_RETRIES_OPTION = typer.Option(
+    None,
+    "--retries",
+    min=0,
+    help="Override retry count for service probes.",
+)
+DOCTOR_MAX_CONCURRENCY_OPTION = typer.Option(
+    None,
+    "--max-concurrency",
+    min=1,
+    help="Limit the number of probes executed concurrently.",
+)
+DOCTOR_FIX_OPTION = typer.Option(
+    False,
+    "--fix",
+    help="Attempt safe remediations (not yet implemented).",
+)
+
+_PROBE_CATEGORY_SET = frozenset(PROBE_CATEGORY_VALUES)
+_PROBE_STATUS_STYLE = {
+    ProbeStatus.GREEN: "[green]PASS[/green]",
+    ProbeStatus.YELLOW: "[yellow]WARN[/yellow]",
+    ProbeStatus.RED: "[red]FAIL[/red]",
+}
+_SUMMARY_STATUS_STYLE = {
+    ProbeStatus.GREEN: "[green]GREEN[/green]",
+    ProbeStatus.YELLOW: "[yellow]WARN[/yellow]",
+    ProbeStatus.RED: "[red]RED[/red]",
+}
+_DOCTOR_IMPACT_MESSAGES = {
+    DoctorImpact.OK: "Doctor run completed successfully.",
+    DoctorImpact.VALIDATION: "Doctor detected configuration validation errors.",
+    DoctorImpact.ENVIRONMENT: "Doctor detected environment dependency errors.",
+    DoctorImpact.PROVIDER: "Doctor detected provider/service failures.",
+}
+
+
+def _parse_probe_categories(raw: str | None) -> set[str]:
+    """Parse comma-separated probe categories into a normalised set."""
+    if raw is None:
+        return set()
+    values = {part.strip().lower() for part in raw.split(",") if part.strip()}
+    return values
+
+
+def _sanitize_doctor_payload(value: object) -> object:
+    """Sanitise doctor payload values for JSON/log contexts."""
+    if value is None:
+        return None
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, Mapping):
+        return {str(key): _sanitize_doctor_payload(item) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_sanitize_doctor_payload(item) for item in value]
+    return str(value)
+
+
+def _serialize_doctor_report(report: DoctorReport) -> dict[str, object]:
+    """Convert a doctor report into a JSON-serialisable mapping."""
+    totals = {
+        status.value: int(report.summary.totals.get(status, 0))
+        for status in ProbeStatus
+    }
+    summary_payload = {
+        "status": report.summary.status.value,
+        "impact": report.summary.impact.name.lower(),
+        "impact_code": report.summary.impact.value,
+        "exit_code": report.summary.exit_code,
+        "totals": totals,
+    }
+    results_payload: list[dict[str, object]] = []
+    for result in report.results:
+        result_payload: dict[str, object] = {
+            "id": result.id,
+            "category": result.category,
+            "status": result.status.value,
+            "impact": result.impact.name.lower(),
+            "impact_code": result.impact.value,
+            "message": result.message,
+        }
+        if result.remediation:
+            result_payload["remediation"] = result.remediation
+        if result.duration_ms is not None:
+            result_payload["duration_ms"] = result.duration_ms
+        if result.data:
+            result_payload["data"] = _sanitize_doctor_payload(result.data)
+        if result.warnings:
+            result_payload["warnings"] = list(result.warnings)
+        results_payload.append(result_payload)
+
+    metadata_payload = (
+        _sanitize_doctor_payload(report.metadata) if report.metadata else {}
+    )
+    return {
+        "summary": summary_payload,
+        "results": results_payload,
+        "metadata": metadata_payload,
+    }
+
+
+def _collect_status_identifiers(
+    results: Sequence[ProbeResult],
+    status: ProbeStatus,
+) -> list[str]:
+    """Return identifiers for results matching a particular status."""
+    return [
+        f"{result.category}:{result.id}"
+        for result in results
+        if result.status is status
+    ]
+
+
+def _render_doctor_report(report: DoctorReport) -> None:
+    """Render a doctor report in a human-friendly format."""
+    summary = report.summary
+    summary_style = _SUMMARY_STATUS_STYLE[summary.status]
+    totals = summary.totals
+    totals_line = (
+        f"green={totals.get(ProbeStatus.GREEN, 0)} "
+        f"warn={totals.get(ProbeStatus.YELLOW, 0)} "
+        f"red={totals.get(ProbeStatus.RED, 0)}"
+    )
+    impact_label = summary.impact.name.lower()
+    console.print(
+        f"Doctor summary: {summary_style} "
+        f"(impact={impact_label}, exit={summary.exit_code})"
+    )
+    console.print(f"Totals: {totals_line}")
+    if not report.results:
+        console.print("No probes were executed.")
+        return
+
+    console.print()
+    for result in report.results:
+        status_label = _PROBE_STATUS_STYLE[result.status]
+        console.print(
+            f"{status_label} [{result.category}] {result.id}: {result.message}"
+        )
+        if result.remediation:
+            console.print(f"  remediation: {result.remediation}")
+        if result.warnings:
+            console.print(f"  notes: {', '.join(result.warnings)}")
+        if result.impact is not DoctorImpact.OK:
+            console.print(
+                f"  impact: {result.impact.name.lower()} (exit={result.impact.value})"
+            )
+        if result.duration_ms is not None:
+            console.print(f"  duration: {result.duration_ms} ms")
 
 app = typer.Typer(
     add_completion=False,
@@ -1100,19 +1288,158 @@ def _provider_error(op: OperationScope, message: str) -> None:
 
 
 @app.command()
-def doctor(ctx: typer.Context) -> None:
-    """Run environment and service health checks (coming soon)."""
+def doctor(
+    ctx: typer.Context,
+    json_output: bool = DOCTOR_JSON_OPTION,
+    only: str | None = DOCTOR_ONLY_OPTION,
+    exclude: str | None = DOCTOR_EXCLUDE_OPTION,
+    timeout_ms: int | None = DOCTOR_TIMEOUT_MS_OPTION,
+    retries: int | None = DOCTOR_RETRIES_OPTION,
+    max_concurrency: int | None = DOCTOR_MAX_CONCURRENCY_OPTION,
+    fix: bool = DOCTOR_FIX_OPTION,
+) -> None:
+    """Run environment and service health checks."""
     runtime = _get_runtime(ctx)
-    message = "Doctor checks will be introduced in the Alpha milestone."
     with runtime.logger.operation(
         "doctor",
+        args={
+            "json": json_output,
+            "only": only,
+            "exclude": exclude,
+            "timeout_ms": timeout_ms,
+            "retries": retries,
+            "max_concurrency": max_concurrency,
+            "fix": fix,
+        },
         target={"kind": "system", "scope": "health"},
     ) as op:
-        _placeholder(message)
-        op.warning(
-            "Doctor placeholder executed.",
-            warnings=["unimplemented"],
+        include_categories = _parse_probe_categories(only)
+        exclude_categories = _parse_probe_categories(exclude)
+
+        invalid_categories = (include_categories | exclude_categories) - _PROBE_CATEGORY_SET
+        if invalid_categories:
+            _command_error(
+                op,
+                f"Unknown probe categories: {', '.join(sorted(invalid_categories))}",
+                rc=2,
+            )
+        if only is not None and exclude is not None:
+            _command_error(op, "Cannot combine --only and --exclude.", rc=2)
+
+        timeout_seconds = (
+            max(timeout_ms / 1000.0, 0.0) if timeout_ms is not None else None
         )
+        if timeout_seconds is not None:
+            timeout_seconds = max(timeout_seconds, 0.001)
+
+        defaults = ProbeExecutorOptions()
+        options = ProbeExecutorOptions(
+            max_concurrency=(
+                max_concurrency if max_concurrency is not None else defaults.max_concurrency
+            ),
+            exec_timeout=timeout_seconds if timeout_seconds is not None else defaults.exec_timeout,
+            connect_timeout=(
+                timeout_seconds if timeout_seconds is not None else defaults.connect_timeout
+            ),
+            request_timeout=(
+                timeout_seconds if timeout_seconds is not None else defaults.request_timeout
+            ),
+            retries=retries if retries is not None else defaults.retries,
+        )
+
+        context = create_probe_context(runtime, options)
+        discovered_probes = list(collect_probes(context))
+        matched_probes = discovered_probes
+        if include_categories:
+            matched_probes = [
+                probe
+                for probe in matched_probes
+                if probe.category in include_categories
+            ]
+        if exclude_categories:
+            matched_probes = [
+                probe
+                for probe in matched_probes
+                if probe.category not in exclude_categories
+            ]
+
+        if fix:
+            op.add_step(
+                "fix-mode",
+                status="skipped",
+                detail="--fix requested but remediation is not yet implemented.",
+            )
+
+        metadata = {
+            "filters": {
+                "only": sorted(include_categories) if only is not None else None,
+                "exclude": sorted(exclude_categories) if exclude is not None else None,
+            },
+            "discovered_probes": len(discovered_probes),
+            "matched_probes": len(matched_probes),
+            "options": asdict(options),
+            "fix": {"requested": fix, "supported": False, "applied": False},
+        }
+
+        engine = DoctorEngine(context)
+        report = engine.run(matched_probes, metadata=metadata)
+        report_payload = _serialize_doctor_report(report)
+
+        if fix and not json_output:
+            console.print(
+                "[yellow]--fix is not implemented yet; no changes were made.[/yellow]"
+            )
+
+        if json_output:
+            console.print(json.dumps(report_payload, indent=2))
+        else:
+            _render_doctor_report(report)
+            if (
+                not matched_probes
+                and discovered_probes
+                and (only is not None or exclude is not None)
+            ):
+                console.print(
+                    "[yellow]No probes matched the provided filters.[/yellow]"
+                )
+
+        warning_ids = _collect_status_identifiers(report.results, ProbeStatus.YELLOW)
+        error_ids = _collect_status_identifiers(report.results, ProbeStatus.RED)
+        log_context = {"report": report_payload}
+
+        summary = report.summary
+        impact_message = _DOCTOR_IMPACT_MESSAGES.get(
+            summary.impact, "Doctor detected issues."
+        )
+
+        if not json_output:
+            if summary.exit_code == 0 and summary.status is ProbeStatus.YELLOW:
+                console.print("[yellow]Doctor completed with warnings.[/yellow]")
+            elif summary.exit_code != 0:
+                console.print(f"[red]{impact_message}[/red]")
+
+        if summary.exit_code == 0:
+            if summary.status is ProbeStatus.YELLOW:
+                op.warning(
+                    "Doctor completed with warnings.",
+                    warnings=warning_ids or None,
+                    context=log_context,
+                )
+            else:
+                op.success(
+                    _DOCTOR_IMPACT_MESSAGES[DoctorImpact.OK],
+                    context=log_context,
+                )
+            return
+
+        op.error(
+            impact_message,
+            rc=summary.exit_code,
+            errors=error_ids or None,
+            warnings=warning_ids or None,
+            context=log_context,
+        )
+        raise typer.Exit(code=summary.exit_code)
 
 
 @app.command()

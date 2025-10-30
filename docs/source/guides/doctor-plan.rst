@@ -92,27 +92,27 @@ Implementation Tasks
 ====================
 
 1. **Data structures & wiring**
-   - Define ``ProbeResult`` (id, category, status, message, remediation, metrics).
-   - Create probe registry + execution harness returning ordered results.
-   - Implement aggregation + exit-code mapper following ADR-013 precedence.
+   - [x] Define ``ProbeResult`` (id, category, status, message, remediation, metrics).
+   - [x] Create probe registry + execution harness returning ordered results.
+   - [x] Implement aggregation + exit-code mapper following ADR-013 precedence.
 
 2. **Probe implementations**
-   - Build individual probes per ADR-029 using existing helpers (registry, providers, config).
-   - Ensure probes never raise; capture exceptions and return ``status=red`` with diagnostic content.
+   - [ ] Build individual probes per ADR-029 using existing helpers (registry, providers, config).
+   - [ ] Ensure probes never raise; capture exceptions and return ``status=red`` with diagnostic content.
 
 3. **CLI Command**
-   - Add `doctor` Typer subcommand using the harness.
-   - Render concise console output grouped by category with colour-coded severities.
-   - Support ``--json`` payloads mirroring ADR-028 structured logging.
+   - [x] Add ``doctor`` Typer subcommand using the harness.
+   - [x] Render concise console output grouped by category with severity labels.
+   - [x] Support ``--json`` payloads mirroring ADR-028 structured logging.
 
 4. **Testing**
-   - Unit tests for each probe (happy path + failure scenarios).
-   - CLI integration tests verifying exit codes for pure success, validation (duplicate ports), environment (missing tool), and provider failure (nginx/systemd).
-   - JSON fixture assertions to keep backwards-compatible schemas.
+   - [x] Harness tests covering aggregation, ordering, and failure capture.
+   - [x] CLI integration tests verifying exit codes for success, environment, and provider failures.
+   - [ ] JSON fixture assertions for the full probe catalogue once probes land.
 
 5. **Documentation & Follow-up**
-   - Update CLI reference + README doctor section once implementation lands.
-   - Record open question: expand ``--fix`` behaviour in a future milestone (tie-in with ADR-029 safe actions).
+   - [x] Update CLI reference + README doctor sections with current behaviour.
+   - [ ] Record probe catalogue + remediation guidance once probes are implemented; expand ``--fix`` behaviour in a future milestone (tie-in with ADR-029 safe actions).
 
 Open Questions
 ==============

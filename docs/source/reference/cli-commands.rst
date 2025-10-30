@@ -178,8 +178,17 @@ System Diagnostics & Backups
 ============================
 
 ``abssctl doctor`` and ``abssctl support-bundle``
-   Placeholders that confirm the CLI wiring. These commands will gain real
-   probes and bundle generation during the Beta milestone.
+   ``doctor`` now wires the health-check engine defined in ADR-029. It emits a
+   human-readable summary plus per-probe detail, or a structured JSON payload
+   when ``--json`` is supplied. ``--only``/``--exclude`` accept comma-separated
+   probe categories (``env``, ``config``, ``state``, ``fs``, ``ports``,
+   ``systemd``, ``nginx``, ``tls``, ``app``, ``disk``), while ``--timeout-ms``,
+   ``--retries``, and ``--max-concurrency`` override executor defaults. Exit
+   codes follow ADR-013, mapping the worst probe impact (``0`` success,
+   ``2`` validation/config errors, ``3`` environment/dependency failures,
+   ``4`` provider/runtime failures). ``--fix`` is reserved for safe
+   remediations and currently reports that no changes are applied. The actual
+   probe catalogue will be populated in the next milestone.
 
 ``abssctl backup create <instance> [--message TEXT] [--label LABELS] [--data-only] [--out-dir PATH] [--compression {auto,zstd,gzip,none}] [--compression-level N] [--json] [--dry-run]``
    Captures an instance snapshot beneath the configured backup root (defaults to

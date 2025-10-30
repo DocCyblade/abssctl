@@ -71,6 +71,20 @@ ProbeCategory = Literal[
     "disk",
 ]
 
+# Ordered tuple of all recognised probe categories. Keep this in sync with ``ProbeCategory``.
+PROBE_CATEGORY_VALUES: tuple[ProbeCategory, ...] = (
+    "env",
+    "config",
+    "state",
+    "fs",
+    "ports",
+    "systemd",
+    "nginx",
+    "tls",
+    "app",
+    "disk",
+)
+
 
 @dataclass(slots=True, frozen=True)
 class ProbeExecutorOptions:

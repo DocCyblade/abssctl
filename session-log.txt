@@ -205,6 +205,9 @@
 - Added concurrency-aware probe execution harness with runtime-to-probe context adapter and defensive failure handling.
 - Authored unit tests covering aggregation, ordering, and error capture for the doctor engine; `.venv/bin/python -m pytest tests/test_doctor_engine.py` passes.
 - Ran `make quick-tests` to keep lint/mypy/pytest coverage green after the doctor infrastructure landed.
+- Replaced the CLI placeholder with the doctor command harness (filters, JSON output, timeout/retry tuning, exit-code mapping) wired to the new engine and structured logging.
+- Added doctor CLI integration tests with fake probes plus warning/failure messaging, and refreshed docs (CLI reference, doctor plan, README) to reflect current behaviour.
+- Re-ran `make quick-tests` (ruff/mypy/pytest) to confirm the CLI/docs/test additions are green.
 
 ## Wrap up:
 - In progress.
@@ -214,9 +217,9 @@
 ----------------------- Sessions logging above this line only ----------------------
 
 # Next Steps / TODO:
-- Item 4.3: build the doctor CLI surface (filters/verbosity, structured output, ADR-013 exit codes).
-- Item 4.4: prepare fake provider fixtures and integration tests to exercise healthy/degraded doctor runs.
-- Item 4.5: document doctor usage and update roadmap/session log once CLI/tests land.
+- Item 4.6: implement the doctor probe catalogue per ADR-029 (env/config/state/fs/ports/systemd/nginx/tls/app/disk).
+- Item 4.7: extend fixtures/tests to exercise real probe success, warning, and failure paths.
+- Item 4.8: refresh docs/roadmap with delivered probe coverage and remediation guidance once probes ship.
 
 # Next Session Primer
-- Continue Beta1.0 Session2: move into ai-tasks item 4.3 (doctor CLI surface) and stage fixtures/tests for 4.4.
+- Continue Beta1.0 Session2: start ai-tasks item 4.6 (implement doctor probe catalogue) and line up fixtures/tests/docs for 4.7–4.8.

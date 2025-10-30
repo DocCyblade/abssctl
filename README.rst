@@ -190,9 +190,10 @@ Roadmap Snapshot
 - **Alpha Core Features (current):** Version install/switch/uninstall, ports
   registry, systemd/nginx providers, instance lifecycle subcommands, structured
   rollback handling, and expanded test coverage.
-- **Beta Releases — Core Features:** TLS tooling, backup restore/reconcile,
-  doctor basics, support bundle groundwork. All updates become non-destructive or
-  ship with migration hooks.
+- **Beta Releases — Core Features:** TLS tooling, backup restore/reconcile, and
+  the doctor CLI harness (structured JSON output, filters, exit-code mapping),
+  plus support bundle groundwork. All updates become non-destructive or ship
+  with migration hooks.
 - **Release Candidate — Quality & Docs:** Support bundle, robust errors, man
   pages & completion, full docs & examples, CI integration tests on TurnKey
   Linux VMs. Automate PyPI release from GitHub actions.
