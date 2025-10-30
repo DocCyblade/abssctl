@@ -1089,17 +1089,12 @@ def _require_instance(
 ) -> dict[str, object]:
     instance = runtime.registry.get_instance(name)
     if instance is None:
-        message = f"Instance '{name}' not found in registry."
-        console.print(f"[red]{message}[/red]")
-        op.error(message, errors=[message], rc=1)
-        raise typer.Exit(code=1)
+        _command_error(op, f"Instance '{name}' not found in registry.", rc=2)
     return instance
 
 
 def _provider_error(op: OperationScope, message: str) -> None:
-    console.print(f"[red]{message}[/red]")
-    op.error(message, errors=[message], rc=1)
-    raise typer.Exit(code=1)
+    _command_error(op, message, rc=4)
 
 
 
@@ -1171,7 +1166,7 @@ def tls_verify(
             "Allowed values: auto, system, custom, lets-encrypt."
         )
         console.print(f"[red]{message}[/red]")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=2)
 
     args = {
         "instance": instance,
@@ -1209,15 +1204,11 @@ def tls_verify(
                         "Let's Encrypt assets were not detected for the instance "
                         f"(resolved source: {selection.resolved})."
                     )
-                    console.print(f"[red]{message}[/red]")
-                    op.error(message, rc=1)
-                    raise typer.Exit(code=1)
+                    _command_error(op, message, rc=2)
             else:
                 if cert is None or key is None:
                     message = "Provide --cert and --key when verifying without --instance."
-                    console.print(f"[red]{message}[/red]")
-                    op.error(message, rc=1)
-                    raise typer.Exit(code=1)
+                    _command_error(op, message, rc=2)
                 selection = runtime.tls_inspector.resolve_manual(
                     certificate=cert,
                     key=key,
@@ -1257,9 +1248,7 @@ def tls_verify(
                 return
             op.success("TLS validation successful.", context=context)
         except TLSConfigurationError as exc:
-            console.print(f"[red]{exc}[/red]")
-            op.error(str(exc), rc=1)
-            raise typer.Exit(code=1) from exc
+            _command_error(op, str(exc), rc=2)
 
 
 @tls_app.command("install")
@@ -1396,9 +1385,7 @@ def tls_install(
                     shutil.chown(dest, perm.owner, perm.group)
                 except (LookupError, PermissionError) as exc:
                     message = f"Failed to adjust ownership for {dest}: {exc}"
-                    console.print(f"[red]{message}[/red]")
-                    op.error(message, errors=[message], rc=1)
-                    raise typer.Exit(code=1) from exc
+                    _command_error(op, message, rc=3)
                 change_count += 1
                 detail = f"{src} -> {dest}"
                 op.add_step(f"tls.copy.{label}", status="success", detail=detail)
@@ -1474,9 +1461,7 @@ def tls_install(
                     entry=entry_for_nginx,
                 )
             except TLSConfigurationError as exc:
-                console.print(f"[red]{exc}[/red]")
-                op.error(str(exc), errors=[str(exc)], rc=1)
-                raise typer.Exit(code=1) from exc
+                _command_error(op, str(exc), rc=2)
 
             nginx_result = runtime.nginx_provider.render_site(normalized_name, nginx_context)
             if nginx_result.validation_error is not None:
@@ -1626,9 +1611,7 @@ def tls_use_system(
                     selection=selection,
                 )
             except TLSConfigurationError as exc:
-                console.print(f"[red]{exc}[/red]")
-                op.error(str(exc), errors=[str(exc)], rc=1)
-                raise typer.Exit(code=1) from exc
+                _command_error(op, str(exc), rc=2)
 
             nginx_result = runtime.nginx_provider.render_site(normalized_name, nginx_context)
             if nginx_result.validation_error is not None:
@@ -1749,7 +1732,7 @@ def version_install(
 
             existing_entry = runtime.registry.get_version(version) if not dry_run else None
             if existing_entry and not dry_run:
-                _command_error(op, f"Version '{version}' is already registered.", rc=1)
+                _command_error(op, f"Version '{version}' is already registered.", rc=2)
 
             impacted_instances = sorted(
                 set(_instances_using_version(runtime.registry, "current"))
@@ -1958,7 +1941,7 @@ def version_uninstall(
 
             entry = runtime.registry.get_version(version)
             if entry is None:
-                _command_error(op, f"Version '{version}' is not registered.", rc=1)
+                _command_error(op, f"Version '{version}' is not registered.", rc=2)
 
             version_path = Path(entry.get("path", runtime.config.install_root / f"v{version}"))
 
@@ -1969,7 +1952,7 @@ def version_uninstall(
                         f"Version '{version}' is the active 'current' target. "
                         "Uninstalling the active version is not permitted."
                     ),
-                    rc=1,
+                    rc=2,
                 )
 
             consumers = _instances_using_version(runtime.registry, version)
@@ -1978,7 +1961,7 @@ def version_uninstall(
                 _command_error(
                     op,
                     f"Cannot uninstall version '{version}' while in use by instances: {joined}",
-                    rc=1,
+                    rc=2,
                 )
 
             impacted_instances = sorted(consumers)
@@ -2072,19 +2055,15 @@ def _switch_version(
     """Update the install_root/current symlink to point at *version*."""
     entry = runtime.registry.get_version(version)
     if entry is None:
-        message = f"Version '{version}' is not registered."
-        console.print(f"[red]{message}[/red]")
-        op.error(message, errors=[message], rc=1)
-        raise typer.Exit(code=1)
+        _command_error(op, f"Version '{version}' is not registered.", rc=2)
 
     version_path = Path(entry.get("path", runtime.config.install_root / f"v{version}"))
     if not version_path.exists():
-        message = (
-            f"Installed directory for version '{version}' is missing: {version_path}"
+        _command_error(
+            op,
+            f"Installed directory for version '{version}' is missing: {version_path}",
+            rc=3,
         )
-        console.print(f"[red]{message}[/red]")
-        op.error(message, errors=[message], rc=1)
-        raise typer.Exit(code=1)
 
     install_root = runtime.config.install_root
     install_root.mkdir(parents=True, exist_ok=True)
@@ -3135,10 +3114,7 @@ def instance_show(
         target = next((entry for entry in entries if entry["name"] == name), None)
 
         if target is None:
-            console.print(f"[red]Instance '{name}' not found in registry.[/red]")
-            message = f"Instance '{name}' not found."
-            op.error(message, errors=[message], rc=1)
-            raise typer.Exit(code=1)
+            _command_error(op, f"Instance '{name}' not found.", rc=2)
 
         metadata = target.setdefault("metadata", {})
         status_info = runtime.instance_status_provider.status(target["name"], target)
@@ -3202,10 +3178,7 @@ def instance_create(
             args={"name": name},
             target={"kind": "instance", "name": name},
         ) as op:
-            console.print(f"[red]{exc}[/red]")
-            message = str(exc)
-            op.error(message, errors=[message], rc=1)
-        raise typer.Exit(code=1) from exc
+            _command_error(op, str(exc), rc=2)
 
     resolved_domain = domain.strip() if domain and domain.strip() else None
     args = {
@@ -3227,10 +3200,7 @@ def instance_create(
             op.set_lock_wait_ms(bundle.wait_ms)
 
             if runtime.registry.get_instance(name) is not None:
-                message = f"Instance '{name}' already exists in the registry."
-                console.print(f"[red]{message}[/red]")
-                op.error(message, errors=[message], rc=1)
-                raise typer.Exit(code=1)
+                _command_error(op, f"Instance '{name}' already exists in the registry.", rc=2)
 
             domain_value = resolved_domain or _default_instance_domain(runtime.config, name)
             version_value = (
@@ -3241,10 +3211,7 @@ def instance_create(
             if version_value != "current":
                 version_entry = runtime.registry.get_version(version_value)
                 if version_entry is None:
-                    message = f"Version '{version_value}' is not registered."
-                    console.print(f"[red]{message}[/red]")
-                    op.error(message, errors=[message], rc=1)
-                    raise typer.Exit(code=1) from None
+                    _command_error(op, f"Version '{version_value}' is not registered.", rc=2)
 
             exec_path = _resolve_exec_path(runtime, version_value)
 
@@ -3270,9 +3237,7 @@ def instance_create(
                     "Cannot create instance because the following paths already exist: "
                     + ", ".join(conflicts)
                 )
-                console.print(f"[red]{message}[/red]")
-                op.error(message, errors=[message], rc=1)
-                raise typer.Exit(code=1)
+                _command_error(op, message, rc=2)
 
             port_reserved = False
 
@@ -3281,9 +3246,7 @@ def instance_create(
                 op.add_step("ports.reserve", status="success", detail=str(port_value))
             except PortsRegistryError as exc:
                 message = str(exc)
-                console.print(f"[red]{message}[/red]")
-                op.error(message, errors=[message], rc=1)
-                raise typer.Exit(code=1) from exc
+                _command_error(op, message, rc=2)
 
             port_reserved = True
             cleanup_files: list[Path] = []
@@ -3505,9 +3468,7 @@ def instance_create(
                     paths=cleanup_files + list(reversed(cleanup_dirs)),
                     remove_registry=registry_registered,
                 )
-                console.print(f"[red]{exc}[/red]")
-                op.error(str(exc), errors=[str(exc)], rc=1)
-                raise typer.Exit(code=1) from exc
+                _command_error(op, str(exc), rc=2)
             except (SystemdError, NginxError, TLSConfigurationError) as exc:
                 _cleanup_instance_create(
                     runtime,
@@ -3526,9 +3487,7 @@ def instance_create(
                     remove_registry=registry_registered,
                 )
                 message = f"Filesystem error provisioning '{name}': {exc}"
-                console.print(f"[red]{message}[/red]")
-                op.error(message, errors=[str(exc)], rc=1)
-                raise typer.Exit(code=1) from exc
+                _command_error(op, message, rc=3)
 
 
 @instances_app.command("enable")
@@ -4438,10 +4397,7 @@ def backup_show(
             raise typer.Exit(code=2) from exc
 
         if entry is None:
-            message = f"Backup '{backup_id}' not found."
-            console.print(f"[red]{message}[/red]")
-            op.error(message, errors=[message], rc=1)
-            raise typer.Exit(code=1)
+            _command_error(op, f"Backup '{backup_id}' not found.", rc=2)
 
         if json_output:
             console.print_json(data={"backup": entry})
@@ -4512,10 +4468,7 @@ def backup_verify(
         else:
             target_entry = runtime.backups.find_by_id(backup_id or "")
             if target_entry is None:
-                message = f"Backup '{backup_id}' not found."
-                console.print(f"[red]{message}[/red]")
-                op.error(message, errors=[message], rc=1)
-                raise typer.Exit(code=1)
+                _command_error(op, f"Backup '{backup_id}' not found.", rc=2)
             targets = [target_entry]
 
         results: list[dict[str, object]] = []
@@ -4952,26 +4905,18 @@ def backup_restore(
             raise typer.Exit(code=2) from exc
 
         if entry is None:
-            message = f"Backup '{backup_id}' is not registered."
-            console.print(f"[red]{message}[/red]")
-            op.error(message, errors=[message], rc=1)
-            raise typer.Exit(code=1)
+            _command_error(op, f"Backup '{backup_id}' is not registered.", rc=2)
 
         backup_instance = str(entry.get("instance", "")).strip()
         if not backup_instance:
-            message = "Backup entry is missing the instance name."
-            console.print(f"[red]{message}[/red]")
-            op.error(message, errors=[message], rc=2)
-            raise typer.Exit(code=2)
+            _command_error(op, "Backup entry is missing the instance name.", rc=2)
 
         if instance and instance.strip() and instance.strip() != backup_instance:
             message = (
                 f"Backup '{backup_id}' belongs to instance '{backup_instance}',"
                 f" not '{instance}'."
             )
-            console.print(f"[red]{message}[/red]")
-            op.error(message, errors=[message], rc=2)
-            raise typer.Exit(code=2)
+            _command_error(op, message, rc=2)
 
         archive_path_value = entry.get("path")
         if not archive_path_value:
@@ -5505,9 +5450,7 @@ def instance_set_fqdn(
         try:
             new_domain = _validate_domain(fqdn)
         except ValueError as exc:
-            console.print(f"[red]{exc}[/red]")
-            op.error(str(exc), errors=[str(exc)], rc=1)
-            raise typer.Exit(code=1) from exc
+            _command_error(op, str(exc), rc=2)
 
         with runtime.locks.mutate_instances([name]) as bundle:
             op.set_lock_wait_ms(bundle.wait_ms)
@@ -5665,9 +5608,7 @@ def instance_set_port(
             message = (
                 f"Port {port} is below the configured base {runtime.config.ports.base}."
             )
-            console.print(f"[red]{message}[/red]")
-            op.error(message, errors=[message], rc=1)
-            raise typer.Exit(code=1)
+            _command_error(op, message, rc=2)
 
         with runtime.locks.mutate_instances([name]) as bundle:
             op.set_lock_wait_ms(bundle.wait_ms)
@@ -5692,9 +5633,7 @@ def instance_set_port(
                 message = (
                     f"Port {port} is already reserved by instance '{conflict['name']}'."
                 )
-                console.print(f"[red]{message}[/red]")
-                op.error(message, errors=[message], rc=1)
-                raise typer.Exit(code=1)
+                _command_error(op, message, rc=2)
 
             paths = _instance_paths_from_entry(runtime.config, name, entry)
             config_payload = _read_instance_config(paths)
@@ -5760,9 +5699,7 @@ def instance_set_port(
                     except PortsRegistryError:
                         pass
                     message = str(exc)
-                    console.print(f"[red]{message}[/red]")
-                    op.error(message, errors=[message], rc=1)
-                    raise typer.Exit(code=1) from None
+                    _command_error(op, message, rc=2)
 
                 server_section = config_payload.setdefault("server", {})
                 if not isinstance(server_section, dict):
@@ -5902,9 +5839,7 @@ def instance_set_version(
         normalized_version = version.strip()
         if not normalized_version:
             message = "Version must be a non-empty string."
-            console.print(f"[red]{message}[/red]")
-            op.error(message, errors=[message], rc=1)
-            raise typer.Exit(code=1)
+            _command_error(op, message, rc=2)
 
         with runtime.locks.mutate_instances([name]) as bundle:
             op.set_lock_wait_ms(bundle.wait_ms)
@@ -5923,10 +5858,7 @@ def instance_set_version(
             if normalized_version != "current":
                 version_entry = runtime.registry.get_version(normalized_version)
                 if version_entry is None:
-                    message = f"Version '{normalized_version}' is not registered."
-                    console.print(f"[red]{message}[/red]")
-                    op.error(message, errors=[message], rc=1)
-                    raise typer.Exit(code=1)
+                    _command_error(op, f"Version '{normalized_version}' is not registered.", rc=2)
 
             paths = _instance_paths_from_entry(runtime.config, name, entry)
             config_payload = _read_instance_config(paths)
@@ -6071,9 +6003,7 @@ def instance_rename(
         try:
             validated_new = _validate_instance_name(new_name)
         except ValueError as exc:
-            console.print(f"[red]{exc}[/red]")
-            op.error(str(exc), errors=[str(exc)], rc=1)
-            raise typer.Exit(code=1) from exc
+            _command_error(op, str(exc), rc=2)
 
         if validated_new == name:
             console.print("[yellow]Name unchanged; nothing to do.[/yellow]")
@@ -6084,10 +6014,7 @@ def instance_rename(
             op.set_lock_wait_ms(bundle.wait_ms)
             entry = _require_instance(runtime, name, op)
             if runtime.registry.get_instance(validated_new) is not None:
-                message = f"Instance '{validated_new}' already exists."
-                console.print(f"[red]{message}[/red]")
-                op.error(message, errors=[message], rc=1)
-                raise typer.Exit(code=1)
+                _command_error(op, f"Instance '{validated_new}' already exists.", rc=2)
 
             paths = _instance_paths_from_entry(runtime.config, name, entry)
             default_paths_old = _determine_instance_paths(runtime.config, name, None)
@@ -6102,9 +6029,7 @@ def instance_rename(
                 message = (
                     "Instance rename currently supports the default filesystem layout only."
                 )
-                console.print(f"[red]{message}[/red]")
-                op.error(message, errors=[message], rc=1)
-                raise typer.Exit(code=1)
+                _command_error(op, message, rc=2)
 
             config_payload = _read_instance_config(paths)
             port_value: object = entry.get("port")
@@ -6187,9 +6112,7 @@ def instance_rename(
                     op.add_step("ports.reserve", status="success", detail=str(port_int))
                 except PortsRegistryError as exc:
                     message = str(exc)
-                    console.print(f"[red]{message}[/red]")
-                    op.error(message, errors=[message], rc=1)
-                    raise typer.Exit(code=1) from None
+                    _command_error(op, message, rc=2)
 
                 moves: list[tuple[Path, Path]] = [
                     (paths.root, default_paths_new.root),

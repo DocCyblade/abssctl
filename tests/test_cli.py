@@ -527,7 +527,7 @@ def test_tls_install_permission_error(tmp_path: Path, monkeypatch: pytest.Monkey
         env=env,
     )
 
-    assert result.exit_code == 1
+    assert result.exit_code == 3
     assert "Failed to adjust ownership" in result.stdout
     registry = StateRegistry(state_dir / "registry")
     entry = registry.get_instance("alpha")
@@ -739,7 +739,7 @@ def test_backup_show_missing(tmp_path: Path) -> None:
     """`backup show` returns error for unknown ids."""
     env, _ = _prepare_environment(tmp_path)
     result = runner.invoke(app, ["backup", "show", "does-not-exist"], env=env)
-    assert result.exit_code == 1
+    assert result.exit_code == 2
 
 
 def _create_backup_entry(
@@ -1572,7 +1572,7 @@ def test_version_uninstall_blocks_current(tmp_path: Path) -> None:
     )
 
     result = runner.invoke(app, ["version", "uninstall", "25.9.0", "--no-backup"], env=env)
-    assert result.exit_code == 1
+    assert result.exit_code == 2
     assert version_dir.exists()
 
 
@@ -1595,7 +1595,7 @@ def test_version_uninstall_blocks_in_use(tmp_path: Path) -> None:
     )
 
     result = runner.invoke(app, ["version", "uninstall", "25.9.0", "--no-backup"], env=env)
-    assert result.exit_code == 1
+    assert result.exit_code == 2
     assert version_dir.exists()
 
 
@@ -1701,7 +1701,7 @@ def test_instance_show_missing(tmp_path: Path) -> None:
 
     result = runner.invoke(app, ["instance", "show", "alpha"], env=env)
 
-    assert result.exit_code == 1
+    assert result.exit_code == 2
     assert "not found" in result.stdout
 
 
@@ -1811,7 +1811,7 @@ def test_instance_create_rolls_back_on_systemd_failure(
 
     result = runner.invoke(app, ["instance", "create", "alpha"], env=env)
 
-    assert result.exit_code == 1
+    assert result.exit_code == 4
 
     instance_root = tmp_path / "instances" / "alpha"
     assert not instance_root.exists()
@@ -1939,6 +1939,23 @@ def test_instance_set_fqdn_updates_registry(tmp_path: Path) -> None:
     assert payload["server"]["public_url"] == "https://alpha.example.com"
 
 
+def test_instance_set_fqdn_rejects_invalid_domain(tmp_path: Path) -> None:
+    """Invalid domains trigger a validation exit code."""
+    env, _ = _prepare_environment(
+        tmp_path,
+        instances=[{"name": "alpha", "version": "current"}],
+    )
+
+    result = runner.invoke(
+        app,
+        ["instance", "set-fqdn", "alpha", "not_valid!", "--no-backup"],
+        env=env,
+    )
+
+    assert result.exit_code == 2
+    assert "Domain" in result.stdout
+
+
 def test_instance_set_port_updates_registry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1987,6 +2004,29 @@ def test_instance_set_port_updates_registry(
     reserved_ports = {item["port"] for item in ports_data.get("ports", [])}
     assert 6000 in reserved_ports
     assert 5000 not in reserved_ports
+
+
+def test_instance_set_port_conflict_returns_error(tmp_path: Path) -> None:
+    """Port conflicts exit with validation error code."""
+    env, state_dir = _prepare_environment(
+        tmp_path,
+        instances=[{"name": "alpha", "port": 5000, "version": "current"}],
+    )
+
+    registry = StateRegistry(state_dir / "registry")
+    registry.write_ports([
+        {"name": "alpha", "port": 5000},
+        {"name": "beta", "port": 6000},
+    ])
+
+    result = runner.invoke(
+        app,
+        ["instance", "set-port", "alpha", "6000", "--no-backup", "--yes"],
+        env=env,
+    )
+
+    assert result.exit_code == 2
+    assert "already reserved" in result.stdout
 
 
 def test_instance_set_version_updates_registry(
@@ -2260,7 +2300,7 @@ def test_instance_enable_systemd_failure_preserves_registry(
     monkeypatch.setattr(NginxProvider, "enable", _fail_nginx_enable)
 
     result = runner.invoke(app, ["instance", "enable", "alpha"], env=env)
-    assert result.exit_code == 1
+    assert result.exit_code == 4
 
     entry = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
     metadata = entry.get("metadata", {})
@@ -2365,7 +2405,7 @@ def test_instance_disable_systemd_failure_preserves_registry(
     monkeypatch.setattr(NginxProvider, "disable", _fail_nginx_disable)
 
     result = runner.invoke(app, ["instance", "disable", "alpha"], env=env)
-    assert result.exit_code == 1
+    assert result.exit_code == 4
 
     entry = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
     metadata = entry.get("metadata", {})
@@ -2455,7 +2495,7 @@ def test_instance_start_systemd_failure_preserves_status(
     monkeypatch.setattr(SystemdProvider, "start", _boom_systemd_start)
 
     result = runner.invoke(app, ["instance", "start", "alpha"], env=env)
-    assert result.exit_code == 1
+    assert result.exit_code == 4
 
     entry = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
     metadata = entry.get("metadata", {})
@@ -2545,7 +2585,7 @@ def test_instance_stop_systemd_failure_preserves_status(
     monkeypatch.setattr(SystemdProvider, "stop", _boom_systemd_stop)
 
     result = runner.invoke(app, ["instance", "stop", "alpha"], env=env)
-    assert result.exit_code == 1
+    assert result.exit_code == 4
 
     entry = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
     metadata = entry.get("metadata", {})
@@ -2668,7 +2708,7 @@ def test_instance_restart_systemd_failure_preserves_status(
     monkeypatch.setattr(SystemdProvider, "start", _boom_systemd_start)
 
     result = runner.invoke(app, ["instance", "restart", "alpha"], env=env)
-    assert result.exit_code == 1
+    assert result.exit_code == 4
     assert calls == ["stop"]
 
     entry = next(item for item in _registry_instances(state_dir) if item["name"] == "alpha")
