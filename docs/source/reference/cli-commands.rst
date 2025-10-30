@@ -9,6 +9,28 @@ captures every invocation, and commands that mutate state acquire the
 appropriate locks before touching the registry or calling out to system
 services.
 
+Common Behaviour
+================
+
+- ``--dry-run`` previews the actions a command would take (and records skipped
+  steps in the operations log) without mutating the filesystem, registry, or
+  provider state.
+- Safety prompts recognise ``--no-backup`` to bypass the pre-flight backup,
+  ``--backup-message`` to annotate the created archive, and ``--yes`` to
+  auto-confirm prompts in non-interactive workflows.
+- Exit codes follow ADR-013 across the CLI:
+
+  * ``0`` — success (including dry-run previews).
+  * ``2`` — validation or user input issues (unknown resources, malformed
+    arguments, conflicting ports, etc.).
+  * ``3`` — environment problems (missing files, insufficient permissions or
+    disk space).
+  * ``4`` — provider/system failures (systemd or nginx errors, TLS permission
+    fixes).
+
+Individual sections below highlight any additional flags or behaviours unique
+to a command group.
+
 Config Commands
 ===============
 

@@ -4,9 +4,6 @@
 #
 # - AI do not edit above this line! Keep this header!
 
-3. Ensure mutating commands honour `--dry-run`, `--yes`, backup prompts, and exit-code taxonomy (ADR-013/016/025/026).
-   6. Refresh documentation/CLI reference to clarify non-interactive flags and exit code guarantees.
-
 4. Deliver initial `doctor` command with environment/system probes (ADR-029).
    1. Define probe set (config sanity, port availability, systemd unit state, nginx validation, filesystem permissions) and output schema (JSON + human summary).
    2. Implement probe collection layer leveraging existing providers/registries, including error aggregation and severity classification.

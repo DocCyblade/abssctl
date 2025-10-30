@@ -109,6 +109,19 @@ npm integrity metadata (``shasum`` plus tarball digest) for each install, and
 ``abssctl version list --json`` exposes that block so offline operators can
 verify artifacts.
 
+CLI Conventions
+===============
+
+- ``--dry-run`` is available on every mutating command; it prints the planned
+  steps and records skipped actions in ``operations.jsonl`` without changing the
+  system.
+- Safety prompts share ``--no-backup`` (skip the recommendation),
+  ``--backup-message`` (annotate the generated archive), and ``--yes``
+  (auto-confirm prompts for non-interactive workflows).
+- Exit codes follow ADR-013 across the tool: ``0`` success, ``2`` validation or
+  user input issues, ``3`` environment errors (permissions, missing files,
+  insufficient disk), and ``4`` provider/system failures (systemd/nginx/TLS).
+
 Backups
 =======
 
