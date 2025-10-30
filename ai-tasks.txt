@@ -5,7 +5,6 @@
 # - AI do not edit above this line! Keep this header!
 
 4. Deliver initial `doctor` command with environment/system probes (ADR-029).
-   1. Define probe set (config sanity, port availability, systemd unit state, nginx validation, filesystem permissions) and output schema (JSON + human summary).
    2. Implement probe collection layer leveraging existing providers/registries, including error aggregation and severity classification.
    3. Build CLI surface (`doctor`, optional filters/verbosity) producing structured logs and exit status reflecting overall health.
    4. Create fake provider fixtures to simulate healthy/degraded states and write unit/CLI tests covering probe success/failure/dry-run.

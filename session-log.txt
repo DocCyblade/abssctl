@@ -190,6 +190,7 @@
 - Added `backup reconcile` reporting command with optional `--apply` status updates plus new README/CLI reference guidance; recorded the design refinements in the restore plan doc.
 - Introduced CLI helper utilities for mutating commands (standardised `_command_error`/dry-run handling), added `--dry-run` support for `version switch`/`version uninstall`, and expanded CLI tests to cover the new plan outputs.
 - Realigned mutating command exit codes with ADR-013 (validation=2, env=3, provider=4) using the new helpers and extended pytest coverage for failure/dry-run scenarios (instance set-fqdn/port, version uninstall/switch, instance lifecycle).
+- Authored the doctor command implementation plan (`docs/source/guides/doctor-plan.rst`) outlining probes, aggregation strategy, exit-code mapping, and testing approach ahead of implementation.
 - Session kickoff for Beta roadmap work; focus will shift to TLS tooling, backup restore, doctor probes, and consistency audits per `ai-tasks.txt`.
 
 ## Wrap up:

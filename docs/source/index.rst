@@ -40,6 +40,7 @@ support bundles, and restore workflows.
    guides/backup-restore-plan
    guides/backup-command-plan
    guides/mutating-command-test-strategy
+   guides/doctor-plan
 
 .. toctree::
    :maxdepth: 1
