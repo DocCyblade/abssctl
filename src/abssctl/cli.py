@@ -21,7 +21,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 
 import typer
 from packaging.version import InvalidVersion, Version
@@ -724,6 +724,30 @@ def _format_tls_status(severity: TLSValidationSeverity) -> str:
     if severity is TLSValidationSeverity.WARNING:
         return "[yellow]WARN[/yellow]"
     return "[red]ERROR[/red]"
+
+
+def _command_error(
+    op: OperationScope,
+    message: str,
+    *,
+    rc: int = 2,
+    errors: Sequence[str] | None = None,
+) -> NoReturn:
+    """Emit a structured error and terminate the command."""
+    console.print(f"[red]{message}[/red]")
+    op.error(message, errors=list(errors or [message]), rc=rc)
+    raise typer.Exit(code=rc)
+
+
+def _dry_run_complete(
+    op: OperationScope,
+    summary: str,
+    *,
+    context: Mapping[str, object] | None = None,
+) -> None:
+    """Standardise dry-run completion messaging."""
+    console.print(f"[yellow]Dry run[/yellow]: {summary}")
+    op.success("Dry run complete.", changed=0, context=dict(context or {}))
 
 
 def _render_tls_report(report: TLSValidationReport, *, json_output: bool) -> None:
@@ -1725,10 +1749,7 @@ def version_install(
 
             existing_entry = runtime.registry.get_version(version) if not dry_run else None
             if existing_entry and not dry_run:
-                message = f"Version '{version}' is already registered."
-                console.print(f"[red]{message}[/red]")
-                op.error(message, errors=[message], rc=1)
-                raise typer.Exit(code=1)
+                _command_error(op, f"Version '{version}' is already registered.", rc=1)
 
             impacted_instances = sorted(
                 set(_instances_using_version(runtime.registry, "current"))
@@ -1762,10 +1783,12 @@ def version_install(
                     dry_run=dry_run,
                 )
             except VersionInstallError as exc:
-                message = f"Failed to install version '{version}': {exc}"
-                console.print(f"[red]{message}[/red]")
-                op.error(message, errors=[str(exc)], rc=4)
-                raise typer.Exit(code=4) from exc
+                _command_error(
+                    op,
+                    f"Failed to install version '{version}': {exc}",
+                    rc=4,
+                    errors=[str(exc)],
+                )
 
             step_name = "installer.install" if not dry_run else "installer.dry-run"
             op.add_step(step_name, status="success", detail=str(install_result.path))
@@ -1813,6 +1836,11 @@ def version_switch(
         help="Restart policy for instances bound to the current version "
         "(none | rolling | all).",
     ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Preview the symlink update and restart plan without changing state.",
+    ),
     no_backup: bool = typer.Option(
         False,
         "--no-backup",
@@ -1838,7 +1866,7 @@ def version_switch(
 
     with runtime.logger.operation(
         "version switch",
-        args={"version": version, "restart": restart_mode},
+        args={"version": version, "restart": restart_mode, "dry_run": dry_run},
         target={"kind": "version", "version": version},
     ) as op:
         with runtime.locks.mutate_versions([version]) as bundle:
@@ -1848,6 +1876,24 @@ def version_switch(
                 | set(_instances_using_version(runtime.registry, version))
             )
             backup_ids: list[str] = []
+
+            if dry_run:
+                plan = {
+                    "version": version,
+                    "restart": restart_mode,
+                    "instances": impacted_instances,
+                    "actions": [
+                        "update-current-symlink",
+                        f"restart:{restart_mode}",
+                    ],
+                }
+                op.add_step("version.switch.plan", status="info", detail=str(plan))
+                _dry_run_complete(
+                    op,
+                    f"version '{version}' would become current (restart={restart_mode}).",
+                    context={"plan": plan},
+                )
+                return
 
             def _handle_switch_backup(scope: OperationScope) -> None:
                 nonlocal backup_ids
@@ -1879,6 +1925,11 @@ def version_switch(
 def version_uninstall(
     ctx: typer.Context,
     version: str = typer.Argument(..., help="Installed version to remove."),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Preview the files and registry updates without deleting anything.",
+    ),
     no_backup: bool = typer.Option(
         False,
         "--no-backup",
@@ -1899,7 +1950,7 @@ def version_uninstall(
     runtime = _get_runtime(ctx)
     with runtime.logger.operation(
         "version uninstall",
-        args={"version": version},
+        args={"version": version, "dry_run": dry_run},
         target={"kind": "version", "version": version},
     ) as op:
         with runtime.locks.mutate_versions([version]) as bundle:
@@ -1907,34 +1958,46 @@ def version_uninstall(
 
             entry = runtime.registry.get_version(version)
             if entry is None:
-                message = f"Version '{version}' is not registered."
-                console.print(f"[red]{message}[/red]")
-                op.error(message, errors=[message], rc=1)
-                raise typer.Exit(code=1)
+                _command_error(op, f"Version '{version}' is not registered.", rc=1)
 
             version_path = Path(entry.get("path", runtime.config.install_root / f"v{version}"))
 
             if _current_version_target(runtime.config.install_root) == version_path.resolve():
-                message = (
-                    f"Version '{version}' is the active 'current' target. "
-                    "Uninstalling the active version is not permitted."
+                _command_error(
+                    op,
+                    (
+                        f"Version '{version}' is the active 'current' target. "
+                        "Uninstalling the active version is not permitted."
+                    ),
+                    rc=1,
                 )
-                console.print(f"[red]{message}[/red]")
-                op.error(message, errors=[message], rc=1)
-                raise typer.Exit(code=1)
 
             consumers = _instances_using_version(runtime.registry, version)
             if consumers:
                 joined = ", ".join(sorted(consumers))
-                message = (
-                    f"Cannot uninstall version '{version}' while in use by instances: {joined}"
+                _command_error(
+                    op,
+                    f"Cannot uninstall version '{version}' while in use by instances: {joined}",
+                    rc=1,
                 )
-                console.print(f"[red]{message}[/red]")
-                op.error(message, errors=[message], rc=1)
-                raise typer.Exit(code=1)
 
             impacted_instances = sorted(consumers)
             backup_ids: list[str] = []
+
+            plan = {
+                "version": version,
+                "path": str(version_path),
+                "will_remove_path": version_path.exists(),
+            }
+
+            if dry_run:
+                op.add_step("version.uninstall.plan", status="info", detail=str(plan))
+                _dry_run_complete(
+                    op,
+                    f"version '{version}' would be removed (path: {version_path}).",
+                    context={"plan": plan},
+                )
+                return
 
             def _handle_uninstall_backup(scope: OperationScope) -> None:
                 nonlocal backup_ids

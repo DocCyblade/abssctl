@@ -43,15 +43,18 @@ Version Commands
    persist npm integrity details (``shasum`` and tarball digest) alongside the
    standard metadata so later audits can confirm the package contents.
 
-``abssctl version switch <X.Y.Z> [--restart {none,rolling,all}] [--no-backup] [--backup-message TEXT] [--yes]``
-   Updates the ``current`` symlink to the chosen version. Instances bound to the
-   active version are restarted according to the selected policy (``rolling`` by
-   default). Safety prompts mirror ``version install``.
+``abssctl version switch <X.Y.Z> [--restart {none,rolling,all}] [--dry-run] [--no-backup] [--backup-message TEXT] [--yes]``
+   Updates the ``current`` symlink to the chosen version. ``--dry-run`` reports
+   the planned symlink change and restart policy without touching the
+   filesystem, while successful runs restart affected instances according to
+   the selected policy (``rolling`` by default). Safety prompts mirror
+   ``version install``.
 
-``abssctl version uninstall <X.Y.Z> [--no-backup] [--backup-message TEXT] [--yes]``
-   Removes an installed version once no instances depend on it. Uninstalling
-   the active ``current`` version is blocked. Prompts for a pre-flight backup
-   unless ``--no-backup`` is supplied.
+``abssctl version uninstall <X.Y.Z> [--dry-run] [--no-backup] [--backup-message TEXT] [--yes]``
+   Removes an installed version once no instances depend on it. ``--dry-run``
+   previews the deletion plan without dropping files or registry entries.
+   Uninstalling the active ``current`` version is blocked. Prompts for a
+   pre-flight backup unless ``--no-backup`` is supplied.
 
 Ports Registry
 ==============

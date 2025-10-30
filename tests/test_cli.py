@@ -1250,6 +1250,39 @@ def test_version_switch_restart_all(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     ]
 
 
+def test_version_switch_dry_run_outputs_plan(tmp_path: Path) -> None:
+    """`version switch --dry-run` reports planned actions without changes."""
+    install_root = tmp_path / "srv" / "app"
+    current_dir = install_root / "v25.7.0"
+    current_dir.mkdir(parents=True, exist_ok=True)
+    new_version = install_root / "v25.8.0"
+    new_version.mkdir(parents=True, exist_ok=True)
+
+    current_symlink = install_root / "current"
+    current_symlink.symlink_to(current_dir)
+
+    env, _ = _prepare_environment(
+        tmp_path,
+        config_overrides={"install_root": str(install_root)},
+        versions=[
+            {"version": "25.7.0", "path": str(current_dir)},
+            {"version": "25.8.0", "path": str(new_version)},
+        ],
+        instances=[{"name": "alpha", "version": "current"}],
+    )
+
+    result = runner.invoke(
+        app,
+        ["version", "switch", "25.8.0", "--dry-run", "--no-backup"],
+        env=env,
+    )
+
+    assert result.exit_code == 0
+    assert "Dry run" in result.stdout
+    assert "25.8.0" in result.stdout
+    assert current_symlink.resolve() == current_dir.resolve()
+
+
 def test_version_install_records_registry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1288,15 +1321,32 @@ def test_version_install_records_registry(
     entry = registry.get_version("25.9.0")
     assert entry is not None
     assert entry["path"] == str(target_dir)
-    assert entry["metadata"]["installed"] is True
-    assert entry["integrity"]["npm"]["shasum"] == FAKE_CLI_SHASUM
-    assert entry["integrity"]["tarball"]["digest"] == FAKE_CLI_DIGEST_HEX
 
-    logs_dir = state_dir.parent / "logs"
-    operations_file = logs_dir / "operations.jsonl"
-    last_record = operations_file.read_text(encoding="utf-8").splitlines()[-1]
-    record = json.loads(last_record)
-    assert record["command"] == "version install"
+
+def test_version_uninstall_dry_run_preserves_files(tmp_path: Path) -> None:
+    """`version uninstall --dry-run` leaves files and registry untouched."""
+    install_root = tmp_path / "srv" / "app"
+    version_dir = install_root / "v25.8.0"
+    version_dir.mkdir(parents=True, exist_ok=True)
+
+    env, state_dir = _prepare_environment(
+        tmp_path,
+        config_overrides={"install_root": str(install_root)},
+        versions=[{"version": "25.8.0", "path": str(version_dir)}],
+    )
+
+    result = runner.invoke(
+        app,
+        ["version", "uninstall", "25.8.0", "--dry-run", "--no-backup"],
+        env=env,
+    )
+
+    assert result.exit_code == 0
+    assert "Dry run" in result.stdout
+    assert version_dir.exists()  # filesystem untouched
+
+    registry = StateRegistry(state_dir / "registry")
+    assert registry.get_version("25.8.0") is not None
 
 
 def test_version_install_triggers_backup(

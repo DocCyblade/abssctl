@@ -5,9 +5,6 @@
 # - AI do not edit above this line! Keep this header!
 
 3. Ensure mutating commands honour `--dry-run`, `--yes`, backup prompts, and exit-code taxonomy (ADR-013/016/025/026).
-   1. Audit all mutating CLI commands to catalogue current behaviour vs ADR expectations (dry-run semantics, prompt messaging, exit codes).
-   2. Introduce shared helpers/utilities to enforce consistent prompt handling, dry-run step recording, and error-to-exit-code mapping.
-   3. Update commands to use helpers, guaranteeing no filesystem/provider calls occur during dry-run and that backup prompts respect `--yes`/`--no-backup`.
    4. Validate exit codes align with ADR-013 across success, user abort, provider failure, and config errors; update operations log context accordingly.
    5. Expand test coverage with scenarios for each command’s dry-run, confirmation, and error paths; add regression tests for exit codes.
    6. Refresh documentation/CLI reference to clarify non-interactive flags and exit code guarantees.

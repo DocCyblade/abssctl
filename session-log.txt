@@ -188,6 +188,7 @@
 - Refreshed CLI reference docs to describe the new TLS workflows and nginx reload behaviour.
 - Implemented full `backup restore` workflow (checksum verification, tar extraction, atomic data swap, systemd/nginx rehydration, metadata updates) with comprehensive CLI coverage for success and dry-run paths.
 - Added `backup reconcile` reporting command with optional `--apply` status updates plus new README/CLI reference guidance; recorded the design refinements in the restore plan doc.
+- Introduced CLI helper utilities for mutating commands (standardised `_command_error`/dry-run handling), added `--dry-run` support for `version switch`/`version uninstall`, and expanded CLI tests to cover the new plan outputs.
 - Session kickoff for Beta roadmap work; focus will shift to TLS tooling, backup restore, doctor probes, and consistency audits per `ai-tasks.txt`.
 
 ## Wrap up:
