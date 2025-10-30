@@ -179,7 +179,7 @@
 
 -----------------------------------------
 
-# 2025-10-22 Beta1.0 Session (OPEN)
+# 2025-10-22 Beta1.0 Session (CLOSED)
 - Reviewed ADR-031 alongside current TLS/nginx context to map required config inputs for upcoming TLS tooling.
 - Extended TLS config schema with validation/perms knobs, refreshed requirements/docs, and added loader tests (`pytest tests/test_config_loader.py`).
 - Implemented TLS inspector/validator helpers plus `tls verify/install/use-system` CLI flows with registry updates and new coverage (`pytest tests/test_tls.py tests/test_cli.py`).
@@ -194,14 +194,14 @@
 - Session kickoff for Beta roadmap work; focus will shift to TLS tooling, backup restore, doctor probes, and consistency audits per `ai-tasks.txt`.
 
 ## Wrap up:
-- Session in progress.
+- Beta session delivered TLS tooling, full backup restore/reconcile workflows, mutating command helpers with ADR-aligned exit codes, and the doctor command implementation plan while keeping quick-tests/docs green. Ready to tackle doctor probe implementation next.
 
 -----------------------------------------
 
 ----------------------- Sessions logging above this line only ----------------------
 
 # Next Steps / TODO:
-- Carry Beta Phase items (TLS tooling, backup restore/reconcile, doctor command, dry-run/exit-code audit, expanded tests) forward via `ai-tasks.txt`.
+- Carry Beta Phase items (doctor command delivery, idempotency test expansion) forward via `ai-tasks.txt`.
 
 # Next Session Primer
-- Alpha 5 is complete and docs synced. Next up: Beta phase essentials—TLS subcommands, backup restore/reconcile, doctor command, consistent dry-run/exit-code semantics, and broader idempotency tests. See numbered breakdown in `ai-tasks.txt`; quick-tests/docs currently green.
+- Open new session "Beta1.0 Session2", give me the next three things on our todo list/roadmap/tasks

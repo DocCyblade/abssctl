@@ -43,16 +43,16 @@ Beta — Basic Functions
 
 - [x] Implement port allocation and collision detection backed by ``ports.yml``,
   following ADR-015 (base port 5000, sequential strategy, locks).
-- [ ] Implement TLS subcommands (``tls verify``, ``tls install``,
+- [x] Implement TLS subcommands (``tls verify``, ``tls install``,
   ``tls use-system``) including file validation, secure permissions, nginx
   reloads, and Let’s Encrypt detection (ADR-031).
-- [ ] Implement backup operations per §5.8 / ADR-012 / ADR-021 / ADR-022,
+- [x] Implement backup operations per §5.8 / ADR-012 / ADR-021 / ADR-022,
   including ``backup restore`` and ``backup reconcile``; ``backup create`` /
   ``list`` /
   ``show`` /
   ``verify`` /
   ``prune`` are in place with checksum handling and prompts.
-- [ ] Ensure all mutating commands honour ``--dry-run``, ``--yes``, backup
+- [x] Ensure all mutating commands honour ``--dry-run``, ``--yes``, backup
   prompt inventory (ADR-016/ADR-025/ADR-026), and emit consistent exit codes
   (ADR-013).
 - [ ] Deliver the initial ``doctor`` command with core probes (environment,
