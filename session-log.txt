@@ -198,7 +198,7 @@
 
 -----------------------------------------
 
-# 2025-10-30 Beta1.0 Session2 (OPEN)
+# 2025-10-30 Beta1.0 Session2 (CLOSED)
 - Session opened per primer; focusing on doctor command delivery per ai-tasks item 4.
 - Reviewed ADR-029 and requirements spec to confirm probe catalogue, severities, and execution constraints for 4.2 groundwork.
 - Implemented doctor probe data models (status/impact enums, result/report structures, aggregation helpers) plus probe execution options context.
@@ -211,7 +211,7 @@
 - Updated README and CLI reference to describe the doctor command, refreshed the doctor plan checklist, and ensured `make quick-tests` passes after all doc/code/test changes.
 
 ## Wrap up:
-- In progress.
+- Delivered the complete doctor probe infrastructure with polished CLI output, integration tests, and documentation updates; quick-tests remain green and we’re ready to shift to idempotency coverage work.
 
 -----------------------------------------
 
@@ -223,4 +223,4 @@
 - Item 5.3: add targeted tests ensuring repeated command execution remains idempotent (restore reruns, enable/disable loops, TLS install reruns).
 
 # Next Session Primer
-- Continue Beta1.0 Session2: begin ai-tasks section 5 by auditing idempotency coverage (task 5.1) and planning fixture improvements for 5.2–5.3.
+- Start a new session focused on ai-tasks section 5: audit idempotency coverage (task 5.1), outline fixture enhancements (5.2), and queue concrete idempotency tests (5.3).
