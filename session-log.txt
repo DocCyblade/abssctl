@@ -205,9 +205,10 @@
 - Added concurrency-aware probe execution harness with runtime-to-probe context adapter and defensive failure handling.
 - Authored unit tests covering aggregation, ordering, and error capture for the doctor engine; `.venv/bin/python -m pytest tests/test_doctor_engine.py` passes.
 - Ran `make quick-tests` to keep lint/mypy/pytest coverage green after the doctor infrastructure landed.
-- Replaced the CLI placeholder with the doctor command harness (filters, JSON output, timeout/retry tuning, exit-code mapping) wired to the new engine and structured logging.
-- Added doctor CLI integration tests with fake probes plus warning/failure messaging, and refreshed docs (CLI reference, doctor plan, README) to reflect current behaviour.
-- Re-ran `make quick-tests` (ruff/mypy/pytest) to confirm the CLI/docs/test additions are green.
+- Implemented the full doctor probe catalogue (env/config/state/fs/ports/systemd/nginx/tls/app/disk) with graceful fallbacks for missing binaries and rich metadata outputs.
+- Replaced the doctor CLI placeholder with the real command surface (filters, JSON, concurrency tuning, exit-code mapping) and wired structured logging with soft-wrapped JSON output.
+- Added doctor CLI integration tests using fake provider fixtures plus disk-usage patching to cover healthy, environment-failure, validation-failure, provider-failure, filter, and fix-flag scenarios.
+- Updated README and CLI reference to describe the doctor command, refreshed the doctor plan checklist, and ensured `make quick-tests` passes after all doc/code/test changes.
 
 ## Wrap up:
 - In progress.
@@ -217,9 +218,9 @@
 ----------------------- Sessions logging above this line only ----------------------
 
 # Next Steps / TODO:
-- Item 4.6: implement the doctor probe catalogue per ADR-029 (env/config/state/fs/ports/systemd/nginx/tls/app/disk).
-- Item 4.7: extend fixtures/tests to exercise real probe success, warning, and failure paths.
-- Item 4.8: refresh docs/roadmap with delivered probe coverage and remediation guidance once probes ship.
+- Item 5.1: inventory coverage gaps for TLS, backup restore/reconcile, doctor, and lifecycle commands (idempotency focus).
+- Item 5.2: extend pytest fixtures for broader idempotency and integration scenarios.
+- Item 5.3: add targeted tests ensuring repeated command execution remains idempotent (restore reruns, enable/disable loops, TLS install reruns).
 
 # Next Session Primer
-- Continue Beta1.0 Session2: start ai-tasks item 4.6 (implement doctor probe catalogue) and line up fixtures/tests/docs for 4.7–4.8.
+- Continue Beta1.0 Session2: begin ai-tasks section 5 by auditing idempotency coverage (task 5.1) and planning fixture improvements for 5.2–5.3.

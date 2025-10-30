@@ -159,6 +159,7 @@ def _prepare_environment(
     config_overrides: dict[str, object] | None = None,
     versions: list[object] | None = None,
     instances: list[object] | None = None,
+    ports: list[object] | None = None,
     remote_versions: list[str] | None = None,
 ) -> tuple[dict[str, str], Path]:
     state_dir = tmp_path / "state"
@@ -167,9 +168,17 @@ def _prepare_environment(
     templates_dir = tmp_path / "templates"
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
-    nginx_stub = bin_dir / "nginx"
-    nginx_stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    nginx_stub.chmod(0o755)
+
+    def _write_stub(name: str, *, content: str = "#!/bin/sh\nexit 0\n") -> Path:
+        path = bin_dir / name
+        path.write_text(content, encoding="utf-8")
+        path.chmod(0o755)
+        return path
+
+    _write_stub("nginx")
+    _write_stub("node", content="#!/bin/sh\necho v18.0.0\nexit 0\n")
+    _write_stub("npm", content="#!/bin/sh\necho 10.0.0\nexit 0\n")
+    # zstd intentionally omitted so doctor can warn when unavailable by default.
     owner = pwd.getpwuid(os.getuid()).pw_name
     group = grp.getgrgid(os.getgid()).gr_name
     tls_root = tmp_path / "tls"
@@ -177,6 +186,7 @@ def _prepare_environment(
     system_cert, system_key = _create_tls_fixture(tls_root, name="system-cert")
     config = {
         "state_dir": str(state_dir),
+        "registry_dir": str(state_dir / "registry"),
         "logs_dir": str(logs_dir),
         "runtime_dir": str(runtime_dir),
         "templates_dir": str(templates_dir),
@@ -220,12 +230,25 @@ def _prepare_environment(
     config_file.write_text(yaml.safe_dump(config), encoding="utf-8")
 
     registry = StateRegistry(state_dir / "registry")
+    registry.ensure_root()
 
     if versions is not None:
         registry.write_versions(versions)
 
     if instances is not None:
         registry.write_instances(instances)
+    if ports is not None:
+        registry.write_ports(ports)
+
+    (tmp_path / "instances").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "backups").mkdir(parents=True, exist_ok=True)
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    (runtime_dir / "systemd").mkdir(parents=True, exist_ok=True)
+    (runtime_dir / "nginx" / "sites-available").mkdir(parents=True, exist_ok=True)
+    (runtime_dir / "nginx" / "sites-enabled").mkdir(parents=True, exist_ok=True)
+    templates_dir.mkdir(parents=True, exist_ok=True)
+    state_dir.mkdir(parents=True, exist_ok=True)
 
     env = {
         "ABSSCTL_CONFIG_FILE": str(config_file),

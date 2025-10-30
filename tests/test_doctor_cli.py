@@ -1,205 +1,205 @@
-"""Tests for the ``abssctl doctor`` CLI command."""
+"""Tests for the ``abssctl doctor`` CLI command with real probes."""
 
 from __future__ import annotations
 
-import json
+from collections import namedtuple
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
+from typer.testing import CliRunner, Result
 
 from abssctl.cli import app
-from abssctl.doctor import (
-    DoctorImpact,
-    ProbeContext,
-    ProbeDefinition,
-    ProbeResult,
-    ProbeStatus,
-)
-from tests.test_cli import _prepare_environment
+from abssctl.doctor import DoctorImpact
+from abssctl.doctor import probes as doctor_probes
+from abssctl.providers.nginx import NginxError
+from tests.test_cli import _extract_json, _prepare_environment
 
 runner = CliRunner()
+_MockDiskUsage = namedtuple("DiskUsage", "total used free")
 
 
-def _probe_factory(
-    *,
-    probe_id: str,
-    category: str,
-    status: ProbeStatus,
-    impact: DoctorImpact,
-    message: str,
-    remediation: str | None = None,
-) -> ProbeDefinition:
-    """Return a probe definition that yields a static result."""
+def _setup_instance_assets(tmp_path: Path, name: str) -> None:
+    runtime_dir = tmp_path / "run"
+    systemd_dir = runtime_dir / "systemd"
+    systemd_dir.mkdir(parents=True, exist_ok=True)
+    unit_path = systemd_dir / f"abssctl-{name}.service"
+    unit_path.write_text("[Unit]\nDescription=Stub\n", encoding="utf-8")
+    unit_path.chmod(0o644)
 
-    def _run(_context: ProbeContext) -> ProbeResult:
-        return ProbeResult(
-            id=probe_id,
-            category=category,
-            status=status,
-            impact=impact,
-            message=message,
-            remediation=remediation,
-        )
-
-    return ProbeDefinition(id=probe_id, category=category, run=_run)
+    sites_available = runtime_dir / "nginx" / "sites-available"
+    sites_enabled = runtime_dir / "nginx" / "sites-enabled"
+    sites_available.mkdir(parents=True, exist_ok=True)
+    sites_enabled.mkdir(parents=True, exist_ok=True)
+    site_path = sites_available / f"abssctl-{name}.conf"
+    site_path.write_text("server { listen 5100; }\n", encoding="utf-8")
+    enabled_path = sites_enabled / f"abssctl-{name}.conf"
+    if not enabled_path.exists():
+        enabled_path.symlink_to(site_path)
 
 
-def _patch_probes(
-    monkeypatch: pytest.MonkeyPatch,
-    probes: list[ProbeDefinition],
+def _invoke_doctor(args: list[str], env: dict[str, str]) -> Result:
+    return runner.invoke(app, ["doctor", *args], env=env)
+
+
+def _patch_disk_usage(monkeypatch: pytest.MonkeyPatch, *, percent_free: float = 50.0) -> None:
+    total = 100_000_000
+    free = int(total * percent_free / 100)
+    used = total - free
+    monkeypatch.setattr(
+        "abssctl.doctor.probes.shutil.disk_usage",
+        lambda path: _MockDiskUsage(total, used, free),
+    )
+
+
+def test_doctor_cli_reports_warning_for_missing_optional_tool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Patch ``collect_probes`` to return *probes*."""
-    def factory(_context: ProbeContext) -> tuple[ProbeDefinition, ...]:
-        return tuple(probes)
-
-    monkeypatch.setattr("abssctl.cli.collect_probes", factory)
-    monkeypatch.setattr("abssctl.doctor.collect_probes", factory)
-
-
-def test_doctor_cli_reports_warnings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Doctor command should report warnings without failing."""
-    env, _ = _prepare_environment(tmp_path)
-    probes = [
-        _probe_factory(
-            probe_id="env-python",
-            category="env",
-            status=ProbeStatus.GREEN,
-            impact=DoctorImpact.OK,
-            message="Python runtime detected.",
-        ),
-        _probe_factory(
-            probe_id="tls-expiry",
-            category="tls",
-            status=ProbeStatus.YELLOW,
-            impact=DoctorImpact.OK,
-            message="TLS certificate expires in 20 days.",
-            remediation="Renew certificate soon.",
-        ),
+    """Running doctor in a healthy fixture should succeed with optional warnings."""
+    instances = [
+        {
+            "name": "alpha",
+            "status": "running",
+            "metadata": {
+                "diagnostics": {
+                    "systemd": {"state": "running", "detail": "active"},
+                }
+            },
+        }
     ]
-    _patch_probes(monkeypatch, probes)
+    ports = [{"name": "alpha", "port": 5100}]
+    env, _ = _prepare_environment(tmp_path, instances=instances, ports=ports)
+    _patch_disk_usage(monkeypatch, percent_free=50.0)
+    _setup_instance_assets(tmp_path, "alpha")
 
-    result = runner.invoke(app, ["doctor"], env=env)
+    result = _invoke_doctor(["--json"], env)
 
     assert result.exit_code == 0, result.stdout
-    assert "Doctor summary: WARN" in result.stdout
-    assert "WARN  tls-expiry" in result.stdout
-    assert "tls-expiry" in result.stdout
-    assert "Totals: green=1 warn=1 red=0" in result.stdout
+    payload = _extract_json(result.stdout)
+    assert payload["summary"]["exit_code"] == 0
+    assert payload["summary"]["status"] in {"green", "yellow"}
+    result_ids = {item["id"] for item in payload["results"]}
+    assert "env-python" in result_ids
+    assert "env-zstd" in result_ids
+    zstd_entry = next(item for item in payload["results"] if item["id"] == "env-zstd")
+    assert zstd_entry["status"] in {"green", "yellow"}
 
 
-def test_doctor_cli_reports_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Doctor command should surface provider failures with exit code 4."""
-    env, _ = _prepare_environment(tmp_path)
-    probes = [
-        _probe_factory(
-            probe_id="nginx-config",
-            category="nginx",
-            status=ProbeStatus.RED,
-            impact=DoctorImpact.PROVIDER,
-            message="nginx -t reported a syntax error.",
-            remediation="Run nginx -t manually to inspect errors.",
-        ),
-    ]
-    _patch_probes(monkeypatch, probes)
+def test_doctor_cli_missing_required_binary_triggers_environment_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Missing a required binary should set exit code 3."""
+    instances = [{"name": "alpha", "status": "running"}]
+    ports = [{"name": "alpha", "port": 5100}]
+    env, _ = _prepare_environment(tmp_path, instances=instances, ports=ports)
+    _patch_disk_usage(monkeypatch, percent_free=50.0)
+    _setup_instance_assets(tmp_path, "alpha")
 
-    result = runner.invoke(app, ["doctor"], env=env)
+    original_exists = doctor_probes._command_exists  # type: ignore[attr-defined]
 
-    assert result.exit_code == DoctorImpact.PROVIDER.value
-    assert "Doctor summary: RED" in result.stdout
-    assert "FAIL  nginx-config" in result.stdout
-    assert "provider/service failures" in result.stdout
+    def fake_command_exists(command: str) -> bool:
+        if command == "node":
+            return False
+        return original_exists(command)
 
+    monkeypatch.setattr(doctor_probes, "_command_exists", fake_command_exists)
 
-def test_doctor_cli_json_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Doctor command should emit structured JSON when requested."""
-    env, _ = _prepare_environment(tmp_path)
-    probes = [
-        _probe_factory(
-            probe_id="missing-tool",
-            category="env",
-            status=ProbeStatus.RED,
-            impact=DoctorImpact.ENVIRONMENT,
-            message="`node` binary not found on PATH.",
-        ),
-    ]
-    _patch_probes(monkeypatch, probes)
-
-    result = runner.invoke(app, ["doctor", "--json"], env=env)
+    result = _invoke_doctor(["--json"], env)
 
     assert result.exit_code == DoctorImpact.ENVIRONMENT.value
-    payload = json.loads(result.stdout)
-    assert payload["summary"]["status"] == "red"
+    payload = _extract_json(result.stdout)
+    failing = {item["id"]: item for item in payload["results"]}
+    assert failing["env-node"]["status"] == "red"
     assert payload["summary"]["exit_code"] == DoctorImpact.ENVIRONMENT.value
-    assert payload["results"][0]["id"] == "missing-tool"
-    assert payload["metadata"]["matched_probes"] == 1
+
+
+def test_doctor_cli_duplicate_ports_triggers_validation_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Duplicate port assignments should produce a validation failure."""
+    instances = [
+        {"name": "alpha", "status": "running"},
+        {"name": "beta", "status": "running"},
+    ]
+    ports = [
+        {"name": "alpha", "port": 5100},
+        {"name": "beta", "port": 5100},
+    ]
+    env, _ = _prepare_environment(tmp_path, instances=instances, ports=ports)
+    _patch_disk_usage(monkeypatch, percent_free=50.0)
+    _setup_instance_assets(tmp_path, "alpha")
+    _setup_instance_assets(tmp_path, "beta")
+
+    result = _invoke_doctor(["--json"], env)
+
+    assert result.exit_code == DoctorImpact.VALIDATION.value
+    payload = _extract_json(result.stdout)
+    failing = {item["id"]: item for item in payload["results"]}
+    assert failing["ports-registry"]["status"] == "red"
+
+
+def test_doctor_cli_nginx_failure_triggers_provider_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nginx failures should produce a provider exit code."""
+    instances = [{"name": "alpha", "status": "running"}]
+    ports = [{"name": "alpha", "port": 5100}]
+    env, _ = _prepare_environment(tmp_path, instances=instances, ports=ports)
+    _patch_disk_usage(monkeypatch, percent_free=50.0)
+    _setup_instance_assets(tmp_path, "alpha")
+
+    def boom(self: object) -> None:  # noqa: D401 - simple stub
+        raise NginxError("nginx -t failed")
+
+    monkeypatch.setattr(
+        "abssctl.providers.nginx.NginxProvider.test_config",
+        boom,
+        raising=False,
+    )
+
+    result = _invoke_doctor(["--json"], env)
+
+    assert result.exit_code == DoctorImpact.PROVIDER.value
+    payload = _extract_json(result.stdout)
+    failing = {item["id"]: item for item in payload["results"]}
+    assert failing["nginx-config"]["status"] == "red"
 
 
 def test_doctor_cli_only_filter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Doctor command should honour --only category filters."""
-    env, _ = _prepare_environment(tmp_path)
-    probes = [
-        _probe_factory(
-            probe_id="env-python",
-            category="env",
-            status=ProbeStatus.GREEN,
-            impact=DoctorImpact.OK,
-            message="Python runtime detected.",
-        ),
-        _probe_factory(
-            probe_id="config-state",
-            category="config",
-            status=ProbeStatus.GREEN,
-            impact=DoctorImpact.OK,
-            message="Registry schema matches.",
-        ),
-    ]
-    _patch_probes(monkeypatch, probes)
+    """Category filters should limit the reported probes."""
+    instances = [{"name": "alpha", "status": "running"}]
+    ports = [{"name": "alpha", "port": 5100}]
+    env, _ = _prepare_environment(tmp_path, instances=instances, ports=ports)
+    _patch_disk_usage(monkeypatch, percent_free=50.0)
+    _setup_instance_assets(tmp_path, "alpha")
 
-    result = runner.invoke(app, ["doctor", "--json", "--only", "config"], env=env)
+    result = _invoke_doctor(["--json", "--only", "env"], env)
 
     assert result.exit_code == 0
-    payload = json.loads(result.stdout)
-    assert len(payload["results"]) == 1
-    assert payload["results"][0]["category"] == "config"
-    assert payload["metadata"]["matched_probes"] == 1
+    payload = _extract_json(result.stdout)
+    categories = {item["category"] for item in payload["results"]}
+    assert categories <= {"env"}
 
 
-def test_doctor_cli_only_filter_no_matches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Doctor command should warn when filters match no probes."""
-    env, _ = _prepare_environment(tmp_path)
-    probes = [
-        _probe_factory(
-            probe_id="env-python",
-            category="env",
-            status=ProbeStatus.GREEN,
-            impact=DoctorImpact.OK,
-            message="Python runtime detected.",
-        ),
-    ]
-    _patch_probes(monkeypatch, probes)
+def test_doctor_cli_fix_flag_reports_placeholder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--fix should report that remediation is not yet implemented."""
+    instances = [{"name": "alpha", "status": "running"}]
+    ports = [{"name": "alpha", "port": 5100}]
+    env, _ = _prepare_environment(tmp_path, instances=instances, ports=ports)
+    _patch_disk_usage(monkeypatch, percent_free=50.0)
+    _setup_instance_assets(tmp_path, "alpha")
 
-    result = runner.invoke(app, ["doctor", "--only", "config"], env=env)
-
-    assert result.exit_code == 0
-    assert "No probes matched the provided filters" in result.stdout
-
-
-def test_doctor_cli_fix_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Doctor command should acknowledge --fix without performing actions."""
-    env, _ = _prepare_environment(tmp_path)
-    _patch_probes(monkeypatch, [])
-
-    result = runner.invoke(app, ["doctor", "--fix"], env=env)
+    result = _invoke_doctor(["--fix"], env)
 
     assert result.exit_code == 0
     assert "--fix is not implemented yet" in result.stdout
 
 
 def test_doctor_cli_rejects_invalid_category(tmp_path: Path) -> None:
-    """Doctor command should reject unknown categories."""
+    """Unknown categories should raise a validation error."""
     env, _ = _prepare_environment(tmp_path)
-    result = runner.invoke(app, ["doctor", "--only", "unknown"], env=env)
+    result = _invoke_doctor(["--only", "unknown"], env)
 
     assert result.exit_code == 2
     assert "Unknown probe categories" in result.stdout

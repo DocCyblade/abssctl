@@ -1391,7 +1391,11 @@ def doctor(
             )
 
         if json_output:
-            console.print(json.dumps(report_payload, indent=2))
+            console.print(
+                json.dumps(report_payload, indent=2),
+                soft_wrap=True,
+                overflow="ignore",
+            )
         else:
             _render_doctor_report(report)
             if (

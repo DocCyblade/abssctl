@@ -4,11 +4,6 @@
 #
 # - AI do not edit above this line! Keep this header!
 
-4. Deliver initial `doctor` command with environment/system probes (ADR-029).
-   6. Implement the probe catalogue per ADR-029 (env/config/state/fs/ports/systemd/nginx/tls/app/disk) and integrate with providers/registries.
-   7. Extend fake provider/config fixtures to exercise real probe success/failure paths in unit and CLI tests.
-   8. Refresh documentation/roadmap with the delivered probe coverage and remediation guidance.
-
 5. Flesh out automated tests for Beta features and idempotency guarantees.
    1. Inventory coverage gaps across TLS, backup restore/reconcile, doctor, and lifecycle commands; prioritise scenarios lacking idempotency/regression tests.
    2. Extend pytest fixtures (fake binaries, temp dirs, helper contexts) to support new integration scenarios efficiently.
