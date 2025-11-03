@@ -228,6 +228,13 @@
 - Ran make quick-tests after extending the bootstrap test suite.
 - Integrated discovery-based state reconciliation probe into doctor and refreshed tests (including new mismatch coverage).
 - Updated requirements spec, CLI reference, and roadmap to capture the system init bootstrap and doctor reconciliation features.
+- Cataloged 5.1.1 snapshot helper requirements for idempotency coverage and documented artefact capture needs in `ai-tasks.txt`.
+- Broke down TLS idempotency tasks (5.1.2.1–5.1.2.4) covering reinstall reruns, system/custom toggles, TLS snapshot helpers, and dry-run verification in `ai-tasks.txt`.
+- Detailed backup restore/reconcile idempotency follow-ups (5.1.3.1–5.1.3.4) for repeat restores, dry-run safety, reconcile replays, and backups snapshot helpers in `ai-tasks.txt`.
+- Scoped doctor rerun idempotency (5.1.4.1–5.1.4.3) including repeated doctor runs, rebuild-state flow, and JSON snapshot comparisons in `ai-tasks.txt`.
+- Outlined lifecycle command rerun coverage (5.1.5.1–5.1.5.4) for repeated enable/disable/start/stop/restart/delete flows and snapshot reuse in `ai-tasks.txt`.
+- Broke down fixture enhancement plan (5.2.1–5.2.5) covering state snapshots, invoke wrappers, richer `_prepare_environment` seeds, helper factories, and documentation touchpoints in `ai-tasks.txt`.
+- Listed targeted implementation tasks (5.3.1–5.3.5) to translate idempotency planning into concrete TLS/backup/doctor/lifecycle tests with quick-tests integration in `ai-tasks.txt`.
 
 ## Wrap up:
 

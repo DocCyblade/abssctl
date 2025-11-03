@@ -6,12 +6,37 @@
 
 5. Flesh out automated tests for Beta features and idempotency guarantees.
    1. Inventory coverage gaps across TLS, backup restore/reconcile, doctor, and lifecycle commands; prioritise scenarios lacking idempotency/regression tests.
-      - 5.1.1 – Capture current CLI artefact snapshots (registry, backups, nginx, operations logs) before/after runs so idempotency assertions can share helpers.
+      - 5.1.1 (done) – Capture current CLI artefact snapshots (registry, backups, nginx, operations logs) before/after runs so idempotency assertions can share helpers.
       - 5.1.2 – TLS idempotency coverage (reinstall, system↔custom toggles, log stability) to ensure repeated `tls` commands remain safe.
+         - 5.1.2.1 – Add a CLI test that runs `tls install --yes` twice on the same instance and asserts registry, copied cert/key, nginx site render, and operations log entries remain unchanged on the second run.
+         - 5.1.2.2 – Add a CLI test that flips from custom (`tls install`) to system (`tls use-system`) and back to custom, confirming state transitions and rendered paths stay consistent with each rerun.
+         - 5.1.2.3 – Extend snapshot helpers to capture TLS artefacts (copied cert/key hashes, nginx site checksum) so assertions can compare before/after states for the above scenarios.
+         - 5.1.2.4 – Cover dry-run idempotency by invoking `tls install --dry-run` followed by a real install to ensure dry-run leaves no residue and install still succeeds with correct metadata.
       - 5.1.3 – Backup restore/reconcile repeatability (default restore with pre-backup, consecutive restores, multiple reconcile applies) to guard metadata and filesystem state.
+         - 5.1.3.1 – Write a CLI test exercising `backup restore` twice with the same archive (first with default pre-backup enabled, second with `--no-pre-backup`) and assert registry metadata, `.pre-restore` rotations, and backup index fields remain consistent.
+         - 5.1.3.2 – Add coverage for `backup restore --dry-run` immediately followed by a real restore to confirm dry-run leaves no temporary directories or metadata updates.
+         - 5.1.3.3 – Add a scenario running `backup reconcile --apply` twice to ensure repeated reconciliation does not churn statuses or timestamps when nothing changes.
+         - 5.1.3.4 – Extend snapshot helpers to include backups root listings and `backups.json` metadata so restores/reconciles can diff before/after state.
       - 5.1.4 – Doctor rerun resiliency, including `system init --rebuild-state` followed by doctor, to verify probes clear reconciled mismatches and stay side-effect free.
+         - 5.1.4.1 – Add a CLI test that runs `doctor --json` twice on a stable fixture, asserting registry snapshots, diagnostics metadata, and operations logs stay unchanged on the second invocation.
+         - 5.1.4.2 – Script a flow that surfaces a state mismatch, executes `system init --rebuild-state --yes --dry-run` and then `--yes`, and finally reruns doctor to confirm the reconciliation probe returns green.
+         - 5.1.4.3 – Capture doctor output JSON snapshots to diff probe statuses and ensure no unexpected warnings/errors surface on reruns.
       - 5.1.5 – Instance lifecycle reruns (enable/disable/start/stop/restart/delete) to make sure registry/provider operations short-circuit cleanly on subsequent executions.
+         - 5.1.5.1 – Extend lifecycle CLI tests to run `instance enable` twice (and `disable` twice) validating registry metadata, diagnostics, and operations logs remain unchanged on the second invocation.
+         - 5.1.5.2 – Add repeat coverage for `instance start`/`stop`/`restart` to ensure systemd provider mocks are not called redundantly and timestamps stay stable.
+         - 5.1.5.3 – Cover double `instance delete` (second run treated as no-op) and recreate via `instance create` to prove cleanup left the system consistent.
+         - 5.1.5.4 – Reuse snapshot helpers to diff registry YAML, ports reservations, and rendered provider assets after each rerun scenario.
    2. Extend pytest fixtures (fake binaries, temp dirs, helper contexts) to support new integration scenarios efficiently.
+      - 5.2.1 – Introduce a reusable `StateSnapshot` helper/fixture that captures registry YAML, backups.json, nginx site contents, TLS assets, and operations log records for before/after comparisons.
+      - 5.2.2 – Provide a fixture wrapping `runner.invoke` that automatically records operations log diffs and provider call counts to simplify idempotency assertions.
+      - 5.2.3 – Extend `_prepare_environment` (tests/test_cli.py:74) to accept richer seed data (existing TLS sources, backup metadata, doctor diagnostics) needed by the new idempotency scenarios.
+      - 5.2.4 – Add lightweight factories/fixtures for generating cert/key pairs, backup archives, and systemd/nginx assets so tests need less manual setup.
+      - 5.2.5 – Document fixture usage patterns in tests to keep repeated command scenarios concise and maintainable.
    3. Add targeted tests ensuring repeated command execution is idempotent (double restore, repeated enable, TLS install reruns, etc.).
+      - 5.3.1 – Implement TLS idempotency tests per 5.1.2 (double install, system/custom toggles, dry-run + install) using the new snapshot/fixture helpers.
+      - 5.3.2 – Implement backup restore/reconcile tests per 5.1.3 (repeat restores, dry-run+apply, reconcile replay) validating filesystem/registry stability.
+      - 5.3.3 – Implement doctor rerun tests per 5.1.4 ensuring probe outputs and exit codes remain stable post-rebuild.
+      - 5.3.4 – Implement lifecycle rerun tests per 5.1.5 covering repeated enable/disable/start/stop/restart/delete and cleanup flows.
+      - 5.3.5 – Wire new tests into `make quick-tests`, applying markers where needed to keep quick runs manageable.
    4. Integrate slow/extended suites under markers so CI can run comprehensive checks while supporting quick local loops.
    5. Track coverage metrics (pytest --cov, mutation tests if feasible) and document remaining risks for future milestones.
