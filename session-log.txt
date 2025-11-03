@@ -220,6 +220,8 @@
 - Awaiting Ken's questions before outlining the coverage gap inventory plan.
 - ADR 0035 accepted; next step is updating requirements/docs and scheduling implementation.
 - Verified ADR statuses and marked ADR 0034 as accepted to keep the set consistent.
+- Implemented bootstrap helper modules (service accounts, filesystem, discovery) with initial unit tests.
+- Ran .venv/bin/python -m pytest tests/test_bootstrap_service_accounts.py tests/test_bootstrap_filesystem.py tests/test_bootstrap_discovery.py.
 
 ## Wrap up:
 
