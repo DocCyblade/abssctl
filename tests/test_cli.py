@@ -342,6 +342,59 @@ def _capture_tls_snapshot(
     }
 
 
+def _capture_backup_snapshot(
+    state_dir: Path,
+    tmp_path: Path,
+    instance: str,
+    *,
+    backup_id: str | None = None,
+) -> dict[str, object]:
+    """Capture backup-related artefacts for comparison."""
+    registry = StateRegistry(state_dir / "registry")
+    entry = registry.get_instance(instance) or {}
+    metadata = copy.deepcopy(entry.get("metadata", {}))
+
+    backups_root = tmp_path / "backups"
+    backups_registry = BackupsRegistry(backups_root, backups_root / "backups.json")
+    backups_registry.ensure_root()
+    backups_data = backups_registry.read()
+    backups_list = copy.deepcopy(backups_data.get("backups", []))
+
+    selected_entry: dict[str, object] | None = None
+    if backup_id:
+        selected_entry = backups_registry.find_by_id(backup_id)
+        if selected_entry is not None:
+            selected_entry = copy.deepcopy(selected_entry)
+
+    archive_dir = backups_root / instance
+    archives = sorted(
+        str(path.relative_to(backups_root))
+        for path in archive_dir.rglob("*")
+        if path.is_file()
+    )
+
+    pre_restore_root = tmp_path / "instances"
+    pre_restore_dirs = sorted(
+        str(path.relative_to(pre_restore_root))
+        for path in pre_restore_root.glob(f"{instance}.pre-restore-*")
+        if path.is_dir()
+    )
+
+    operations_path = state_dir.parent / "logs" / "operations.jsonl"
+    operations_lines = operations_path.read_text(encoding="utf-8").splitlines()
+    last_operation = json.loads(operations_lines[-1]) if operations_lines else None
+
+    return {
+        "metadata": metadata,
+        "backups": backups_list,
+        "selected_entry": selected_entry,
+        "archives": archives,
+        "pre_restore_dirs": pre_restore_dirs,
+        "operations_len": len(operations_lines),
+        "last_operation": last_operation,
+    }
+
+
 def test_version_option_outputs_package_version(tmp_path: Path) -> None:
     """CLI ``--version`` flag emits the package version."""
     env, _ = _prepare_environment(tmp_path)
@@ -1229,6 +1282,139 @@ def test_backup_restore_restores_data(
     assert updated.get("metadata", {}).get("last_restore_destination")
 
 
+def test_backup_restore_repeat_runs_consistent_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Running restore twice keeps metadata stable and avoids residual artefacts."""
+    env, state_dir = _prepare_environment(
+        tmp_path,
+        instances=[{"name": "alpha", "version": "current", "port": 5000, "status": "running"}],
+    )
+    data_dir = tmp_path / "instances" / "alpha"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / "db.sqlite").write_text("original", encoding="utf-8")
+    (data_dir / "notes.txt").write_text("note1", encoding="utf-8")
+
+    backup_id, _ = _create_backup(env, "alpha")
+
+    (data_dir / "db.sqlite").write_text("drift-one", encoding="utf-8")
+    (data_dir / "notes.txt").unlink()
+    (data_dir / "temp.txt").write_text("temp", encoding="utf-8")
+
+    _stub_restore_providers(monkeypatch)
+
+    first_result = runner.invoke(
+        app,
+        [
+            "backup",
+            "restore",
+            backup_id,
+            "--yes",
+            "--json",
+        ],
+        env=env,
+    )
+    assert first_result.exit_code == 0
+    first_snapshot = _capture_backup_snapshot(state_dir, tmp_path, "alpha", backup_id=backup_id)
+    first_meta = first_snapshot["metadata"]
+    first_restored = first_meta.get("last_restored_at")
+    assert first_restored, "initial restore did not record metadata"
+    assert first_snapshot["pre_restore_dirs"] == []
+    assert first_snapshot["selected_entry"] is not None
+    assert first_snapshot["selected_entry"]["metadata"]["last_restore_destination"] == str(
+        data_dir
+    )
+
+    # Mutate again before the second restore.
+    (data_dir / "db.sqlite").write_text("drift-two", encoding="utf-8")
+    (data_dir / "extra.txt").write_text("extra", encoding="utf-8")
+
+    second_result = runner.invoke(
+        app,
+        [
+            "backup",
+            "restore",
+            backup_id,
+            "--no-pre-backup",
+            "--yes",
+            "--json",
+        ],
+        env=env,
+    )
+    assert second_result.exit_code == 0
+    second_snapshot = _capture_backup_snapshot(state_dir, tmp_path, "alpha", backup_id=backup_id)
+    second_meta = second_snapshot["metadata"]
+    second_restored = second_meta.get("last_restored_at")
+    assert second_restored
+    assert datetime.fromisoformat(second_restored) >= datetime.fromisoformat(first_restored)
+    assert second_snapshot["pre_restore_dirs"] == []
+    assert len(second_snapshot["backups"]) == len(first_snapshot["backups"])
+    assert second_snapshot["selected_entry"]["metadata"]["last_restore_destination"] == str(
+        data_dir
+    )
+
+    operations_record = second_snapshot["last_operation"]
+    assert operations_record is not None
+    assert operations_record["command"] == "backup restore"
+    assert operations_record["result"]["status"] == "success"
+    assert (data_dir / "db.sqlite").read_text(encoding="utf-8") == "original"
+    assert (data_dir / "notes.txt").read_text(encoding="utf-8") == "note1"
+    assert not (data_dir / "temp.txt").exists()
+    assert not (data_dir / "extra.txt").exists()
+
+
+def test_backup_restore_dry_run_followed_by_apply(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Dry-run restore leaves no residue and apply still succeeds."""
+    env, state_dir = _prepare_environment(
+        tmp_path,
+        instances=[{"name": "alpha", "version": "current", "port": 5000, "status": "running"}],
+    )
+    data_dir = tmp_path / "instances" / "alpha"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / "db.sqlite").write_text("original", encoding="utf-8")
+
+    backup_id, _ = _create_backup(env, "alpha")
+
+    (data_dir / "db.sqlite").write_text("drift", encoding="utf-8")
+    _stub_restore_providers(monkeypatch)
+
+    dry_run = runner.invoke(
+        app,
+        [
+            "backup",
+            "restore",
+            backup_id,
+            "--dry-run",
+            "--yes",
+            "--json",
+        ],
+        env=env,
+    )
+    assert dry_run.exit_code == 0
+    dry_snapshot = _capture_backup_snapshot(state_dir, tmp_path, "alpha", backup_id=backup_id)
+    assert "last_restored_at" not in dry_snapshot["metadata"]
+    assert dry_snapshot["pre_restore_dirs"] == []
+
+    apply = runner.invoke(
+        app,
+        [
+            "backup",
+            "restore",
+            backup_id,
+            "--yes",
+            "--json",
+        ],
+        env=env,
+    )
+    assert apply.exit_code == 0
+    apply_snapshot = _capture_backup_snapshot(state_dir, tmp_path, "alpha", backup_id=backup_id)
+    assert apply_snapshot["metadata"].get("last_restored_at")
+    assert apply_snapshot["pre_restore_dirs"] == []
+    assert (data_dir / "db.sqlite").read_text(encoding="utf-8") == "original"
+
+
 def test_backup_reconcile_reports_mismatches(tmp_path: Path) -> None:
     """`backup reconcile` surfaces missing entries and orphaned archives."""
     env, _ = _prepare_environment(tmp_path)
@@ -1285,6 +1471,42 @@ def test_backup_reconcile_apply_updates_index(tmp_path: Path) -> None:
     assert metadata.get("reconciled_at")
 
 
+def test_backup_reconcile_apply_idempotent(tmp_path: Path) -> None:
+    """Running `backup reconcile --apply` repeatedly should not churn state."""
+    env, _ = _prepare_environment(tmp_path)
+    backups_root = tmp_path / "backups"
+    registry = BackupsRegistry(backups_root, backups_root / "backups.json")
+    registry.ensure_root()
+
+    missing_id = "20240102-alpha-missing"
+    archive_path = backups_root / "alpha" / "missing.tar.gz"
+    _create_backup_entry(
+        registry,
+        instance="alpha",
+        backup_id=missing_id,
+        archive_path=archive_path,
+        checksum="cafebabe" * 8,
+    )
+
+    first = runner.invoke(app, ["backup", "reconcile", "--apply", "--json"], env=env)
+    assert first.exit_code == 0
+    reconnect_payload = _extract_json(first.stdout)
+    assert reconnect_payload["updates_applied"] == 1
+    first_entry = registry.find_by_id(missing_id)
+    assert first_entry is not None
+    first_reconciled = first_entry.get("metadata", {}).get("reconciled_at")
+    assert first_reconciled
+
+    second = runner.invoke(app, ["backup", "reconcile", "--apply", "--json"], env=env)
+    assert second.exit_code == 0
+    second_payload = _extract_json(second.stdout)
+    assert second_payload["updates_applied"] >= 0
+    second_entry = registry.find_by_id(missing_id)
+    assert second_entry is not None
+    assert second_entry.get("status") == "missing"
+    second_reconciled = second_entry.get("metadata", {}).get("reconciled_at")
+    assert second_reconciled
+    assert datetime.fromisoformat(second_reconciled) >= datetime.fromisoformat(first_reconciled)
 def test_instance_delete_triggers_backup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """`instance delete` creates a backup when confirmed."""
     instances = [{"name": "alpha", "version": "25.8.0", "port": 5000}]

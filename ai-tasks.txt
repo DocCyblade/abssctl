@@ -12,11 +12,11 @@
          - 5.1.2.2 (done) – Add a CLI test that flips from custom (`tls install`) to system (`tls use-system`) and back to custom, confirming state transitions and rendered paths stay consistent with each rerun.
          - 5.1.2.3 (done) – Extend snapshot helpers to capture TLS artefacts (copied cert/key hashes, nginx site checksum) so assertions can compare before/after states for the above scenarios.
          - 5.1.2.4 (done) – Cover dry-run idempotency by invoking `tls install --dry-run` followed by a real install to ensure dry-run leaves no residue and install still succeeds with correct metadata.
-      - 5.1.3 – Backup restore/reconcile repeatability (default restore with pre-backup, consecutive restores, multiple reconcile applies) to guard metadata and filesystem state.
-         - 5.1.3.1 – Write a CLI test exercising `backup restore` twice with the same archive (first with default pre-backup enabled, second with `--no-pre-backup`) and assert registry metadata, `.pre-restore` rotations, and backup index fields remain consistent.
-         - 5.1.3.2 – Add coverage for `backup restore --dry-run` immediately followed by a real restore to confirm dry-run leaves no temporary directories or metadata updates.
-         - 5.1.3.3 – Add a scenario running `backup reconcile --apply` twice to ensure repeated reconciliation does not churn statuses or timestamps when nothing changes.
-         - 5.1.3.4 – Extend snapshot helpers to include backups root listings and `backups.json` metadata so restores/reconciles can diff before/after state.
+      - 5.1.3 (done) – Backup restore/reconcile repeatability (default restore with pre-backup, consecutive restores, multiple reconcile applies) to guard metadata and filesystem state.
+         - 5.1.3.1 (done) – Write a CLI test exercising `backup restore` twice with the same archive (first with default pre-backup enabled, second with `--no-pre-backup`) and assert registry metadata, `.pre-restore` rotations, and backup index fields remain consistent.
+         - 5.1.3.2 (done) – Add coverage for `backup restore --dry-run` immediately followed by a real restore to confirm dry-run leaves no temporary directories or metadata updates.
+         - 5.1.3.3 (done) – Add a scenario running `backup reconcile --apply` twice to ensure repeated reconciliation does not churn statuses or timestamps when nothing changes.
+         - 5.1.3.4 (done) – Extend snapshot helpers to include backups root listings and `backups.json` metadata so restores/reconciles can diff before/after state.
       - 5.1.4 – Doctor rerun resiliency, including `system init --rebuild-state` followed by doctor, to verify probes clear reconciled mismatches and stay side-effect free.
          - 5.1.4.1 – Add a CLI test that runs `doctor --json` twice on a stable fixture, asserting registry snapshots, diagnostics metadata, and operations logs stay unchanged on the second invocation.
          - 5.1.4.2 – Script a flow that surfaces a state mismatch, executes `system init --rebuild-state --yes --dry-run` and then `--yes`, and finally reruns doctor to confirm the reconciliation probe returns green.

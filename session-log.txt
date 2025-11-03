@@ -236,6 +236,7 @@
 - Broke down fixture enhancement plan (5.2.1–5.2.5) covering state snapshots, invoke wrappers, richer `_prepare_environment` seeds, helper factories, and documentation touchpoints in `ai-tasks.txt`.
 - Listed targeted implementation tasks (5.3.1–5.3.5) to translate idempotency planning into concrete TLS/backup/doctor/lifecycle tests with quick-tests integration in `ai-tasks.txt`.
 - Implemented TLS idempotency helpers/tests (reinstall, system↔custom toggles, dry-run→apply) in `tests/test_cli.py`, added `_capture_tls_snapshot`, and ran `make quick-tests`.
+- Added backup snapshot helper, repeat restore/dry-run/reconcile idempotency tests (`tests/test_cli.py`), and validated with `make quick-tests`.
 
 ## Wrap up:
 
