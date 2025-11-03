@@ -227,6 +227,7 @@
 - Added discovery/--rebuild-state options to `system init`, including registry rebuild helpers and state unit tests.
 - Ran make quick-tests after extending the bootstrap test suite.
 - Integrated discovery-based state reconciliation probe into doctor and refreshed tests (including new mismatch coverage).
+- Updated requirements spec, CLI reference, and roadmap to capture the system init bootstrap and doctor reconciliation features.
 
 ## Wrap up:
 

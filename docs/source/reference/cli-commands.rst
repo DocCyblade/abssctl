@@ -31,6 +31,23 @@ Common Behaviour
 Individual sections below highlight any additional flags or behaviours unique
 to a command group.
 
+System Commands
+===============
+
+``abssctl system init``
+   Bootstraps a host for abssctl-managed deployments. By default the command
+   launches an interactive wizard that confirms the service user/group,
+   previews the directory scaffold (config, install root, instance root,
+   state/registry, logs, runtime, templates, backups), and applies the plan
+   once approved. ``--yes`` / ``--defaults`` enable unattended execution,
+   ``--dry-run`` reports the plan without touching the filesystem, and the
+   optional ``--json`` flag emits a machine-readable summary. ``--discover``
+   scans the filesystem for existing Actual instances, while
+   ``--rebuild-state`` rewrites ``instances.yml`` / ``ports.yml`` (and creates
+   ``config.yml`` if missing) from the discovery results—ideal when abssctl is
+   installed on an already-running host. Automated service-account creation is
+   gated by ``--allow-create-user`` so operators must opt in explicitly.
+
 Config Commands
 ===============
 
@@ -178,17 +195,17 @@ System Diagnostics & Backups
 ============================
 
 ``abssctl doctor`` and ``abssctl support-bundle``
-   ``doctor`` now wires the health-check engine defined in ADR-029. It emits a
-   human-readable summary plus per-probe detail, or a structured JSON payload
-   when ``--json`` is supplied. ``--only``/``--exclude`` accept comma-separated
-   probe categories (``env``, ``config``, ``state``, ``fs``, ``ports``,
-   ``systemd``, ``nginx``, ``tls``, ``app``, ``disk``), while ``--timeout-ms``,
-   ``--retries``, and ``--max-concurrency`` override executor defaults. Exit
-   codes follow ADR-013, mapping the worst probe impact (``0`` success,
-   ``2`` validation/config errors, ``3`` environment/dependency failures,
-   ``4`` provider/runtime failures). ``--fix`` is reserved for safe
-   remediations and currently reports that no changes are applied. The actual
-   probe catalogue will be populated in the next milestone.
+   ``doctor`` wires the ADR-029 health-check engine and emits both human and
+   JSON summaries (via ``--json``). ``--only``/``--exclude`` accept
+   comma-separated probe categories (``env``, ``config``, ``state``, ``fs``,
+   ``ports``, ``systemd``, ``nginx``, ``tls``, ``app``, ``disk``), while
+   ``--timeout-ms``, ``--retries``, and ``--max-concurrency`` override executor
+   defaults. Exit codes follow ADR-013, mapping the worst probe impact (``0``
+   success, ``2`` validation/config errors, ``3`` environment/dependency
+   failures, ``4`` provider/runtime failures). ``--fix`` remains advisory for
+   future safe remediations. The state probes now cross-check the registry
+   against filesystem discovery and recommend ``abssctl system init
+   --rebuild-state`` whenever mismatches are detected.
 
 ``abssctl backup create <instance> [--message TEXT] [--label LABELS] [--data-only] [--out-dir PATH] [--compression {auto,zstd,gzip,none}] [--compression-level N] [--json] [--dry-run]``
    Captures an instance snapshot beneath the configured backup root (defaults to

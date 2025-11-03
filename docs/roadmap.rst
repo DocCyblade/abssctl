@@ -55,9 +55,13 @@ Beta — Basic Functions
 - [x] Ensure all mutating commands honour ``--dry-run``, ``--yes``, backup
   prompt inventory (ADR-016/ADR-025/ADR-026), and emit consistent exit codes
   (ADR-013).
-- [ ] Deliver the initial ``doctor`` command with core probes (environment,
-  ports, systemd/nginx status) as defined in ADR-029, returning structured JSON
-  and summaries.
+- [x] Deliver the ``doctor`` command with the ADR-029 probe catalogue (env,
+  config, state, filesystem, ports, systemd, nginx, tls, app, disk), JSON
+  output, and state reconciliation guidance that recommends
+  ``abssctl system init --rebuild-state`` when mismatches are detected.
+- [x] Ship the ``system init`` bootstrap command (interactive wizard plus
+  unattended flags, discovery, and ``--rebuild-state`` support) so new or
+  existing hosts can be prepared consistently.
 - [ ] Flesh out automated tests (unit/integration fakes) to cover the above
   Beta features and guard idempotency.
 

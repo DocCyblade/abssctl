@@ -118,8 +118,19 @@ Non‑Goals for v1.0
 5.1 Global Commands
 - abssctl version
   Prints CLI Script-Version and package PKG_VERSION/PKG_COMPAT, and copyright notices.
+- abssctl system init [--yes|--defaults] [--dry-run] [--json] [--discover] [--rebuild-state] [--allow-create-user]
+  Interactive (or fully non-interactive via flags) bootstrap command that confirms the service user/group, ensures core
+  directories exist (config, install, instance, state/registry, logs, runtime, templates, backups), and logs a detailed plan
+  before applying changes. ``--discover`` scans the filesystem for existing instances; ``--rebuild-state`` rewrites registry
+  files ``instances.yml``/``ports.yml`` (and creates ``config.yml`` if missing) from the discovery results so the CLI is in sync
+  with running deployments. ``--dry-run`` previews, ``--json`` emits machine-readable plans/results, and ``--allow-create-user``
+  gates automated service-account creation when it is absent.
 - abssctl doctor [--fix] [--verbose]
-  Validates: python/env, node/npm versions, npm reachability, presence of required tools (tar, zstd), service user & directory perms, free port scan, systemd unit status, nginx site syntax (no reload), instance TCP health checks. --fix performs non‑destructive remediation (create user, dirs, perms) where safe. Outputs summary to stdout and a JSON report with --json; exit code non‑zero on failures.
+  Validates: python/env, node/npm versions, npm reachability, presence of required tools (tar, zstd), service user & directory perms,
+  free port scan, systemd unit status, nginx site syntax (no reload), instance TCP health checks, and reconciles the registry against
+  filesystem discovery. ``--only``/``--exclude`` narrow probe categories; timeout/retry flags tune execution. ``--json`` emits a structured
+  report, and ``--fix`` remains a placeholder for future safe remediations. Validation failures now advise running
+  ``abssctl system init --rebuild-state`` when mismatches are detected; exit codes follow ADR-013.
 - abssctl support-bundle [--no-redact] [--out PATH]
   Collects configs, logs, versions, doctor output into a tarball; redacts sensitive paths by default can include if requested. Supports --json to print bundle metadata (path, size, redaction status).
 - abssctl backup create <instance> [--message|-m <text>] [--label <str>] [--data-only] [--out-dir PATH] [--compression {auto,zstd,gzip,none}] [--compression-level N] [--json]
@@ -212,6 +223,10 @@ Non‑Goals for v1.0
   - ``ports``: {base: 5000, strategy: sequential}
   - ``state_dir``: /var/lib/abssctl (registry defaults to ``state_dir/registry``)
   - ``default_version``: current.
+- ``abssctl system init`` enforces the bootstrap contract: it creates the directories above with secure permissions,
+  ensures the configured service user/group exist (subject to ``--allow-create-user``), and can regenerate ``instances.yml`` /
+  ``ports.yml`` plus a minimal ``config.yml`` using discovery data via ``--rebuild-state`` so deployments remain manageable even
+  after reinstalling the CLI.
 - Config precedence: CLI flags > environment variables > /etc/abssctl/config.yml > built-in defaults. Environment variables use the ABSSCTL_* namespace (documented in --help).
 - Registry /var/lib/abssctl/registry/instances.yml: name, domain, port, version_binding (current|X.Y.Z), data_dir, created_at, last_changed, notes.
 - Optional port registry /var/lib/abssctl/registry/ports.yml: records reserved ports with owner instance and timestamp.
