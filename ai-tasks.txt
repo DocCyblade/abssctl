@@ -6,6 +6,11 @@
 
 5. Flesh out automated tests for Beta features and idempotency guarantees.
    1. Inventory coverage gaps across TLS, backup restore/reconcile, doctor, and lifecycle commands; prioritise scenarios lacking idempotency/regression tests.
+      - 5.1.1 – Capture current CLI artefact snapshots (registry, backups, nginx, operations logs) before/after runs so idempotency assertions can share helpers.
+      - 5.1.2 – TLS idempotency coverage (reinstall, system↔custom toggles, log stability) to ensure repeated `tls` commands remain safe.
+      - 5.1.3 – Backup restore/reconcile repeatability (default restore with pre-backup, consecutive restores, multiple reconcile applies) to guard metadata and filesystem state.
+      - 5.1.4 – Doctor rerun resiliency, including `system init --rebuild-state` followed by doctor, to verify probes clear reconciled mismatches and stay side-effect free.
+      - 5.1.5 – Instance lifecycle reruns (enable/disable/start/stop/restart/delete) to make sure registry/provider operations short-circuit cleanly on subsequent executions.
    2. Extend pytest fixtures (fake binaries, temp dirs, helper contexts) to support new integration scenarios efficiently.
    3. Add targeted tests ensuring repeated command execution is idempotent (double restore, repeated enable, TLS install reruns, etc.).
    4. Integrate slow/extended suites under markers so CI can run comprehensive checks while supporting quick local loops.

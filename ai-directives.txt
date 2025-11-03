@@ -2,7 +2,7 @@ This file is used to help bootstrap AI help/chats to keep things consistent betw
 
 All new chats I will start with the below text
 Start with: 
-Hello AI Dev Partner, can I call you Albert or Al? :-) you can call me Ken. to get you up to speed and bootstrap this chat session please 
+Hello AI Dev Partner, can I call you Albert or Al? :-) you can call me Doc. to get you up to speed and bootstrap this chat session please 
 read the file ai-directives.txt this has all the info you need to get started.
 
 AI Directives for chats for this repo/project
