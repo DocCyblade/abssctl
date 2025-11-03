@@ -40,12 +40,16 @@ from .backups import (
 from .bootstrap import (
     DirectoryPlan,
     DirectorySpec,
+    DiscoveryReport,
     ServiceAccountPlan,
     ServiceAccountSpec,
     apply_directory_plan,
     apply_service_account_plan,
+    discover_instances,
     plan_directories,
     plan_service_account,
+    rebuild_registry_from_report,
+    write_config_file,
 )
 from .config import ALLOWED_BACKUP_COMPRESSION, AppConfig, TLSPermissionSpec, load_config
 from .doctor import (
@@ -328,6 +332,16 @@ SYSTEM_INIT_JSON_OPTION = typer.Option(
     False,
     "--json",
     help="Output plan details as JSON.",
+)
+SYSTEM_INIT_DISCOVER_OPTION = typer.Option(
+    False,
+    "--discover",
+    help="Scan for existing instances and include a discovery report.",
+)
+SYSTEM_INIT_REBUILD_STATE_OPTION = typer.Option(
+    False,
+    "--rebuild-state",
+    help="Rebuild registry/config state from discovery results (implies --discover).",
 )
 
 _PROBE_CATEGORY_SET = frozenset(PROBE_CATEGORY_VALUES)
@@ -812,6 +826,76 @@ def _bootstrap_plan_to_json(
             "templates_dir": str(options.config.templates_dir),
             "backups_root": str(options.config.backups.root),
         },
+    }
+
+
+def _render_discovery_report(report: DiscoveryReport) -> None:
+    """Render discovery findings in a human-readable format."""
+    console.print("[bold]Discovery[/bold]")
+    if report.errors:
+        console.print("  [red]Errors[/red]:")
+        for message in report.errors:
+            console.print(f"    - {message}")
+    if report.instances:
+        for instance in report.instances:
+            port_label = instance.port if instance.port is not None else "?"
+            domain_label = instance.domain or "<unset>"
+            console.print(
+                f"  • {instance.name} (port={port_label}, domain={domain_label})"
+            )
+            if instance.warnings:
+                for warning in instance.warnings:
+                    console.print(f"      warning: {warning}")
+    else:
+        console.print("  • No instances discovered.")
+    if report.warnings:
+        console.print("  Warnings:")
+        for warning in report.warnings:
+            console.print(f"    - {warning}")
+
+
+def _discovery_report_to_json(report: DiscoveryReport) -> dict[str, object]:
+    """Return a JSON-serialisable mapping for discovery results."""
+    instances_payload = []
+    for instance in report.instances:
+        instances_payload.append(
+            {
+                "name": instance.name,
+                "root": str(instance.root),
+                "data_dir": str(instance.data_dir),
+                "config_path": str(instance.config_path),
+                "runtime_dir": str(instance.runtime_dir) if instance.runtime_dir else None,
+                "logs_dir": str(instance.logs_dir) if instance.logs_dir else None,
+                "state_dir": str(instance.state_dir) if instance.state_dir else None,
+                "systemd_unit": str(instance.systemd_unit) if instance.systemd_unit else None,
+                "nginx_site": str(instance.nginx_site) if instance.nginx_site else None,
+                "port": instance.port,
+                "domain": instance.domain,
+                "version": instance.version,
+                "warnings": list(instance.warnings),
+            }
+        )
+    return {
+        "instances": instances_payload,
+        "warnings": list(report.warnings),
+        "errors": list(report.errors),
+    }
+
+
+def _planned_rebuild_outputs(config: AppConfig) -> dict[str, object]:
+    """Return the paths that would be written during a rebuild."""
+    registry = StateRegistry(config.registry_dir)
+    instances_path = registry.path_for("instances.yml")
+    ports_path = registry.path_for("ports.yml")
+    versions_path = registry.path_for("versions.yml")
+    config_path = config.config_file if not config.config_file.exists() else None
+    return {
+        "registry": {
+            "instances": str(instances_path),
+            "ports": str(ports_path),
+            "versions": str(versions_path),
+        },
+        "config": str(config_path) if config_path is not None else None,
     }
 
 
@@ -1861,6 +1945,8 @@ def system_init(
     defaults: bool = SYSTEM_INIT_DEFAULTS_OPTION,
     dry_run: bool = SYSTEM_INIT_DRY_RUN_OPTION,
     json_output: bool = SYSTEM_INIT_JSON_OPTION,
+    discover: bool = SYSTEM_INIT_DISCOVER_OPTION,
+    rebuild_state: bool = SYSTEM_INIT_REBUILD_STATE_OPTION,
 ) -> None:
     """Bootstrap abssctl prerequisites (service account and directories)."""
     interactive = sys.stdin.isatty() and not yes and not defaults
@@ -1875,6 +1961,8 @@ def system_init(
             "is not a TTY.[/red]"
         )
         raise typer.Exit(code=2)
+
+    should_discover = discover or rebuild_state
 
     del ctx
 
@@ -1924,14 +2012,67 @@ def system_init(
             )
             raise typer.Exit(code=3)
 
+    discovery_report: DiscoveryReport | None = None
+    discovery_payload: dict[str, object] | None = None
+    if should_discover:
+        discovery_report = discover_instances(
+            options.config.instance_root,
+            runtime_root=options.config.runtime_dir,
+            logs_root=options.config.logs_dir,
+            state_root=options.config.state_dir,
+            systemd_dir=options.config.runtime_dir / "systemd",
+            nginx_sites_available=options.config.runtime_dir / "nginx" / "sites-available",
+        )
+        if rebuild_state and discovery_report.errors:
+            message = (
+                "Cannot rebuild state because discovery encountered errors. "
+                "Resolve the issues and retry."
+            )
+            if json_output:
+                payload = {
+                    "error": message,
+                    "discovery": _discovery_report_to_json(discovery_report),
+                }
+                console.print(json.dumps(payload, indent=2), soft_wrap=True, overflow="ignore")
+            else:
+                console.print(f"[red]{message}[/red]")
+                _render_discovery_report(discovery_report)
+            raise typer.Exit(code=2)
+        if json_output:
+            discovery_payload = _discovery_report_to_json(discovery_report)
+
+    rebuild_preview: dict[str, object] | None = None
+    if rebuild_state:
+        rebuild_preview = _planned_rebuild_outputs(options.config)
+
     plan_payload = _bootstrap_plan_to_json(plan, options, dry_run=dry_run) if json_output else None
+    if plan_payload is not None and discovery_payload is not None:
+        plan_payload["discovery"] = discovery_payload
 
     if not json_output:
         console.rule("[bold]Bootstrap Plan[/bold]")
         _render_bootstrap_plan(plan)
         console.print()
+        if discovery_report is not None:
+            _render_discovery_report(discovery_report)
+            console.print()
+        if rebuild_preview is not None:
+            heading = "Rebuild state (dry-run preview)" if dry_run else "Rebuild state plan"
+            console.print(f"[bold]{heading}[/bold]")
+            registry_preview = cast(dict[str, str], rebuild_preview["registry"])
+            console.print(f"  • instances.yml -> {registry_preview['instances']}")
+            console.print(f"  • ports.yml -> {registry_preview['ports']}")
+            console.print(f"  • versions.yml -> {registry_preview['versions']}")
+            config_preview = cast(str | None, rebuild_preview["config"])
+            if config_preview:
+                console.print(
+                    f"  • config.yml -> {config_preview} (will be created if missing)"
+                    if dry_run
+                    else f"  • config.yml -> {config_preview}"
+                )
+            console.print()
 
-    if not plan.has_changes():
+    if not plan.has_changes() and not rebuild_state:
         if json_output:
             plan_payload = plan_payload or {}
             plan_payload["applied"] = False
@@ -1947,11 +2088,25 @@ def system_init(
             )
         return
 
+    rebuild_result: dict[str, object] | None = None
+    config_written_path: Path | None = None
+
     if dry_run:
         if json_output:
             plan_payload = plan_payload or {}
             plan_payload["applied"] = False
             plan_payload["status"] = "dry-run"
+            if rebuild_preview is not None:
+                plan_payload["rebuild"] = {
+                    "planned": rebuild_preview,
+                    "applied": {
+                        "registry": rebuild_preview["registry"],
+                        "config": {
+                            "path": rebuild_preview["config"],
+                            "written": False,
+                        },
+                    },
+                }
             console.print(
                 json.dumps(plan_payload, indent=2),
                 soft_wrap=True,
@@ -1981,6 +2136,24 @@ def system_init(
     try:
         apply_service_account_plan(plan.service)
         apply_directory_plan(plan.directories)
+        if rebuild_state:
+            assert discovery_report is not None
+            registry = StateRegistry(options.config.registry_dir)
+            artifacts = rebuild_registry_from_report(registry, options.config, discovery_report)
+            registry_paths = {
+                "instances": str(artifacts.instances),
+                "ports": str(artifacts.ports),
+                "versions": str(artifacts.versions),
+            }
+            if not options.config.config_file.exists():
+                config_written_path = write_config_file(options.config)
+            rebuild_result = {
+                "registry": registry_paths,
+                "config": {
+                    "path": str(options.config.config_file),
+                    "written": config_written_path is not None,
+                },
+            }
     except subprocess.CalledProcessError as exc:
         console.print(
             f"[red]Command '{' '.join(str(token) for token in exc.cmd)}' failed: {exc}[/red]"
@@ -1994,12 +2167,27 @@ def system_init(
         plan_payload = plan_payload or {}
         plan_payload["applied"] = True
         plan_payload["status"] = "applied"
+        if rebuild_result is not None and rebuild_preview is not None:
+            plan_payload["rebuild"] = {
+                "planned": rebuild_preview,
+                "applied": rebuild_result,
+            }
         console.print(
             json.dumps(plan_payload, indent=2),
             soft_wrap=True,
             overflow="ignore",
         )
     else:
+        if rebuild_result is not None:
+            registry_paths = cast(dict[str, str], rebuild_result["registry"])
+            config_info = cast(dict[str, object], rebuild_result["config"])
+            console.print("[green]Registry rebuilt from discovery results.[/green]")
+            console.print(f"  • instances.yml -> {registry_paths['instances']}")
+            console.print(f"  • ports.yml -> {registry_paths['ports']}")
+            console.print(f"  • versions.yml -> {registry_paths['versions']}")
+            if bool(config_info.get("written")):
+                console.print(f"  • Wrote config file {config_info['path']}")
+            console.print()
         console.print("[green]Bootstrap completed successfully.[/green]")
 
 

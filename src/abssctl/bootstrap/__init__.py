@@ -18,6 +18,7 @@ from .service_accounts import (
     inspect_service_account,
     plan_service_account,
 )
+from .state import RegistryArtifacts, rebuild_registry_from_report, write_config_file
 
 __all__ = [
     # service account helpers
@@ -38,4 +39,8 @@ __all__ = [
     "DiscoveredInstance",
     "DiscoveryReport",
     "discover_instances",
+    # state helpers
+    "RegistryArtifacts",
+    "rebuild_registry_from_report",
+    "write_config_file",
 ]

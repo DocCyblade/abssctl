@@ -66,3 +66,63 @@ def test_system_init_json_plan(tmp_path: Path) -> None:
     assert payload["dry_run"] is True
     assert payload["status"] == "dry-run"
     assert payload["service_account"]["actions"]
+
+
+def test_system_init_discover_dry_run(tmp_path: Path) -> None:
+    """Discovery mode should emit a readable summary in dry-run."""
+    args = _bootstrap_args(tmp_path) + ["--yes", "--dry-run", "--discover"]
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0
+    assert "Discovery" in result.stdout
+    assert "No instances discovered" in result.stdout
+
+
+def _write_instance_config(root: Path, name: str, port: int) -> None:
+    config_path = root / name / "data" / "config.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema": 1,
+        "instance": {"name": name, "domain": f"{name}.example.com"},
+        "server": {
+            "upstream": {"host": "127.0.0.1", "port": port},
+            "version": "v1.2.3",
+        },
+        "paths": {
+            "root": str(root / name),
+            "data": str(root / name / "data"),
+            "config": str(config_path),
+        },
+    }
+    config_path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_system_init_rebuild_state_dry_run(tmp_path: Path) -> None:
+    """Rebuild state dry-run should display planned registry files."""
+    instance_root = tmp_path / "srv"
+    _write_instance_config(instance_root, "alpha", 6000)
+
+    args = _bootstrap_args(tmp_path) + ["--yes", "--dry-run", "--rebuild-state"]
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0
+    assert "Rebuild state" in result.stdout
+    assert "instances.yml" in result.stdout
+
+
+def test_system_init_rebuild_state_json(tmp_path: Path) -> None:
+    """JSON payload should include rebuild plan details when requested."""
+    instance_root = tmp_path / "srv"
+    _write_instance_config(instance_root, "beta", 7000)
+
+    args = _bootstrap_args(tmp_path) + [
+        "--yes",
+        "--dry-run",
+        "--rebuild-state",
+        "--json",
+    ]
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    rebuild = payload.get("rebuild")
+    assert rebuild is not None
+    assert rebuild["planned"]["registry"]
+    assert rebuild["planned"]["config"]

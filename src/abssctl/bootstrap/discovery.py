@@ -46,7 +46,7 @@ def discover_instances(
     """Inspect *instance_root* for existing instances shaped like abssctl expects."""
     report = DiscoveryReport()
     if not instance_root.exists():
-        report.warnings.append(f"Instance root {instance_root} does not exist.")
+        report.errors.append(f"Instance root {instance_root} does not exist.")
         return report
 
     for child in sorted(instance_root.iterdir()):
