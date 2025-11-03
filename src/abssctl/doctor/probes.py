@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import __version__
+from ..bootstrap import discover_instances
 from ..ports import PortsRegistryError
 from ..providers.nginx import NginxError
 from ..providers.systemd import SystemdError
@@ -311,6 +312,7 @@ def _probe_filesystem_directories(context: ProbeContext) -> ProbeResult:
 def _state_probes() -> Sequence[ProbeDefinition]:
     return (
         _make_probe("state-instances", "state", _probe_state_instances),
+        _make_probe("state-reconcile", "state", _probe_state_reconcile),
     )
 
 
@@ -335,6 +337,103 @@ def _probe_state_instances(context: ProbeContext) -> ProbeResult:
         status=ProbeStatus.GREEN,
         impact=DoctorImpact.OK,
         message=message,
+    )
+
+
+def _probe_state_reconcile(context: ProbeContext) -> ProbeResult:
+    config = context.config
+    report = discover_instances(
+        config.instance_root,
+        runtime_root=config.runtime_dir,
+        logs_root=config.logs_dir,
+        state_root=config.state_dir,
+        systemd_dir=config.runtime_dir / "systemd",
+        nginx_sites_available=config.runtime_dir / "nginx" / "sites-available",
+    )
+
+    registry_entries = _iter_instance_entries(context)
+    registry_names = set(_instance_names(registry_entries))
+    discovered_names = {instance.name for instance in report.instances}
+
+    missing_in_registry = sorted(discovered_names - registry_names)
+    missing_on_disk = sorted(registry_names - discovered_names)
+
+    instance_warnings = {
+        instance.name: list(instance.warnings)
+        for instance in report.instances
+        if instance.warnings
+    }
+
+    data: dict[str, object] = {}
+    if missing_in_registry:
+        data["discovered_only"] = missing_in_registry
+    if missing_on_disk:
+        data["registry_only"] = missing_on_disk
+    if instance_warnings:
+        data["instance_warnings"] = instance_warnings
+
+    if report.errors:
+        return ProbeResult(
+            id="state-reconcile",
+            category="state",
+            status=ProbeStatus.RED,
+            impact=DoctorImpact.VALIDATION,
+            message="Discovery encountered errors; unable to reconcile registry state.",
+            warnings=tuple(report.errors),
+            data=data or None,
+            remediation=(
+                "Resolve discovery issues, then run `abssctl system init --rebuild-state` to "
+                "repopulate registry files."
+            ),
+        )
+
+    if missing_in_registry or missing_on_disk:
+        message_parts: list[str] = []
+        if missing_in_registry:
+            entries = ", ".join(missing_in_registry)
+            message_parts.append(f"filesystem instances not registered: {entries}")
+        if missing_on_disk:
+            entries = ", ".join(missing_on_disk)
+            message_parts.append(f"registry entries missing on disk: {entries}")
+        message = "; ".join(message_parts)
+        return ProbeResult(
+            id="state-reconcile",
+            category="state",
+            status=ProbeStatus.RED,
+            impact=DoctorImpact.VALIDATION,
+            message=message,
+            data=data or None,
+            remediation=(
+                "Review the discrepancies and run `abssctl system init --rebuild-state` once the "
+                "filesystem matches the desired state."
+            ),
+        )
+
+    if report.warnings or instance_warnings:
+        combined_warnings = tuple(report.warnings)
+        message = "Discovery completed with warnings; see details."
+        return ProbeResult(
+            id="state-reconcile",
+            category="state",
+            status=ProbeStatus.YELLOW,
+            impact=DoctorImpact.OK,
+            message=message,
+            warnings=combined_warnings,
+            data=data or None,
+        )
+
+    message = (
+        "Registry matches discovery"
+        if discovered_names
+        else "No instances discovered; registry is empty"
+    )
+    return ProbeResult(
+        id="state-reconcile",
+        category="state",
+        status=ProbeStatus.GREEN,
+        impact=DoctorImpact.OK,
+        message=message,
+        data=data or None,
     )
 
 

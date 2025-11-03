@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections import namedtuple
 from pathlib import Path
 
@@ -37,6 +38,29 @@ def _setup_instance_assets(tmp_path: Path, name: str) -> None:
         enabled_path.symlink_to(site_path)
 
 
+def _write_instance_config(root: Path, name: str, port: int) -> None:
+    """Write a minimal config.json for discovery to consume."""
+    config_path = root / name / "data" / "config.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema": 1,
+        "instance": {
+            "name": name,
+            "domain": f"{name}.example.com",
+        },
+        "server": {
+            "upstream": {"host": "127.0.0.1", "port": port},
+            "version": "v1.2.3",
+        },
+        "paths": {
+            "root": str(root / name),
+            "data": str(root / name / "data"),
+            "config": str(config_path),
+        },
+    }
+    config_path.write_text(json.dumps(payload), encoding="utf-8")
+
+
 def _invoke_doctor(args: list[str], env: dict[str, str]) -> Result:
     return runner.invoke(app, ["doctor", *args], env=env)
 
@@ -70,6 +94,7 @@ def test_doctor_cli_reports_warning_for_missing_optional_tool(
     env, _ = _prepare_environment(tmp_path, instances=instances, ports=ports)
     _patch_disk_usage(monkeypatch, percent_free=50.0)
     _setup_instance_assets(tmp_path, "alpha")
+    _write_instance_config(tmp_path / "instances", "alpha", 5100)
 
     result = _invoke_doctor(["--json"], env)
 
@@ -93,6 +118,7 @@ def test_doctor_cli_missing_required_binary_triggers_environment_exit(
     env, _ = _prepare_environment(tmp_path, instances=instances, ports=ports)
     _patch_disk_usage(monkeypatch, percent_free=50.0)
     _setup_instance_assets(tmp_path, "alpha")
+    _write_instance_config(tmp_path / "instances", "alpha", 5100)
 
     original_exists = doctor_probes._command_exists  # type: ignore[attr-defined]
 
@@ -128,6 +154,8 @@ def test_doctor_cli_duplicate_ports_triggers_validation_exit(
     _patch_disk_usage(monkeypatch, percent_free=50.0)
     _setup_instance_assets(tmp_path, "alpha")
     _setup_instance_assets(tmp_path, "beta")
+    _write_instance_config(tmp_path / "instances", "alpha", 5100)
+    _write_instance_config(tmp_path / "instances", "beta", 5100)
 
     result = _invoke_doctor(["--json"], env)
 
@@ -146,6 +174,7 @@ def test_doctor_cli_nginx_failure_triggers_provider_exit(
     env, _ = _prepare_environment(tmp_path, instances=instances, ports=ports)
     _patch_disk_usage(monkeypatch, percent_free=50.0)
     _setup_instance_assets(tmp_path, "alpha")
+    _write_instance_config(tmp_path / "instances", "alpha", 5100)
 
     def boom(self: object) -> None:  # noqa: D401 - simple stub
         raise NginxError("nginx -t failed")
@@ -171,6 +200,7 @@ def test_doctor_cli_only_filter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     env, _ = _prepare_environment(tmp_path, instances=instances, ports=ports)
     _patch_disk_usage(monkeypatch, percent_free=50.0)
     _setup_instance_assets(tmp_path, "alpha")
+    _write_instance_config(tmp_path / "instances", "alpha", 5100)
 
     result = _invoke_doctor(["--json", "--only", "env"], env)
 
@@ -189,11 +219,43 @@ def test_doctor_cli_fix_flag_reports_placeholder(
     env, _ = _prepare_environment(tmp_path, instances=instances, ports=ports)
     _patch_disk_usage(monkeypatch, percent_free=50.0)
     _setup_instance_assets(tmp_path, "alpha")
+    _write_instance_config(tmp_path / "instances", "alpha", 5100)
 
     result = _invoke_doctor(["--fix"], env)
 
     assert result.exit_code == 0
     assert "--fix is not implemented yet" in result.stdout
+
+
+def test_doctor_cli_detects_registry_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """State reconcile probe should report mismatches between disk and registry."""
+    instances = [
+        {
+            "name": "alpha",
+            "status": "running",
+        }
+    ]
+    ports = [
+        {"name": "alpha", "port": 5100},
+    ]
+    env, _ = _prepare_environment(tmp_path, instances=instances, ports=ports)
+    _patch_disk_usage(monkeypatch, percent_free=50.0)
+    _setup_instance_assets(tmp_path, "alpha")
+    _setup_instance_assets(tmp_path, "beta")
+
+    instance_root = tmp_path / "instances"
+    _write_instance_config(instance_root, "alpha", 5100)
+    _write_instance_config(instance_root, "beta", 5200)
+
+    result = _invoke_doctor(["--json"], env)
+
+    assert result.exit_code == DoctorImpact.VALIDATION.value
+    payload = _extract_json(result.stdout)
+    reconcile = next(item for item in payload["results"] if item["id"] == "state-reconcile")
+    assert reconcile["status"] == "red"
+    assert "beta" in reconcile.get("data", {}).get("discovered_only", [])
 
 
 def test_doctor_cli_rejects_invalid_category(tmp_path: Path) -> None:

@@ -226,6 +226,7 @@
 - Added dedicated system-init CLI tests and executed make quick-tests (ruff, mypy, pytest) to validate the workflow end-to-end.
 - Added discovery/--rebuild-state options to `system init`, including registry rebuild helpers and state unit tests.
 - Ran make quick-tests after extending the bootstrap test suite.
+- Integrated discovery-based state reconciliation probe into doctor and refreshed tests (including new mismatch coverage).
 
 ## Wrap up:
 
