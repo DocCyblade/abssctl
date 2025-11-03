@@ -215,6 +215,16 @@
 
 -----------------------------------------
 
+# 2025-10-30 Beta1.0 Session3 (OPEN)
+- Session opened per Next Session Primer; focus remains ai-tasks item 5 idempotency coverage initiatives.
+- Awaiting Ken's questions before outlining the coverage gap inventory plan.
+- ADR 0035 accepted; next step is updating requirements/docs and scheduling implementation.
+- Verified ADR statuses and marked ADR 0034 as accepted to keep the set consistent.
+
+## Wrap up:
+
+-----------------------------------------
+
 ----------------------- Sessions logging above this line only ----------------------
 
 # Next Steps / TODO:

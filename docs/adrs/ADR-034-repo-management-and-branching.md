@@ -1,7 +1,7 @@
 # ADR 034: Repository Management & Branching Workflow
 
 - **Date:** 2025-10-08
-- **Status:** Proposed
+- **Status:** Accepted
 - **Authors:** Codex (with guidance from DocCyblade)
 - **Deciders:** Project maintainers
 - **Consulted:** Release engineering reviewers
