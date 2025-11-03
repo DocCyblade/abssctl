@@ -5,11 +5,9 @@
 # - AI do not edit above this line! Keep this header!
 
 6. Implement `abssctl system init` bootstrap and recovery command.
-   1. Build helper modules for service-user management, directory ensuring, and discovery logic.
-   2. Deliver interactive wizard + unattended flag handling with dry-run support.
-   3. Implement discovery and `--rebuild-state` flows, including backups of existing files.
-   4. Integrate shared helpers with doctor for state reconciliation probes.
-   5. Update requirements/docs/roadmap/CLI reference once accepted.
+   1. Implement discovery and `--rebuild-state` flows, including backups of existing files.
+   2. Integrate shared helpers with doctor for state reconciliation probes.
+   3. Update requirements/docs/roadmap/CLI reference once accepted.
 
 5. Flesh out automated tests for Beta features and idempotency guarantees.
    1. Inventory coverage gaps across TLS, backup restore/reconcile, doctor, and lifecycle commands; prioritise scenarios lacking idempotency/regression tests.

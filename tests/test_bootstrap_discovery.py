@@ -1,11 +1,14 @@
+"""Unit tests for bootstrap discovery helpers."""
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from abssctl.bootstrap.discovery import discover_instances
 
 
-def _write_config(path, domain: str, port: int, version: str) -> None:
+def _write_config(path: Path, domain: str, port: int, version: str) -> None:
+    """Write a minimal config.json payload for discovery fixtures."""
     payload = {
         "schema": 1,
         "instance": {
@@ -26,7 +29,8 @@ def _write_config(path, domain: str, port: int, version: str) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
-def test_discovery_reports_instances(tmp_path) -> None:
+def test_discovery_reports_instances(tmp_path: Path) -> None:
+    """Discovery should populate metadata for existing instances."""
     instance_root = tmp_path / "srv"
     runtime_root = tmp_path / "run" / "abssctl"
     logs_root = tmp_path / "var" / "log" / "abssctl"
@@ -58,7 +62,8 @@ def test_discovery_reports_instances(tmp_path) -> None:
     assert instance.nginx_site == nginx_sites / "alpha.conf"
 
 
-def test_discovery_handles_missing_config(tmp_path) -> None:
+def test_discovery_handles_missing_config(tmp_path: Path) -> None:
+    """Discovery should capture warnings when config.json is absent."""
     instance_root = tmp_path / "srv"
     (instance_root / "beta" / "data").mkdir(parents=True)
 

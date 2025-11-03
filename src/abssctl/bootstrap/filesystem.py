@@ -1,15 +1,14 @@
 """Helpers for planning directory creation and permission reconciliation."""
 from __future__ import annotations
 
+import grp
 import os
+import pwd
+import shutil
 import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
-
-import grp
-import pwd
-import shutil
 
 
 @dataclass(slots=True)
@@ -140,12 +139,22 @@ def apply_directory_plan(plan: DirectoryPlan, *, dry_run: bool = False) -> None:
             continue
         if action.kind == "mkdir":
             action.path.mkdir(mode=action.mode or 0o755, parents=action.parents, exist_ok=True)
-            if action.owner or action.group:
-                shutil.chown(action.path, user=action.owner, group=action.group)
+            if action.owner is not None or action.group is not None:
+                mkdir_chown_kwargs: dict[str, str] = {}
+                if action.owner is not None:
+                    mkdir_chown_kwargs["user"] = action.owner
+                if action.group is not None:
+                    mkdir_chown_kwargs["group"] = action.group
+                shutil.chown(action.path, **mkdir_chown_kwargs)
             if action.mode is not None:
                 os.chmod(action.path, action.mode)
         elif action.kind == "chown":
-            shutil.chown(action.path, user=action.owner, group=action.group)
+            chown_kwargs: dict[str, str] = {}
+            if action.owner is not None:
+                chown_kwargs["user"] = action.owner
+            if action.group is not None:
+                chown_kwargs["group"] = action.group
+            shutil.chown(action.path, **chown_kwargs)
         elif action.kind == "chmod" and action.mode is not None:
             os.chmod(action.path, action.mode)
 

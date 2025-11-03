@@ -222,6 +222,8 @@
 - Verified ADR statuses and marked ADR 0034 as accepted to keep the set consistent.
 - Implemented bootstrap helper modules (service accounts, filesystem, discovery) with initial unit tests.
 - Ran .venv/bin/python -m pytest tests/test_bootstrap_service_accounts.py tests/test_bootstrap_filesystem.py tests/test_bootstrap_discovery.py.
+- Implemented interactive `system init` command with wizard prompts, non-interactive flags, and dry-run summaries leveraging the new bootstrap helpers.
+- Added dedicated system-init CLI tests and executed make quick-tests (ruff, mypy, pytest) to validate the workflow end-to-end.
 
 ## Wrap up:
 

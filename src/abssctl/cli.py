@@ -14,6 +14,7 @@ import re
 import secrets
 import shutil
 import subprocess
+import sys
 import tempfile
 import textwrap
 from collections import defaultdict
@@ -35,6 +36,16 @@ from .backups import (
     BackupRegistryError,
     BackupsRegistry,
     copy_into,
+)
+from .bootstrap import (
+    DirectoryPlan,
+    DirectorySpec,
+    ServiceAccountPlan,
+    ServiceAccountSpec,
+    apply_directory_plan,
+    apply_service_account_plan,
+    plan_directories,
+    plan_service_account,
 )
 from .config import ALLOWED_BACKUP_COMPRESSION, AppConfig, TLSPermissionSpec, load_config
 from .doctor import (
@@ -207,6 +218,116 @@ DOCTOR_FIX_OPTION = typer.Option(
     False,
     "--fix",
     help="Attempt safe remediations (not yet implemented).",
+)
+
+SYSTEM_INIT_CONFIG_FILE_OPTION = typer.Option(
+    None,
+    "--config-file",
+    help="Path to the abssctl config file (default: /etc/abssctl/config.yml).",
+    exists=False,
+    file_okay=True,
+    dir_okay=False,
+    writable=False,
+    readable=False,
+    resolve_path=True,
+)
+SYSTEM_INIT_SERVICE_USER_OPTION = typer.Option(
+    None,
+    "--service-user",
+    help="Service account name used for abssctl-managed processes.",
+)
+SYSTEM_INIT_SERVICE_GROUP_OPTION = typer.Option(
+    None,
+    "--service-group",
+    help="Primary group for the service account (defaults to the service user).",
+)
+SYSTEM_INIT_INSTALL_ROOT_OPTION = typer.Option(
+    None,
+    "--install-root",
+    help="Directory where abssctl installs Actual Sync Server versions.",
+    exists=False,
+    file_okay=False,
+    dir_okay=True,
+    resolve_path=True,
+)
+SYSTEM_INIT_INSTANCE_ROOT_OPTION = typer.Option(
+    None,
+    "--instance-root",
+    help="Root directory for instance data (default: /srv).",
+    exists=False,
+    file_okay=False,
+    dir_okay=True,
+    resolve_path=True,
+)
+SYSTEM_INIT_STATE_DIR_OPTION = typer.Option(
+    None,
+    "--state-dir",
+    help="Directory for abssctl state (default: /var/lib/abssctl).",
+    exists=False,
+    file_okay=False,
+    dir_okay=True,
+    resolve_path=True,
+)
+SYSTEM_INIT_LOGS_DIR_OPTION = typer.Option(
+    None,
+    "--logs-dir",
+    help="Directory for abssctl logs (default: /var/log/abssctl).",
+    exists=False,
+    file_okay=False,
+    dir_okay=True,
+    resolve_path=True,
+)
+SYSTEM_INIT_RUNTIME_DIR_OPTION = typer.Option(
+    None,
+    "--runtime-dir",
+    help="Runtime directory for locks and temp data (default: /run/abssctl).",
+    exists=False,
+    file_okay=False,
+    dir_okay=True,
+    resolve_path=True,
+)
+SYSTEM_INIT_TEMPLATES_DIR_OPTION = typer.Option(
+    None,
+    "--templates-dir",
+    help="Directory for abssctl template overrides (default: /etc/abssctl/templates).",
+    exists=False,
+    file_okay=False,
+    dir_okay=True,
+    resolve_path=True,
+)
+SYSTEM_INIT_BACKUPS_ROOT_OPTION = typer.Option(
+    None,
+    "--backups-root",
+    help="Root directory for abssctl backups (default: /srv/backups).",
+    exists=False,
+    file_okay=False,
+    dir_okay=True,
+    resolve_path=True,
+)
+SYSTEM_INIT_ALLOW_CREATE_USER_OPTION = typer.Option(
+    None,
+    "--allow-create-user/--no-allow-create-user",
+    help="Allow abssctl to create the service user/group when missing.",
+)
+SYSTEM_INIT_YES_OPTION = typer.Option(
+    False,
+    "--yes",
+    help="Automatically approve prompts.",
+)
+SYSTEM_INIT_DEFAULTS_OPTION = typer.Option(
+    False,
+    "--defaults",
+    help="Use default values without interactive prompts.",
+)
+SYSTEM_INIT_DRY_RUN_OPTION = typer.Option(
+    False,
+    "--dry-run",
+    help="Show the planned changes without applying them.",
+)
+SYSTEM_INIT_JSON_OPTION = typer.Option(
+    False,
+    "--json",
+    help="Output plan details as JSON.",
 )
 
 _PROBE_CATEGORY_SET = frozenset(PROBE_CATEGORY_VALUES)
@@ -389,6 +510,33 @@ class InstancePaths:
     state: Path
 
 
+@dataclass(slots=True)
+class BootstrapOptions:
+    """Resolved settings used during system bootstrap."""
+
+    config: AppConfig
+    service_user: str
+    service_group: str | None
+    overrides: dict[str, object]
+
+
+@dataclass(slots=True)
+class BootstrapPlan:
+    """Aggregated actions needed to satisfy bootstrap requirements."""
+
+    service: ServiceAccountPlan
+    directories: DirectoryPlan
+
+    def has_changes(self) -> bool:
+        """Return True when any actions are required."""
+        return bool(self.service.actions or self.directories.actions)
+
+    def requires_service_account_creation(self) -> bool:
+        """Return True when the plan needs to create user/group resources."""
+        return any(
+            action.kind in {"ensure-group", "create-user"} for action in self.service.actions
+        )
+
 def _instance_paths_from_entry(
     config: AppConfig,
     name: str,
@@ -438,6 +586,233 @@ def _coerce_port(value: object, default: int) -> int:
             except ValueError:
                 return default
     return default
+
+
+def _prompt_str(message: str, default: str) -> str:
+    value = typer.prompt(message, default=default)
+    return value.strip() or default
+
+
+def _prompt_optional_str(message: str, default: str | None) -> str | None:
+    default_display = default if default is not None else ""
+    value = typer.prompt(message, default=default_display)
+    stripped = value.strip()
+    if not stripped:
+        return default
+    return stripped
+
+
+def _prompt_path(message: str, default: Path) -> Path:
+    value = typer.prompt(message, default=str(default))
+    stripped = value.strip()
+    return Path(stripped or str(default)).expanduser()
+
+
+def _resolve_bootstrap_options(
+    *,
+    config_file: Path | None,
+    service_user: str | None,
+    service_group: str | None,
+    install_root: Path | None,
+    instance_root: Path | None,
+    state_dir: Path | None,
+    logs_dir: Path | None,
+    runtime_dir: Path | None,
+    templates_dir: Path | None,
+    backups_root: Path | None,
+    defaults: bool,
+    interactive: bool,
+) -> BootstrapOptions:
+    base_config = load_config(config_file=config_file)
+
+    resolved_service_user = (
+        service_user
+        if service_user is not None
+        else (
+            _prompt_str("Service user", base_config.service_user)
+            if interactive and not defaults
+            else base_config.service_user
+        )
+    ).strip()
+    if not resolved_service_user:
+        raise typer.BadParameter("Service user cannot be empty.")
+
+    resolved_service_group = (
+        service_group
+        if service_group is not None
+        else (
+            _prompt_optional_str(
+                "Primary service group (leave blank to match service user)",
+                base_config.service_user,
+            )
+            if interactive and not defaults
+            else resolved_service_user
+        )
+    )
+    if resolved_service_group is not None and not resolved_service_group.strip():
+        resolved_service_group = None
+
+    def _resolve_path(option: Path | None, prompt_message: str, default_value: Path) -> Path:
+        if option is not None:
+            return option.expanduser()
+        if interactive and not defaults:
+            return _prompt_path(prompt_message, default_value)
+        return default_value
+
+    resolved_install_root = _resolve_path(
+        install_root, "Install root", base_config.install_root
+    )
+    resolved_instance_root = _resolve_path(
+        instance_root, "Instance root", base_config.instance_root
+    )
+    resolved_state_dir = _resolve_path(state_dir, "State directory", base_config.state_dir)
+    resolved_logs_dir = _resolve_path(logs_dir, "Logs directory", base_config.logs_dir)
+    resolved_runtime_dir = _resolve_path(
+        runtime_dir, "Runtime directory", base_config.runtime_dir
+    )
+    resolved_templates_dir = _resolve_path(
+        templates_dir, "Templates directory", base_config.templates_dir
+    )
+    resolved_backups_root = _resolve_path(
+        backups_root, "Backups root", base_config.backups.root
+    )
+
+    overrides: dict[str, object] = {
+        "service_user": resolved_service_user,
+        "install_root": str(resolved_install_root),
+        "instance_root": str(resolved_instance_root),
+        "state_dir": str(resolved_state_dir),
+        "logs_dir": str(resolved_logs_dir),
+        "runtime_dir": str(resolved_runtime_dir),
+        "templates_dir": str(resolved_templates_dir),
+        "backups": {
+            "root": str(resolved_backups_root),
+        },
+    }
+
+    config = load_config(config_file=config_file, overrides=overrides)
+
+    return BootstrapOptions(
+        config=config,
+        service_user=resolved_service_user,
+        service_group=resolved_service_group,
+        overrides=overrides,
+    )
+
+
+def _collect_bootstrap_directory_specs(config: AppConfig) -> list[DirectorySpec]:
+    """Return DirectorySpec entries for required bootstrap directories."""
+    candidates: list[tuple[Path, int]] = [
+        (config.config_file.parent, 0o750),
+        (config.install_root, 0o750),
+        (config.instance_root, 0o750),
+        (config.state_dir, 0o750),
+        (config.registry_dir, 0o750),
+        (config.logs_dir, 0o750),
+        (config.runtime_dir, 0o750),
+        (config.runtime_dir / "instances", 0o750),
+        (config.runtime_dir / "systemd", 0o750),
+        (config.runtime_dir / "nginx", 0o750),
+        (config.runtime_dir / "nginx" / "sites-available", 0o750),
+        (config.runtime_dir / "nginx" / "sites-enabled", 0o750),
+        (config.templates_dir, 0o755),
+        (config.backups.root, 0o750),
+        (config.backups.index.parent, 0o750),
+    ]
+
+    specs: list[DirectorySpec] = []
+    seen: set[Path] = set()
+    for path, mode in candidates:
+        resolved = path.expanduser()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        specs.append(DirectorySpec(path=resolved, mode=mode))
+    return specs
+
+
+def _render_bootstrap_plan(plan: BootstrapPlan) -> None:
+    """Render bootstrap actions for human consumption."""
+    console.print("[bold]Service account[/bold]")
+    if plan.service.actions:
+        for svc_action in plan.service.actions:
+            command = " ".join(svc_action.command) if svc_action.command else ""
+            detail = f" ({command})" if command else ""
+            console.print(f"  • {svc_action.description}{detail}")
+    else:
+        console.print("  • No changes required.")
+    if plan.service.warnings:
+        console.print("  Warnings:")
+        for warning in plan.service.warnings:
+            console.print(f"    - {warning}")
+
+    console.print()
+    console.print("[bold]Directories[/bold]")
+    if plan.directories.actions:
+        for dir_action in plan.directories.actions:
+            mode_label = (
+                f" mode={dir_action.mode:04o}" if dir_action.mode is not None else ""
+            )
+            owner_label = ""
+            if dir_action.owner or dir_action.group:
+                owner_label = (
+                    f" owner={dir_action.owner or '-'}:{dir_action.group or '-'}"
+                )
+            console.print(
+                f"  • {dir_action.kind} {dir_action.path}{mode_label}{owner_label}"
+            )
+    else:
+        console.print("  • No directory changes required.")
+    if plan.directories.warnings:
+        console.print("  Warnings:")
+        for warning in plan.directories.warnings:
+            console.print(f"    - {warning}")
+
+
+def _bootstrap_plan_to_json(
+    plan: BootstrapPlan, options: BootstrapOptions, *, dry_run: bool
+) -> dict[str, object]:
+    """Return a JSON-serialisable representation of the bootstrap plan."""
+    return {
+        "dry_run": dry_run,
+        "changes_planned": plan.has_changes(),
+        "service_account": {
+            "actions": [
+                {
+                    "kind": action.kind,
+                    "description": action.description,
+                    "command": action.command,
+                }
+                for action in plan.service.actions
+            ],
+            "warnings": list(plan.service.warnings),
+        },
+        "directories": {
+            "actions": [
+                {
+                    "kind": action.kind,
+                    "path": str(action.path),
+                    "mode": f"{action.mode:04o}" if action.mode is not None else None,
+                    "owner": action.owner,
+                    "group": action.group,
+                }
+                for action in plan.directories.actions
+            ],
+            "warnings": list(plan.directories.warnings),
+        },
+        "options": {
+            "config_file": str(options.config.config_file),
+            "service_user": options.service_user,
+            "service_group": options.service_group,
+            "install_root": str(options.config.install_root),
+            "instance_root": str(options.config.instance_root),
+            "state_dir": str(options.config.state_dir),
+            "logs_dir": str(options.config.logs_dir),
+            "runtime_dir": str(options.config.runtime_dir),
+            "templates_dir": str(options.config.templates_dir),
+            "backups_root": str(options.config.backups.root),
+        },
+    }
 
 
 def _collect_provider_diagnostics(
@@ -691,6 +1066,9 @@ def _root(  # noqa: D401 - Typer displays help for us, docstring optional.
             console.print(f"abssctl {__version__}")
             op.success("Reported CLI version.", changed=0)
         raise typer.Exit(code=0)
+
+    if ctx.invoked_subcommand == "system":
+        return
 
     _ensure_runtime(ctx, config_file, lock_timeout)
 
@@ -1462,6 +1840,169 @@ def support_bundle(ctx: typer.Context) -> None:
         )
 
 
+system_app = typer.Typer(help="Manage system bootstrap and recovery tasks.")
+
+
+@system_app.command("init")
+def system_init(
+    ctx: typer.Context,
+    config_file: Path | None = SYSTEM_INIT_CONFIG_FILE_OPTION,
+    service_user: str | None = SYSTEM_INIT_SERVICE_USER_OPTION,
+    service_group: str | None = SYSTEM_INIT_SERVICE_GROUP_OPTION,
+    install_root: Path | None = SYSTEM_INIT_INSTALL_ROOT_OPTION,
+    instance_root: Path | None = SYSTEM_INIT_INSTANCE_ROOT_OPTION,
+    state_dir: Path | None = SYSTEM_INIT_STATE_DIR_OPTION,
+    logs_dir: Path | None = SYSTEM_INIT_LOGS_DIR_OPTION,
+    runtime_dir: Path | None = SYSTEM_INIT_RUNTIME_DIR_OPTION,
+    templates_dir: Path | None = SYSTEM_INIT_TEMPLATES_DIR_OPTION,
+    backups_root: Path | None = SYSTEM_INIT_BACKUPS_ROOT_OPTION,
+    allow_create_user: bool | None = SYSTEM_INIT_ALLOW_CREATE_USER_OPTION,
+    yes: bool = SYSTEM_INIT_YES_OPTION,
+    defaults: bool = SYSTEM_INIT_DEFAULTS_OPTION,
+    dry_run: bool = SYSTEM_INIT_DRY_RUN_OPTION,
+    json_output: bool = SYSTEM_INIT_JSON_OPTION,
+) -> None:
+    """Bootstrap abssctl prerequisites (service account and directories)."""
+    interactive = sys.stdin.isatty() and not yes and not defaults
+    if json_output and interactive:
+        console.print(
+            "[red]--json cannot be used in interactive mode. Use --yes or --defaults.[/red]"
+        )
+        raise typer.Exit(code=2)
+    if not interactive and not yes and not defaults and not dry_run:
+        console.print(
+            "[red]system init requires --yes, --defaults, or --dry-run when stdin "
+            "is not a TTY.[/red]"
+        )
+        raise typer.Exit(code=2)
+
+    del ctx
+
+    try:
+        options = _resolve_bootstrap_options(
+            config_file=config_file,
+            service_user=service_user,
+            service_group=service_group,
+            install_root=install_root,
+            instance_root=instance_root,
+            state_dir=state_dir,
+            logs_dir=logs_dir,
+            runtime_dir=runtime_dir,
+            templates_dir=templates_dir,
+            backups_root=backups_root,
+            defaults=defaults,
+            interactive=interactive,
+        )
+    except typer.BadParameter as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from exc
+
+    group_value = (
+        options.service_group if options.service_group is not None else options.service_user
+    )
+    service_spec = ServiceAccountSpec(
+        name=options.service_user,
+        group=group_value,
+        system=True,
+        create_group=group_value is not None,
+    )
+    service_plan = plan_service_account(service_spec)
+    directory_plan = plan_directories(_collect_bootstrap_directory_specs(options.config))
+    plan = BootstrapPlan(service=service_plan, directories=directory_plan)
+
+    requires_account = plan.requires_service_account_creation()
+
+    if requires_account and not dry_run:
+        if allow_create_user is None and interactive:
+            allow_create_user = typer.confirm(
+                "Create the service user/group if missing?", default=True
+            )
+        if allow_create_user is not True:
+            console.print(
+                "[red]Service account resources are missing. Re-run with --allow-create-user "
+                "or create them manually before applying the bootstrap.[/red]"
+            )
+            raise typer.Exit(code=3)
+
+    plan_payload = _bootstrap_plan_to_json(plan, options, dry_run=dry_run) if json_output else None
+
+    if not json_output:
+        console.rule("[bold]Bootstrap Plan[/bold]")
+        _render_bootstrap_plan(plan)
+        console.print()
+
+    if not plan.has_changes():
+        if json_output:
+            plan_payload = plan_payload or {}
+            plan_payload["applied"] = False
+            plan_payload["status"] = "no-changes"
+            console.print(
+                json.dumps(plan_payload, indent=2),
+                soft_wrap=True,
+                overflow="ignore",
+            )
+        else:
+            console.print(
+                "[green]No changes required; system already matches expectations.[/green]"
+            )
+        return
+
+    if dry_run:
+        if json_output:
+            plan_payload = plan_payload or {}
+            plan_payload["applied"] = False
+            plan_payload["status"] = "dry-run"
+            console.print(
+                json.dumps(plan_payload, indent=2),
+                soft_wrap=True,
+                overflow="ignore",
+            )
+        else:
+            console.print("[yellow]Dry run only — no changes were applied.[/yellow]")
+        return
+
+    proceed = True
+    if not yes and not defaults:
+        proceed = typer.confirm("Apply these changes?", default=True)
+    if not proceed:
+        if json_output:
+            plan_payload = plan_payload or {}
+            plan_payload["applied"] = False
+            plan_payload["status"] = "aborted"
+            console.print(
+                json.dumps(plan_payload, indent=2),
+                soft_wrap=True,
+                overflow="ignore",
+            )
+        else:
+            console.print("[yellow]Aborted; no changes were made.[/yellow]")
+        return
+
+    try:
+        apply_service_account_plan(plan.service)
+        apply_directory_plan(plan.directories)
+    except subprocess.CalledProcessError as exc:
+        console.print(
+            f"[red]Command '{' '.join(str(token) for token in exc.cmd)}' failed: {exc}[/red]"
+        )
+        raise typer.Exit(code=4) from exc
+    except OSError as exc:
+        console.print(f"[red]Filesystem operation failed: {exc}[/red]")
+        raise typer.Exit(code=4) from exc
+
+    if json_output:
+        plan_payload = plan_payload or {}
+        plan_payload["applied"] = True
+        plan_payload["status"] = "applied"
+        console.print(
+            json.dumps(plan_payload, indent=2),
+            soft_wrap=True,
+            overflow="ignore",
+        )
+    else:
+        console.print("[green]Bootstrap completed successfully.[/green]")
+
+
 instances_app = typer.Typer(help="Manage Actual Budget Sync Server instances.")
 ports_app = typer.Typer(help="Inspect and manage port reservations.")
 versions_app = typer.Typer(help="Manage installed Sync Server versions.")
@@ -1469,6 +2010,7 @@ backups_app = typer.Typer(help="Create and reconcile instance backups.")
 config_app = typer.Typer(help="Inspect and manage global configuration.")
 tls_app = typer.Typer(help="Manage TLS certificates and validation.")
 
+app.add_typer(system_app, name="system")
 app.add_typer(instances_app, name="instance")
 app.add_typer(ports_app, name="ports")
 app.add_typer(versions_app, name="version")

@@ -1,3 +1,4 @@
+"""Unit tests for bootstrap service account helpers."""
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -12,6 +13,7 @@ def _raise_key_error(*args: object, **kwargs: object) -> None:
 
 
 def test_plan_creates_group_and_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Plan should request group and user creation when missing."""
     from abssctl.bootstrap import service_accounts
 
     monkeypatch.setattr(service_accounts.pwd, "getpwnam", _raise_key_error)
@@ -27,6 +29,7 @@ def test_plan_creates_group_and_user(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_plan_no_actions_when_account_matches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Plan should be empty when user and group already match expectations."""
     from abssctl.bootstrap import service_accounts
 
     pw_entry = SimpleNamespace(
@@ -54,6 +57,7 @@ def test_plan_no_actions_when_account_matches(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_plan_warns_on_mismatched_group(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Plan should warn if the existing account uses a different primary group."""
     from abssctl.bootstrap import service_accounts
 
     pw_entry = SimpleNamespace(

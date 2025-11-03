@@ -1,13 +1,13 @@
 """Utilities for inspecting and planning service account provisioning."""
 from __future__ import annotations
 
-import subprocess
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Callable, Literal
-
 import grp
 import pwd
+import subprocess
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Literal
 
 
 @dataclass(slots=True)
@@ -62,7 +62,7 @@ def inspect_service_account(spec: ServiceAccountSpec) -> ServiceAccountStatus:
         uid = pw_entry.pw_uid
         gid = pw_entry.pw_gid
         home = Path(pw_entry.pw_dir)
-        shell = Path(pw_entry.pw_shell)
+        shell = pw_entry.pw_shell
         try:
             primary_group = grp.getgrgid(gid).gr_name
         except KeyError:
@@ -141,7 +141,9 @@ def plan_service_account(spec: ServiceAccountSpec) -> ServiceAccountPlan:
     else:
         if spec.group and status.primary_group and status.primary_group != spec.group:
             plan.warnings.append(
-                f"User '{spec.name}' primary group is '{status.primary_group}', expected '{spec.group}'."
+                "User "
+                f"'{spec.name}' primary group is '{status.primary_group}', "
+                f"expected '{spec.group}'."
             )
         if spec.home and status.home and status.home != spec.home:
             plan.warnings.append(

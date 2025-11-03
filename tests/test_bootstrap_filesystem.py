@@ -1,6 +1,8 @@
+"""Unit tests for bootstrap filesystem planning helpers."""
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from abssctl.bootstrap.filesystem import (
     DirectorySpec,
@@ -9,7 +11,8 @@ from abssctl.bootstrap.filesystem import (
 )
 
 
-def test_plan_creates_missing_directory(tmp_path) -> None:
+def test_plan_creates_missing_directory(tmp_path: Path) -> None:
+    """Plan should create directories that are absent on disk."""
     target = tmp_path / "var" / "lib" / "abssctl"
     spec = DirectorySpec(path=target, mode=0o750)
 
@@ -22,7 +25,8 @@ def test_plan_creates_missing_directory(tmp_path) -> None:
     assert mode == 0o750
 
 
-def test_plan_adjusts_permissions(tmp_path) -> None:
+def test_plan_adjusts_permissions(tmp_path: Path) -> None:
+    """Plan should adjust permissions when they differ from expectations."""
     target = tmp_path / "var" / "log" / "abssctl"
     target.mkdir(parents=True, mode=0o700)
     os.chmod(target, 0o700)
@@ -38,7 +42,8 @@ def test_plan_adjusts_permissions(tmp_path) -> None:
     assert mode == 0o750
 
 
-def test_plan_warns_on_non_directory(tmp_path) -> None:
+def test_plan_warns_on_non_directory(tmp_path: Path) -> None:
+    """Plan should warn when the target path is not a directory."""
     target = tmp_path / "var" / "lib" / "abssctl"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("not a directory", encoding="utf-8")
