@@ -7,11 +7,11 @@
 5. Flesh out automated tests for Beta features and idempotency guarantees.
    1. Inventory coverage gaps across TLS, backup restore/reconcile, doctor, and lifecycle commands; prioritise scenarios lacking idempotency/regression tests.
       - 5.1.1 (done) – Capture current CLI artefact snapshots (registry, backups, nginx, operations logs) before/after runs so idempotency assertions can share helpers.
-      - 5.1.2 – TLS idempotency coverage (reinstall, system↔custom toggles, log stability) to ensure repeated `tls` commands remain safe.
-         - 5.1.2.1 – Add a CLI test that runs `tls install --yes` twice on the same instance and asserts registry, copied cert/key, nginx site render, and operations log entries remain unchanged on the second run.
-         - 5.1.2.2 – Add a CLI test that flips from custom (`tls install`) to system (`tls use-system`) and back to custom, confirming state transitions and rendered paths stay consistent with each rerun.
-         - 5.1.2.3 – Extend snapshot helpers to capture TLS artefacts (copied cert/key hashes, nginx site checksum) so assertions can compare before/after states for the above scenarios.
-         - 5.1.2.4 – Cover dry-run idempotency by invoking `tls install --dry-run` followed by a real install to ensure dry-run leaves no residue and install still succeeds with correct metadata.
+      - 5.1.2 (done) – TLS idempotency coverage (reinstall, system↔custom toggles, log stability) to ensure repeated `tls` commands remain safe.
+         - 5.1.2.1 (done) – Add a CLI test that runs `tls install --yes` twice on the same instance and asserts registry, copied cert/key, nginx site render, and operations log entries remain unchanged on the second run.
+         - 5.1.2.2 (done) – Add a CLI test that flips from custom (`tls install`) to system (`tls use-system`) and back to custom, confirming state transitions and rendered paths stay consistent with each rerun.
+         - 5.1.2.3 (done) – Extend snapshot helpers to capture TLS artefacts (copied cert/key hashes, nginx site checksum) so assertions can compare before/after states for the above scenarios.
+         - 5.1.2.4 (done) – Cover dry-run idempotency by invoking `tls install --dry-run` followed by a real install to ensure dry-run leaves no residue and install still succeeds with correct metadata.
       - 5.1.3 – Backup restore/reconcile repeatability (default restore with pre-backup, consecutive restores, multiple reconcile applies) to guard metadata and filesystem state.
          - 5.1.3.1 – Write a CLI test exercising `backup restore` twice with the same archive (first with default pre-backup enabled, second with `--no-pre-backup`) and assert registry metadata, `.pre-restore` rotations, and backup index fields remain consistent.
          - 5.1.3.2 – Add coverage for `backup restore --dry-run` immediately followed by a real restore to confirm dry-run leaves no temporary directories or metadata updates.

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import grp
 import hashlib
 import json
@@ -153,6 +154,17 @@ def _fake_completed(command: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess(command, returncode=0, stdout="", stderr="")
 
 
+def _file_digest(path: Path) -> str | None:
+    """Return the SHA256 digest of *path*, if it exists."""
+    if not path.exists():
+        return None
+    hasher = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(8192), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
 def _prepare_environment(
     tmp_path: Path,
     *,
@@ -262,6 +274,72 @@ def _prepare_environment(
     else:
         env["ABSSCTL_SKIP_NPM"] = "1"
     return env, state_dir
+
+
+def _capture_tls_snapshot(
+    env: dict[str, str],
+    state_dir: Path,
+    tmp_path: Path,
+    instance: str,
+) -> dict[str, object]:
+    """Capture TLS-related artefacts for *instance* to compare across runs."""
+    config_path = Path(env["ABSSCTL_CONFIG_FILE"])
+    config_data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    system_config = config_data["tls"]["system"]
+    cert_dir = Path(system_config["cert"]).expanduser().parent
+    key_dir = Path(system_config["key"]).expanduser().parent
+    safe_name = instance.replace("/", "-")
+    dest_cert = cert_dir / f"abssctl-{safe_name}.pem"
+    dest_key = key_dir / f"abssctl-{safe_name}.key"
+    dest_chain = cert_dir / f"abssctl-{safe_name}.chain.pem"
+
+    registry = StateRegistry(state_dir / "registry")
+    entry = registry.get_instance(instance)
+    assert entry is not None, f"Instance '{instance}' missing from registry"
+    tls_block = copy.deepcopy(entry.get("tls", {}))
+    metadata = copy.deepcopy(entry.get("metadata", {}))
+
+    cert_ref_digest: str | None = None
+    key_ref_digest: str | None = None
+    if isinstance(tls_block, dict):
+        cert_ref_raw = tls_block.get("cert")
+        key_ref_raw = tls_block.get("key")
+        if cert_ref_raw:
+            cert_ref_digest = _file_digest(Path(str(cert_ref_raw)).expanduser())
+        if key_ref_raw:
+            key_ref_digest = _file_digest(Path(str(key_ref_raw)).expanduser())
+
+    def _backups_for(path: Path) -> list[dict[str, object]]:
+        pattern = f"{path.name}.bak-*"
+        backups = []
+        for backup_path in sorted(path.parent.glob(pattern)):
+            backups.append({"path": str(backup_path), "digest": _file_digest(backup_path)})
+        return backups
+
+    operations_path = state_dir.parent / "logs" / "operations.jsonl"
+    operations_lines = operations_path.read_text(encoding="utf-8").splitlines()
+    last_operation = json.loads(operations_lines[-1]) if operations_lines else None
+
+    site_path = tmp_path / "run" / "nginx" / "sites-available" / f"abssctl-{instance}.conf"
+    site_contents = site_path.read_text(encoding="utf-8") if site_path.exists() else None
+
+    return {
+        "tls_block": tls_block,
+        "metadata": metadata,
+        "cert_path": str(dest_cert),
+        "cert_digest": _file_digest(dest_cert),
+        "cert_backups": _backups_for(dest_cert),
+        "key_path": str(dest_key),
+        "key_digest": _file_digest(dest_key),
+        "key_backups": _backups_for(dest_key),
+        "registry_cert_digest": cert_ref_digest,
+        "registry_key_digest": key_ref_digest,
+        "chain_path": str(dest_chain),
+        "chain_digest": _file_digest(dest_chain),
+        "operations_len": len(operations_lines),
+        "last_operation": last_operation,
+        "nginx_site": site_contents,
+    }
 
 
 def test_version_option_outputs_package_version(tmp_path: Path) -> None:
@@ -523,6 +601,36 @@ def test_tls_install_dry_run_skips_changes(tmp_path: Path) -> None:
     assert not (tls_root / "abssctl-alpha.pem").exists()
     assert not (tls_root / "abssctl-alpha.key").exists()
 
+    operations_path = state_dir.parent / "logs" / "operations.jsonl"
+    dry_run_lines = operations_path.read_text(encoding="utf-8").splitlines()
+    assert dry_run_lines, "operations log should record the dry-run"
+    dry_run_record = json.loads(dry_run_lines[-1])
+    assert dry_run_record["command"] == "tls install"
+    assert dry_run_record["result"]["status"] == "success"
+    dry_run_steps = _index_steps(dry_run_record)
+    assert dry_run_steps["tls.copy.cert"]["status"] == "skipped"
+    assert dry_run_steps["tls.copy.key"]["status"] == "skipped"
+
+    applied = runner.invoke(
+        app,
+        [
+            "tls",
+            "install",
+            "alpha",
+            "--cert",
+            str(cert_path),
+            "--key",
+            str(key_path),
+            "--yes",
+        ],
+        env=env,
+    )
+    assert applied.exit_code == 0
+    snapshot = _capture_tls_snapshot(env, state_dir, tmp_path, "alpha")
+    assert snapshot["tls_block"].get("source") == "custom"
+    assert snapshot["cert_digest"] == _file_digest(cert_path)
+    assert snapshot["key_digest"] == _file_digest(key_path)
+
 
 def test_tls_install_permission_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Ownership adjustment failures abort the install."""
@@ -556,6 +664,132 @@ def test_tls_install_permission_error(tmp_path: Path, monkeypatch: pytest.Monkey
     entry = registry.get_instance("alpha")
     assert entry is not None
     assert "tls" not in entry
+
+
+def test_tls_install_reinstall_preserves_state(tmp_path: Path) -> None:
+    """Re-running `tls install` keeps registry state stable and creates backups."""
+    instances = [{"name": "alpha", "port": 5000, "version": "current"}]
+    env, state_dir = _prepare_environment(tmp_path, instances=instances)
+    cert_path, key_path = _create_tls_fixture(tmp_path, name="alpha.example")
+
+    first = runner.invoke(
+        app,
+        [
+            "tls",
+            "install",
+            "alpha",
+            "--cert",
+            str(cert_path),
+            "--key",
+            str(key_path),
+            "--yes",
+        ],
+        env=env,
+    )
+    assert first.exit_code == 0
+    first_snapshot = _capture_tls_snapshot(env, state_dir, tmp_path, "alpha")
+
+    second = runner.invoke(
+        app,
+        [
+            "tls",
+            "install",
+            "alpha",
+            "--cert",
+            str(cert_path),
+            "--key",
+            str(key_path),
+            "--yes",
+        ],
+        env=env,
+    )
+    assert second.exit_code == 0
+    second_snapshot = _capture_tls_snapshot(env, state_dir, tmp_path, "alpha")
+
+    assert second_snapshot["tls_block"] == first_snapshot["tls_block"]
+    assert second_snapshot["metadata"].get("tls_source") == "custom"
+    first_updated = first_snapshot["metadata"].get("tls_updated_at")
+    second_updated = second_snapshot["metadata"].get("tls_updated_at")
+    assert first_updated and second_updated
+    assert datetime.fromisoformat(second_updated) >= datetime.fromisoformat(first_updated)
+
+    source_cert_digest = _file_digest(cert_path)
+    source_key_digest = _file_digest(key_path)
+    assert second_snapshot["cert_digest"] == first_snapshot["cert_digest"] == source_cert_digest
+    assert second_snapshot["key_digest"] == first_snapshot["key_digest"] == source_key_digest
+    assert second_snapshot["registry_cert_digest"] == source_cert_digest
+    assert second_snapshot["registry_key_digest"] == source_key_digest
+
+    assert second_snapshot["cert_backups"], "expected certificate backup after reinstall"
+    assert second_snapshot["cert_backups"][-1]["digest"] == first_snapshot["cert_digest"]
+    assert second_snapshot["key_backups"], "expected key backup after reinstall"
+    assert second_snapshot["key_backups"][-1]["digest"] == first_snapshot["key_digest"]
+
+    assert second_snapshot["operations_len"] >= first_snapshot["operations_len"] + 1
+    record = second_snapshot["last_operation"]
+    assert record is not None
+    assert record["command"] == "tls install"
+    assert record["result"]["status"] == "success"
+
+
+def test_tls_use_system_toggle_round_trip(tmp_path: Path) -> None:
+    """Switching system/custom TLS repeatedly keeps artefacts consistent."""
+    instances = [{"name": "alpha", "port": 5000, "version": "current"}]
+    env, state_dir = _prepare_environment(tmp_path, instances=instances)
+    cert_path, key_path = _create_tls_fixture(tmp_path, name="alpha.example")
+
+    install_result = runner.invoke(
+        app,
+        [
+            "tls",
+            "install",
+            "alpha",
+            "--cert",
+            str(cert_path),
+            "--key",
+            str(key_path),
+            "--yes",
+        ],
+        env=env,
+    )
+    assert install_result.exit_code == 0
+    custom_snapshot = _capture_tls_snapshot(env, state_dir, tmp_path, "alpha")
+
+    config_path = Path(env["ABSSCTL_CONFIG_FILE"])
+    config_data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    system_cert_path = Path(config_data["tls"]["system"]["cert"]).expanduser()
+    system_key_path = Path(config_data["tls"]["system"]["key"]).expanduser()
+
+    switch_result = runner.invoke(app, ["tls", "use-system", "alpha"], env=env)
+    assert switch_result.exit_code == 0
+    system_snapshot = _capture_tls_snapshot(env, state_dir, tmp_path, "alpha")
+    assert system_snapshot["tls_block"].get("source") == "system"
+    assert system_snapshot["tls_block"].get("cert") == str(system_cert_path)
+    assert system_snapshot["tls_block"].get("key") == str(system_key_path)
+    assert system_snapshot["registry_cert_digest"] == _file_digest(system_cert_path)
+    assert system_snapshot["registry_key_digest"] == _file_digest(system_key_path)
+
+    reinstall = runner.invoke(
+        app,
+        [
+            "tls",
+            "install",
+            "alpha",
+            "--cert",
+            str(cert_path),
+            "--key",
+            str(key_path),
+            "--yes",
+        ],
+        env=env,
+    )
+    assert reinstall.exit_code == 0
+    final_snapshot = _capture_tls_snapshot(env, state_dir, tmp_path, "alpha")
+    assert final_snapshot["tls_block"] == custom_snapshot["tls_block"]
+    assert final_snapshot["cert_digest"] == _file_digest(cert_path)
+    assert final_snapshot["key_digest"] == _file_digest(key_path)
+    assert final_snapshot["registry_cert_digest"] == _file_digest(cert_path)
+    assert final_snapshot["registry_key_digest"] == _file_digest(key_path)
 
 
 def test_tls_verify_detects_lets_encrypt(tmp_path: Path) -> None:
