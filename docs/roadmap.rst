@@ -62,7 +62,7 @@ Beta — Basic Functions
 - [x] Ship the ``system init`` bootstrap command (interactive wizard plus
   unattended flags, discovery, and ``--rebuild-state`` support) so new or
   existing hosts can be prepared consistently.
-- [ ] Flesh out automated tests (unit/integration fakes) to cover the above
+- [x] Flesh out automated tests (unit/integration fakes) to cover the above
   Beta features and guard idempotency.
 
 Release Candidate — Quality & Docs

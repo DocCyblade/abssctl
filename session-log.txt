@@ -242,6 +242,7 @@
 - Introduced reusable CLI harness/instance snapshot fixtures, richer `_prepare_environment` seeding, and helper factories for TLS/backups to streamline idempotency testing; `make quick-tests` remains green.
 - Confirmed TLS/backup/doctor/lifecycle idempotency suites run via the new harness, updated `ai-tasks.txt`, and verified `make quick-tests` stays green.
 - Added pytest `slow` marker plumbing and updated `make quick-tests` to skip slow tests by default so we can layer longer suites without slowing daily loops.
+- Ran coverage (`pytest --cov=src/abssctl --cov-report=term-missing`), logged results in `docs/requirements/test-coverage-report.rst`, added a `make coverage` target, and marked remaining risks (version provider, CLI error paths, bootstrap failures).
 
 ## Wrap up:
 

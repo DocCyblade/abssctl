@@ -67,6 +67,10 @@ quick-tests: $(DEV_VENV)/.installed
 	$(DEV_VENV)/bin/python -m mypy src
 	$(DEV_VENV)/bin/python -m pytest -m "not slow"
 
+.PHONY: coverage
+coverage: $(DEV_VENV)/.installed
+	$(DEV_VENV)/bin/python -m pytest --cov=src/abssctl --cov-report=term-missing
+
 ## lint: Run Ruff via .venv-test (test env)
 .PHONY: lint
 lint: $(TEST_VENV)/.installed
