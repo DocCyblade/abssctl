@@ -91,7 +91,7 @@ Proposed Test Additions
    - Simulate ``npm`` missing/non-zero exit/malformed JSON to confirm the provider returns ``[]`` and
      does not write cache files.
    - Cover ``refresh_cache`` success path and cache write failure tolerance (mocking ``Path.write_text``).
-2. **B2-2 – `providers.version_installer` validation & integrity**
+2. **B2-2 – `providers.version_installer` validation & integrity** *(Completed 2025-11-03)*
    - Reject blank/whitespace version strings and existing target directories with ``VersionInstallError``.
    - Surface ``VersionInstallError`` when npm succeeds but the package directory is absent.
    - Validate dry-run metadata includes ``npm_args`` and that integrity parsing extracts npm/tarball

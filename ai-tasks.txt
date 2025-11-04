@@ -4,11 +4,6 @@
 #
 # - AI do not edit above this line! Keep this header!
 
-B2-2 – providers.version_installer validation & integrity
-- Add tests asserting blank/whitespace versions and pre-existing install directories raise VersionInstallError.
-- Simulate npm success without package directory to confirm VersionInstallError surfaces.
-- Extend integrity parsing tests for npm_args preservation, tarball digest extraction, and malformed integrity strings.
-
 B2-3 – version install CLI error handling
 - CLI integration tests for already-registered version (rc=2, filesystem untouched).
 - Inject installer error to validate rc=4 and logged error step.
