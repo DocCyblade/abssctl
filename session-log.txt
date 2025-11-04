@@ -245,15 +245,16 @@
 - Ran coverage (`pytest --cov=src/abssctl --cov-report=term-missing`), logged results in `docs/requirements/test-coverage-report.rst`, added a `make coverage` target, and marked remaining risks (version provider, CLI error paths, bootstrap failures).
 
 ## Wrap up:
+Completed Beta idempotency coverage, added reusable test harness/snapshots, wired slow-test & coverage tooling, documented manual-server constraints, and aligned ai-tasks/roadmap/status for the RC push ahead.
 
 -----------------------------------------
 
 ----------------------- Sessions logging above this line only ----------------------
 
 # Next Steps / TODO:
-- Item 5.1: inventory coverage gaps for TLS, backup restore/reconcile, doctor, and lifecycle commands (idempotency focus).
-- Item 5.2: extend pytest fixtures for broader idempotency and integration scenarios.
-- Item 5.3: add targeted tests ensuring repeated command execution remains idempotent (restore reruns, enable/disable loops, TLS install reruns).
+- Raise coverage for version management and CLI error paths (npm interactions, install/switch/uninstall failure handling).
+- Begin RC feature implementation: support-bundle command, doctor `--fix`, documentation/CI polish.
+- Plan manual-server migration from tarball installs to npm once abssctl version management is ready.
 
 # Next Session Primer
-- Start a new session focused on ai-tasks section 5: audit idempotency coverage (task 5.1), outline fixture enhancements (5.2), and queue concrete idempotency tests (5.3).
+- Kick off RC-track work: target the version-provider/CLI coverage gaps, outline support-bundle/doctor `--fix` plans, and coordinate the manual-server migration strategy.
