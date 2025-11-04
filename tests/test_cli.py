@@ -1551,6 +1551,38 @@ def test_instance_delete_triggers_backup(tmp_path: Path, monkeypatch: pytest.Mon
     assert state_registry.get_instance("alpha") is None
 
 
+def test_instance_delete_second_run_detects_missing(tmp_path: Path) -> None:
+    """Deleting twice should report not found without altering backups metadata."""
+    instances = [{"name": "alpha", "version": "25.8.0", "port": 5000}]
+    env, state_dir = _prepare_environment(tmp_path, instances=instances)
+
+    backups_root = tmp_path / "backups"
+    data_dir = tmp_path / "instances" / "alpha"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / "db.sqlite").write_text("content", encoding="utf-8")
+
+    first = runner.invoke(
+        app,
+        ["instance", "delete", "alpha", "--yes", "--backup-message", "cleanup"],
+        env=env,
+    )
+    assert first.exit_code == 0
+
+    second = runner.invoke(
+        app,
+        ["instance", "delete", "alpha", "--yes"],
+        env=env,
+    )
+    assert second.exit_code == 2
+    assert "not found" in second.stdout
+
+    registry = BackupsRegistry(backups_root, backups_root / "backups.json")
+    entries = registry.list_entries()
+    assert entries and entries[0]["message"] == "cleanup"
+    state_registry = StateRegistry(state_dir / "registry")
+    assert state_registry.get_instance("alpha") is None
+
+
 def test_version_check_updates_reports_upgrade(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2679,6 +2711,28 @@ def _index_steps(record: dict[str, object]) -> dict[str, dict[str, object]]:
     return steps
 
 
+def _instance_snapshot(state_dir: Path, name: str) -> dict[str, object]:
+    """Return a copy of the registry entry and latest operation for *name*."""
+    instances = _registry_instances(state_dir)
+    entry = next((item for item in instances if item.get("name") == name), None)
+    assert entry is not None, f"Instance '{name}' missing from registry"
+    log = _latest_operation(state_dir)
+    return {"entry": json.loads(json.dumps(entry)), "log": log}
+
+
+def _normalize_diagnostics(diagnostics: dict[str, object]) -> dict[str, object]:
+    """Return diagnostics stripped of timestamp fields for stable comparisons."""
+    normalized: dict[str, dict[str, object]] = {}
+    for provider, payload in diagnostics.items():
+        if not isinstance(payload, dict):
+            continue
+        filtered = dict(payload)
+        for key in ("last_checked", "last_checked_at"):
+            filtered.pop(key, None)
+        normalized[str(provider)] = filtered
+    return normalized
+
+
 def test_instance_enable_updates_registry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2754,6 +2808,52 @@ def test_instance_enable_dry_run_skips_changes(
     assert isinstance(metadata, dict)
     assert "enabled_at" not in metadata
     assert entry["status"] == "enabled"
+
+
+def test_instance_enable_repeat_run_is_idempotent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Second enable should keep metadata stable and avoid duplicate provider calls."""
+    env, state_dir = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    def fake_systemd_enable(
+        self: SystemdProvider,
+        name: str,
+        *,
+        dry_run: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            ["systemctl", "enable", f"abssctl-{name}.service"], returncode=0
+        )
+
+    monkeypatch.setattr(SystemdProvider, "enable", fake_systemd_enable)
+    monkeypatch.setattr(NginxProvider, "enable", lambda self, name: None)
+
+    first = runner.invoke(app, ["instance", "enable", "alpha"], env=env)
+    assert first.exit_code == 0
+    first_snapshot = _instance_snapshot(state_dir, "alpha")
+
+    second = runner.invoke(app, ["instance", "enable", "alpha"], env=env)
+    assert second.exit_code == 0
+    second_snapshot = _instance_snapshot(state_dir, "alpha")
+
+    entry_first = first_snapshot["entry"]
+    entry_second = second_snapshot["entry"]
+    assert entry_second["status"] == entry_first["status"] == "enabled"
+    assert entry_second["domain"] == entry_first["domain"]
+    assert entry_second["port"] == entry_first["port"]
+    assert entry_second["paths"] == entry_first["paths"]
+    metadata_first = entry_first["metadata"]
+    metadata_second = entry_second["metadata"]
+    diag_first = _normalize_diagnostics(metadata_first.get("diagnostics", {}))
+    diag_second = _normalize_diagnostics(metadata_second.get("diagnostics", {}))
+    assert diag_second == diag_first
+    assert metadata_second.get("enabled_at") >= metadata_first.get("enabled_at")
+    assert metadata_second.get("last_changed") >= metadata_first.get("last_changed")
+    assert second_snapshot["log"]["command"] == "instance enable"
+    assert second_snapshot["log"]["result"]["status"] == "success"
 
 
 def test_instance_enable_systemd_failure_preserves_registry(
@@ -2859,6 +2959,52 @@ def test_instance_disable_dry_run_skips_changes(
     assert isinstance(metadata, dict)
     assert "disabled_at" not in metadata
     assert entry["status"] == "enabled"
+
+
+def test_instance_disable_repeat_run_is_idempotent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Disabling twice should leave registry/diagnostics unchanged."""
+    env, state_dir = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    monkeypatch.setattr(
+        SystemdProvider,
+        "disable",
+        lambda self, name, dry_run=False: subprocess.CompletedProcess(
+            ["systemctl", "disable", f"abssctl-{name}.service"], returncode=0
+        ),
+    )
+    monkeypatch.setattr(NginxProvider, "disable", lambda self, name: None)
+
+    first = runner.invoke(app, ["instance", "disable", "alpha"], env=env)
+    assert first.exit_code == 0
+    first_snapshot = _instance_snapshot(state_dir, "alpha")
+
+    second = runner.invoke(app, ["instance", "disable", "alpha"], env=env)
+    assert second.exit_code == 0
+    second_snapshot = _instance_snapshot(state_dir, "alpha")
+
+    entry_first = first_snapshot["entry"]
+    entry_second = second_snapshot["entry"]
+    assert entry_second["status"] == entry_first["status"] == "disabled"
+    assert entry_second["domain"] == entry_first["domain"]
+    assert entry_second["port"] == entry_first["port"]
+    assert entry_second["paths"] == entry_first["paths"]
+    metadata_first = entry_first["metadata"]
+    metadata_second = entry_second["metadata"]
+    diag_first = _normalize_diagnostics(metadata_first.get("diagnostics", {}))
+    diag_second = _normalize_diagnostics(metadata_second.get("diagnostics", {}))
+    assert diag_second == diag_first
+    assert metadata_second.get("disabled_at") >= metadata_first.get("disabled_at")
+    diagnostics = second_snapshot["entry"]["metadata"].get("diagnostics", {})
+    assert isinstance(diagnostics, dict)
+    systemd_diag = diagnostics.get("systemd", {})
+    assert isinstance(systemd_diag, dict)
+    assert systemd_diag.get("enabled") is False
+    assert second_snapshot["log"]["command"] == "instance disable"
+    assert second_snapshot["log"]["result"]["status"] == "success"
 
 
 def test_instance_disable_systemd_failure_preserves_registry(
@@ -3045,6 +3191,43 @@ def test_instance_stop_dry_run_skips_changes(
     assert entry["status"] == "enabled"
 
 
+def test_instance_start_repeat_run_is_idempotent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Starting an already running instance should be a no-op for metadata."""
+    env, state_dir = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    monkeypatch.setattr(
+        SystemdProvider,
+        "start",
+        lambda self, name, dry_run=False: subprocess.CompletedProcess(
+            ["systemctl", "start", f"abssctl-{name}.service"], returncode=0
+        ),
+    )
+
+    first = runner.invoke(app, ["instance", "start", "alpha"], env=env)
+    assert first.exit_code == 0
+    first_snapshot = _instance_snapshot(state_dir, "alpha")
+
+    second = runner.invoke(app, ["instance", "start", "alpha"], env=env)
+    assert second.exit_code == 0
+    second_snapshot = _instance_snapshot(state_dir, "alpha")
+
+    entry_first = first_snapshot["entry"]
+    entry_second = second_snapshot["entry"]
+    assert entry_second["status"] == entry_first["status"] == "running"
+    assert entry_second["domain"] == entry_first["domain"]
+    assert entry_second["port"] == entry_first["port"]
+    assert entry_second["paths"] == entry_first["paths"]
+    metadata_first = entry_first["metadata"]
+    metadata_second = entry_second["metadata"]
+    assert metadata_second.get("last_started_at") >= metadata_first.get("last_started_at")
+    assert second_snapshot["log"]["command"] == "instance start"
+    assert second_snapshot["log"]["result"]["status"] == "success"
+
+
 def test_instance_stop_systemd_failure_preserves_status(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3072,11 +3255,45 @@ def test_instance_stop_systemd_failure_preserves_status(
     assert "last_stopped_at" not in metadata
     assert entry["status"] == "enabled"
 
-    record = _latest_operation(state_dir)
-    assert record["command"] == "instance stop"
-    result_payload = record.get("result", {})
-    assert result_payload.get("status") == "error"
-    assert result_payload.get("errors")
+
+def test_instance_stop_repeat_run_is_idempotent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stopping repeatedly should retain status metadata."""
+    env, state_dir = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    monkeypatch.setattr(
+        SystemdProvider,
+        "stop",
+        lambda self, name, dry_run=False: subprocess.CompletedProcess(
+            ["systemctl", "stop", f"abssctl-{name}.service"], returncode=0
+        ),
+    )
+
+    first = runner.invoke(app, ["instance", "stop", "alpha"], env=env)
+    assert first.exit_code == 0
+    first_snapshot = _instance_snapshot(state_dir, "alpha")
+
+    second = runner.invoke(app, ["instance", "stop", "alpha"], env=env)
+    assert second.exit_code == 0
+    second_snapshot = _instance_snapshot(state_dir, "alpha")
+
+    entry_first = first_snapshot["entry"]
+    entry_second = second_snapshot["entry"]
+    assert entry_second["status"] == entry_first["status"] == "stopped"
+    assert entry_second["domain"] == entry_first["domain"]
+    assert entry_second["port"] == entry_first["port"]
+    assert entry_second["paths"] == entry_first["paths"]
+    metadata_first = entry_first["metadata"]
+    metadata_second = entry_second["metadata"]
+    diag_first = _normalize_diagnostics(metadata_first.get("diagnostics", {}))
+    diag_second = _normalize_diagnostics(metadata_second.get("diagnostics", {}))
+    assert diag_second == diag_first
+    assert metadata_second.get("last_stopped_at") >= metadata_first.get("last_stopped_at")
+    assert second_snapshot["log"]["command"] == "instance stop"
+    assert second_snapshot["log"]["result"]["status"] == "success"
 
 
 def test_instance_restart_calls_stop_and_start(
@@ -3201,6 +3418,44 @@ def test_instance_restart_systemd_failure_preserves_status(
     result_payload = record.get("result", {})
     assert result_payload.get("status") == "error"
     assert result_payload.get("errors")
+
+
+def test_instance_restart_repeat_run_is_idempotent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Restarting twice should reuse existing metadata and avoid duplicate actions."""
+    env, state_dir = _prepare_environment(tmp_path)
+    _create_instance(env)
+
+    def fake_stop(self: SystemdProvider, name: str) -> subprocess.CompletedProcess:
+        return _fake_systemctl("stop", name)
+
+    def fake_start(self: SystemdProvider, name: str) -> subprocess.CompletedProcess:
+        return _fake_systemctl("start", name)
+
+    monkeypatch.setattr(SystemdProvider, "stop", fake_stop)
+    monkeypatch.setattr(SystemdProvider, "start", fake_start)
+
+    first = runner.invoke(app, ["instance", "restart", "alpha"], env=env)
+    assert first.exit_code == 0
+    first_snapshot = _instance_snapshot(state_dir, "alpha")
+
+    second = runner.invoke(app, ["instance", "restart", "alpha"], env=env)
+    assert second.exit_code == 0
+    second_snapshot = _instance_snapshot(state_dir, "alpha")
+
+    entry_first = first_snapshot["entry"]
+    entry_second = second_snapshot["entry"]
+    assert entry_second["status"] == "running" == entry_first["status"]
+    assert entry_second["domain"] == entry_first["domain"]
+    assert entry_second["port"] == entry_first["port"]
+    assert entry_second["paths"] == entry_first["paths"]
+    metadata_first = entry_first["metadata"]
+    metadata_second = entry_second["metadata"]
+    assert metadata_second.get("last_restarted_at") >= metadata_first.get("last_restarted_at")
+    assert second_snapshot["log"]["command"] == "instance restart"
+    assert second_snapshot["log"]["result"]["status"] == "success"
 
 
 def test_instance_delete_removes_registry(

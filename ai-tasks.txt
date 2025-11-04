@@ -21,11 +21,11 @@
          - 5.1.4.1 (done) – Add a CLI test that runs `doctor --json` twice on a stable fixture, asserting registry snapshots, diagnostics metadata, and operations logs stay unchanged on the second invocation.
          - 5.1.4.2 (done) – Script a flow that surfaces a state mismatch, executes `system init --rebuild-state --yes` (with non-destructive defaults), and finally reruns doctor to confirm the reconciliation probe returns green.
          - 5.1.4.3 (done) – Capture doctor output JSON snapshots to diff probe statuses and ensure no unexpected warnings/errors surface on reruns.
-      - 5.1.5 – Instance lifecycle reruns (enable/disable/start/stop/restart/delete) to make sure registry/provider operations short-circuit cleanly on subsequent executions.
-         - 5.1.5.1 – Extend lifecycle CLI tests to run `instance enable` twice (and `disable` twice) validating registry metadata, diagnostics, and operations logs remain unchanged on the second invocation.
-         - 5.1.5.2 – Add repeat coverage for `instance start`/`stop`/`restart` to ensure systemd provider mocks are not called redundantly and timestamps stay stable.
-         - 5.1.5.3 – Cover double `instance delete` (second run treated as no-op) and recreate via `instance create` to prove cleanup left the system consistent.
-         - 5.1.5.4 – Reuse snapshot helpers to diff registry YAML, ports reservations, and rendered provider assets after each rerun scenario.
+      - 5.1.5 (done) – Instance lifecycle reruns (enable/disable/start/stop/restart/delete) to make sure registry/provider operations short-circuit cleanly on subsequent executions.
+         - 5.1.5.1 (done) – Extend lifecycle CLI tests to run `instance enable` twice (and `disable` twice) validating registry metadata, diagnostics, and operations logs remain unchanged on the second invocation.
+         - 5.1.5.2 (done) – Add repeat coverage for `instance start`/`stop`/`restart` to ensure systemd provider mocks are not called redundantly and timestamps stay stable.
+         - 5.1.5.3 (done) – Cover double `instance delete` (second run treated as no-op) and recreate via `instance create` to prove cleanup left the system consistent.
+         - 5.1.5.4 (done) – Reuse snapshot helpers to diff registry YAML, ports reservations, and rendered provider assets after each rerun scenario.
    2. Extend pytest fixtures (fake binaries, temp dirs, helper contexts) to support new integration scenarios efficiently.
       - 5.2.1 – Introduce a reusable `StateSnapshot` helper/fixture that captures registry YAML, backups.json, nginx site contents, TLS assets, and operations log records for before/after comparisons.
       - 5.2.2 – Provide a fixture wrapping `runner.invoke` that automatically records operations log diffs and provider call counts to simplify idempotency assertions.
