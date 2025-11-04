@@ -1737,6 +1737,24 @@ def test_version_check_updates_remote_unavailable_json(
     assert payload["message"].startswith("Unable to retrieve versions for demo")
 
 
+def test_support_bundle_placeholder_warns(tmp_path: Path) -> None:
+    """`support-bundle` placeholder emits warning and logs the operation."""
+    env, state_dir = _prepare_environment(tmp_path)
+
+    result = runner.invoke(app, ["support-bundle"], env=env)
+
+    assert result.exit_code == 0
+    assert "Support bundle generation is planned" in result.stdout
+
+    logs_dir = state_dir.parent / "logs"
+    operations_file = logs_dir / "operations.jsonl"
+    record = json.loads(operations_file.read_text(encoding="utf-8").splitlines()[-1])
+    assert record["command"] == "support-bundle"
+    result_block = record["result"]
+    assert result_block["status"] == "warning"
+    assert result_block["warnings"] == ["unimplemented"]
+
+
 def test_version_check_updates_handles_remote_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

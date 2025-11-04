@@ -3,3 +3,11 @@
 #   file and try to recover where it was in the long task.
 #
 # - AI do not edit above this line! Keep this header!
+# B3-2 – Bootstrap/logging/ports resilience tests
+# - Add bootstrap unit tests for directory permission denials and discovery fallbacks.
+# - Extend logging module tests for rotation/JSONL failure scenarios.
+# - Cover ports registry conflict handling and persistence errors.
+
+# B3-3 – Pilot mutation testing
+# - Run mutmut targeting abssctl.cli and related providers after B3-1/B3-2 land.
+# - Capture runtime, surviving mutants, and recommend CI integration plan.

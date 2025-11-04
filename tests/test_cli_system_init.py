@@ -126,3 +126,24 @@ def test_system_init_rebuild_state_json(tmp_path: Path) -> None:
     assert rebuild is not None
     assert rebuild["planned"]["registry"]
     assert rebuild["planned"]["config"]
+
+
+def test_system_init_requires_allow_create_user_flag(tmp_path: Path) -> None:
+    """Applying without --allow-create-user fails when account creation is needed."""
+    args = _bootstrap_args(tmp_path) + ["--yes"]
+    result = runner.invoke(app, args)
+    assert result.exit_code == 3
+    assert "--allow-create-user" in result.stdout
+
+
+def test_system_init_rebuild_state_errors_abort(tmp_path: Path) -> None:
+    """Rebuild-state should abort when discovery reports errors."""
+    args = _bootstrap_args(tmp_path) + [
+        "--yes",
+        "--dry-run",
+        "--rebuild-state",
+        "--allow-create-user",
+    ]
+    result = runner.invoke(app, args)
+    assert result.exit_code == 2
+    assert "Cannot rebuild state" in result.stdout
