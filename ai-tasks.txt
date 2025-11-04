@@ -3,11 +3,3 @@
 #   file and try to recover where it was in the long task.
 #
 # - AI do not edit above this line! Keep this header!
-
-B2-6 – version check-updates CLI coverage
-- Remote matches installed -> “up to date” message/JSON assertions.
-- Remote lookup returning [] (no failure) -> “remote-unavailable” status path.
-
-B2-7 – version list CLI fallback paths
-- Simulate VersionProvider raising FileNotFoundError (missing npm) and confirm fallback to local data.
-- Ensure malformed cache JSON degrades gracefully (still lists registry versions, exit 0).

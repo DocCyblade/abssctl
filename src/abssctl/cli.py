@@ -5083,10 +5083,16 @@ def version_list(
     local_entries = _normalize_versions(local_raw.get("versions", []))
 
     remote_versions: list[str] = []
+    remote_error: str | None = None
     if remote:
-        remote_versions = runtime.version_provider.list_remote_versions(
-            runtime.config.npm_package_name
-        )
+        try:
+            remote_versions = runtime.version_provider.list_remote_versions(
+                runtime.config.npm_package_name
+            )
+        except FileNotFoundError as exc:
+            remote_error = str(exc)
+        except Exception as exc:  # pragma: no cover - defensive
+            remote_error = str(exc)
 
     entries = _merge_versions(local_entries, remote_versions)
 
@@ -5136,6 +5142,16 @@ def version_list(
         args={"json": json_output, "remote": remote},
         target={"kind": "version", "scope": "registry"},
     ) as op:
+        if remote_error:
+            console.print(
+                "[yellow]Unable to fetch remote versions; showing registry data only.[/yellow]"
+            )
+            op.add_step(
+                "remote.lookup",
+                status="warning",
+                detail=remote_error or "remote lookup failed",
+            )
+
         if json_output:
             console.print_json(data={"versions": entries})
             op.success("Reported version list as JSON.", changed=0)

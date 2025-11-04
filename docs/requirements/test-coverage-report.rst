@@ -110,10 +110,10 @@ Proposed Test Additions
    - Unknown version (absent from registry) exits with rc=2 before filesystem mutation.
    - Confirm error messaging for “in use” guard includes sorted instance list.
    - Path-missing uninstall still succeeds (no ``filesystem.remove`` step) while registry entry drops.
-6. **B2-6 – `version check-updates` CLI coverage**
+6. **B2-6 – `version check-updates` CLI coverage** *(Completed 2025-11-03)*
    - Scenario where remote versions are identical to installed should emit the “up to date” message/JSON.
    - Remote lookup returning ``[]`` (without remote failure) should yield the “unable to fetch” status.
-7. **B2-7 – `version list` CLI fallback paths**
+7. **B2-7 – `version list` CLI fallback paths** *(Completed 2025-11-03)*
    - Remote flag with provider raising ``FileNotFoundError`` (missing npm) should fall back to local entries
      and still exit 0.
    - Malformed cache JSON should degrade gracefully and continue listing registry versions.

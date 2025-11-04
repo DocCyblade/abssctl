@@ -544,6 +544,48 @@ def test_version_list_json(tmp_path: Path) -> None:
     assert last_backup and last_backup["id"] == "20250101-alpha-abc123"
 
 
+def test_version_list_remote_missing_npm_falls_back(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing npm during remote lookup falls back to local entries."""
+    versions = [{"version": "25.8.0", "metadata": {"installed": True}}]
+    env, _ = _prepare_environment(tmp_path, versions=versions)
+    env.pop("ABSSCTL_SKIP_NPM", None)
+
+    def raise_missing(*args: object, **kwargs: object) -> list[str]:
+        raise FileNotFoundError("npm not available")
+
+    monkeypatch.setattr(VersionProvider, "list_remote_versions", raise_missing)
+
+    result = runner.invoke(app, ["version", "list", "--remote"], env=env)
+
+    assert result.exit_code == 0
+    assert "Unable to fetch remote versions; showing registry data only." in result.stdout
+    assert "25.8.0" in result.stdout
+    assert "(none)" not in result.stdout
+
+
+def test_version_list_remote_malformed_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Malformed cache JSON degrades gracefully when listing remote entries."""
+    versions = [{"version": "25.8.0", "metadata": {"installed": True}}]
+    env, state_dir = _prepare_environment(tmp_path, versions=versions)
+
+    cache_path = Path(state_dir) / "registry" / "remote-versions.json"
+    cache_path.write_text("{invalid-json", encoding="utf-8")
+    env.pop("ABSSCTL_SKIP_NPM", None)
+
+    monkeypatch.setattr(VersionProvider, "_from_npm", lambda self, package: [])
+
+    result = runner.invoke(app, ["version", "list", "--remote"], env=env)
+
+    assert result.exit_code == 0
+    assert "25.8.0" in result.stdout
+
+
 def test_tls_verify_manual_reports_success(tmp_path: Path) -> None:
     """`tls verify` validates manual certificate paths."""
     env, _ = _prepare_environment(tmp_path)
@@ -1647,6 +1689,52 @@ def test_version_check_updates_json_payload(
     assert payload["package"] == "demo"
     assert payload["status"] == "updates-available"
     assert payload["available_updates"] == ["25.9.0"]
+
+
+def test_version_check_updates_reports_up_to_date(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Up-to-date installations emit the up-to-date message."""
+    env, _ = _prepare_environment(
+        tmp_path,
+        versions=[{"version": "25.8.0"}],
+        config_overrides={"npm_package_name": "demo"},
+    )
+    monkeypatch.setattr(
+        VersionProvider,
+        "list_remote_versions",
+        lambda self, package: ["25.7.0", "25.8.0"],
+    )
+
+    result = runner.invoke(app, ["version", "check-updates"], env=env)
+
+    assert result.exit_code == 0
+    assert "Installed versions are up to date with npm" in result.stdout
+
+
+def test_version_check_updates_remote_unavailable_json(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """JSON form reports remote-unavailable when npm data is missing."""
+    env, _ = _prepare_environment(
+        tmp_path,
+        versions=[{"version": "25.8.0"}],
+        config_overrides={"npm_package_name": "demo"},
+    )
+    monkeypatch.setattr(
+        VersionProvider,
+        "list_remote_versions",
+        lambda self, package: [],
+    )
+
+    result = runner.invoke(app, ["version", "check-updates", "--json"], env=env)
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "remote-unavailable"
+    assert payload["message"].startswith("Unable to retrieve versions for demo")
 
 
 def test_version_check_updates_handles_remote_failure(
