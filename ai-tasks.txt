@@ -3,3 +3,39 @@
 #   file and try to recover where it was in the long task.
 #
 # - AI do not edit above this line! Keep this header!
+
+B2-1 – providers.version_provider resilience
+- Add unit tests covering ABSSCTL_SKIP_NPM short-circuit to [].
+- Exercise cache precedence (explicit cache_path vs env var) and malformed cache JSON fallback.
+- Simulate npm missing, non-zero exit, and malformed stdout to ensure [] is returned without cache writes.
+- Cover refresh_cache success path plus cache write failure tolerance (mock Path.write_text to raise).
+
+B2-2 – providers.version_installer validation & integrity
+- Add tests asserting blank/whitespace versions and pre-existing install directories raise VersionInstallError.
+- Simulate npm success without package directory to confirm VersionInstallError surfaces.
+- Extend integrity parsing tests for npm_args preservation, tarball digest extraction, and malformed integrity strings.
+
+B2-3 – version install CLI error handling
+- CLI integration tests for already-registered version (rc=2, filesystem untouched).
+- Inject installer error to validate rc=4 and logged error step.
+- Dry-run with --set-current should mark deferred switch without touching symlink.
+- Verify --no-backup path records backup.skip step and skips prompt/backup creation.
+
+B2-4 – version switch CLI guard rails
+- Cover invalid --restart input (rc=2) and message content.
+- Unregistered version path (rc=2) via _switch_version guard.
+- Missing install directory (rc=3) scenario to confirm messaging.
+- Simulate SystemdError during restart to ensure provider_error -> rc=4 and step logging.
+
+B2-5 – version uninstall CLI safety checks
+- Unknown version (rc=2) before filesystem mutation.
+- Verify in-use guard message lists sorted instances and prevents changes.
+- Path-missing uninstall succeeds: registry entry removed, no filesystem.remove step logged.
+
+B2-6 – version check-updates CLI coverage
+- Remote matches installed -> “up to date” message/JSON assertions.
+- Remote lookup returning [] (no failure) -> “remote-unavailable” status path.
+
+B2-7 – version list CLI fallback paths
+- Simulate VersionProvider raising FileNotFoundError (missing npm) and confirm fallback to local data.
+- Ensure malformed cache JSON degrades gracefully (still lists registry versions, exit 0).

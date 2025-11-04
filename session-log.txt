@@ -249,6 +249,20 @@ Completed Beta idempotency coverage, added reusable test harness/snapshots, wire
 
 -----------------------------------------
 
+# 2025-11-03 Beta2-1 Session (OPEN)
+- Session opened to launch RC coverage workstream Beta2-1 focusing on version management and CLI error-path test gaps.
+- Reviewed primer/Next Steps to confirm priority on mapping coverage and preparing a draft supplementation plan.
+- Preparing to audit existing tests, requirements, and ADR guidance before proposing additions.
+- Surveyed current version CLI/provider tests plus requirements/ADRs to inventory exercised versus missing scenarios.
+- Documented Beta2-1 coverage gap inventory and proposed test plan in `docs/requirements/test-coverage-report.rst`.
+- Numbered coverage plan items (B2-1..B2-7) within `docs/requirements/test-coverage-report.rst` for task tracking.
+- Mirrored B2-1..B2-7 tasks into `ai-tasks.txt` with execution notes for future sessions.
+
+## Wrap up:
+- Drafted Beta2-1 coverage plan outlining remaining version management/CLI error-path test gaps, now tracked as B2-1..B2-7 with ai-tasks context.
+
+-----------------------------------------
+
 ----------------------- Sessions logging above this line only ----------------------
 
 # Next Steps / TODO:
