@@ -41,7 +41,7 @@ def test_structured_logger_disables_after_write_failure(
 
     original_open = Path.open
 
-    def fail_once(self: Path, *args: object, **kwargs: object):
+    def fail_once(self: Path, *args: object, **kwargs: object) -> object:
         if self == operations_path:
             raise OSError("disk full")
         return original_open(self, *args, **kwargs)

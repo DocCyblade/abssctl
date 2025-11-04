@@ -72,7 +72,7 @@ def test_ports_registry_persist_failure(tmp_path: Path, monkeypatch: pytest.Monk
     registry = StateRegistry(tmp_path / "registry")
     ports = PortsRegistry(registry=registry, base_port=5000)
 
-    def fail_write(entries: list[dict[str, int]]) -> None:  # noqa: ARG001 - signature matches
+    def fail_write(self: StateRegistry, ports_entries: list[dict[str, int]]) -> None:  # noqa: ARG001
         raise OSError("disk full")
 
     monkeypatch.setattr(StateRegistry, "write_ports", fail_write)
