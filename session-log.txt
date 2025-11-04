@@ -261,9 +261,10 @@ Completed Beta idempotency coverage, added reusable test harness/snapshots, wire
 - Updated `ai-tasks.txt` to drop B2-1 and ran targeted pytest plus `make quick-tests` to keep the gate green.
 - Delivered B2-2 coverage: expanded `tests/test_version_installer.py` to include blank/duplicate version guards, missing package directory handling, npm args metadata, and malformed integrity parsing before rerunning quick-tests.
 - Updated tracking docs by marking B2-2 complete and trimming it from `ai-tasks.txt`.
+- Delivered B2-3 coverage: added CLI tests capturing duplicate install rejection, installer error propagation, dry-run + set-current deferral, and backup.skip semantics; marked item complete and refreshed quick-tests.
 
 ## Wrap up:
-- Drafted Beta2-1 coverage plan outlining remaining version management/CLI error-path test gaps, now tracked as B2-1..B2-7 with ai-tasks context; B2-1 and B2-2 are complete with passing quick-tests.
+- Drafted Beta2-1 coverage plan outlining remaining version management/CLI error-path test gaps, now tracked as B2-1..B2-7 with ai-tasks context; B2-1 through B2-3 are complete with passing quick-tests.
 
 -----------------------------------------
 

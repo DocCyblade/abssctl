@@ -4,12 +4,6 @@
 #
 # - AI do not edit above this line! Keep this header!
 
-B2-3 – version install CLI error handling
-- CLI integration tests for already-registered version (rc=2, filesystem untouched).
-- Inject installer error to validate rc=4 and logged error step.
-- Dry-run with --set-current should mark deferred switch without touching symlink.
-- Verify --no-backup path records backup.skip step and skips prompt/backup creation.
-
 B2-4 – version switch CLI guard rails
 - Cover invalid --restart input (rc=2) and message content.
 - Unregistered version path (rc=2) via _switch_version guard.

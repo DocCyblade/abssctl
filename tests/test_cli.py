@@ -27,7 +27,11 @@ from abssctl.backups import BackupEntryBuilder, BackupsRegistry
 from abssctl.cli import app
 from abssctl.providers.nginx import NginxProvider
 from abssctl.providers.systemd import SystemdError, SystemdProvider
-from abssctl.providers.version_installer import VersionInstaller, VersionInstallResult
+from abssctl.providers.version_installer import (
+    VersionInstaller,
+    VersionInstallError,
+    VersionInstallResult,
+)
 from abssctl.providers.version_provider import VersionProvider
 from abssctl.state import StateRegistry
 
@@ -1845,6 +1849,167 @@ def test_version_install_records_registry(
     entry = registry.get_version("25.9.0")
     assert entry is not None
     assert entry["path"] == str(target_dir)
+
+
+def test_version_install_rejects_existing_version(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repeated installs of the same version fail with rc=2."""
+    install_root = tmp_path / "srv" / "app"
+    existing_dir = install_root / "v25.8.0"
+    existing_dir.mkdir(parents=True, exist_ok=True)
+    env, state_dir = _prepare_environment(
+        tmp_path,
+        config_overrides={"install_root": str(install_root)},
+        versions=[
+            {
+                "version": "25.8.0",
+                "path": str(existing_dir),
+                "metadata": {"installed": True},
+            }
+        ],
+    )
+
+    def fail_install(
+        self: VersionInstaller,
+        version: str,
+        *,
+        env: dict[str, str] | None = None,
+        dry_run: bool = False,
+    ) -> VersionInstallResult:
+        raise AssertionError("Installer should not run when version already registered.")
+
+    monkeypatch.setattr(VersionInstaller, "install", fail_install)
+
+    result = runner.invoke(app, ["version", "install", "25.8.0", "--no-backup"], env=env)
+
+    assert result.exit_code == 2
+    assert "already registered" in result.stdout
+    assert not (install_root / "v25.8.0" / "node_modules").exists()
+    registry = StateRegistry(state_dir / "registry")
+    assert registry.get_version("25.8.0")["metadata"]["installed"] is True
+
+
+def test_version_install_installer_error_bubbles(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Installer exceptions propagate as rc=4 without recording registry entries."""
+    install_root = tmp_path / "srv" / "app"
+    env, state_dir = _prepare_environment(
+        tmp_path,
+        config_overrides={"install_root": str(install_root)},
+    )
+
+    def fail_install(
+        self: VersionInstaller,
+        version: str,
+        *,
+        env: dict[str, str] | None = None,
+        dry_run: bool = False,
+    ) -> VersionInstallResult:
+        raise VersionInstallError("npm install failed")
+
+    monkeypatch.setattr(VersionInstaller, "install", fail_install)
+
+    result = runner.invoke(app, ["version", "install", "26.5.0", "--no-backup"], env=env)
+
+    assert result.exit_code == 4
+    assert "Failed to install version '26.5.0'" in result.stdout
+    registry = StateRegistry(state_dir / "registry")
+    assert registry.get_version("26.5.0") is None
+
+
+def test_version_install_dry_run_with_set_current_defers_switch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dry-run installs with --set-current do not mutate symlinks but record pending step."""
+    install_root = tmp_path / "srv" / "app"
+    env, state_dir = _prepare_environment(
+        tmp_path,
+        config_overrides={"install_root": str(install_root)},
+    )
+    current_link = install_root / "current"
+
+    def fake_install(
+        self: VersionInstaller,
+        version: str,
+        *,
+        env: dict[str, str] | None = None,
+        dry_run: bool = False,
+    ) -> VersionInstallResult:
+        return VersionInstallResult(
+            version=version,
+            path=install_root / f"v{version}",
+            installed_at="2025-10-12T00:00:00Z",
+            metadata={"package": self.package_name, "dry_run": dry_run},
+            integrity={},
+        )
+
+    monkeypatch.setattr(VersionInstaller, "install", fake_install)
+
+    result = runner.invoke(
+        app,
+        ["version", "install", "27.1.0", "--set-current", "--dry-run", "--no-backup"],
+        env=env,
+    )
+
+    assert result.exit_code == 0
+    assert not current_link.exists()
+    logs_dir = state_dir.parent / "logs"
+    operations_file = logs_dir / "operations.jsonl"
+    lines = operations_file.read_text(encoding="utf-8").splitlines()
+    record = json.loads(lines[-1])
+    step_names = [step["name"] for step in record["steps"]]
+    assert "switch.pending" in step_names
+    assert any(step["name"] == "installer.dry-run" for step in record["steps"])
+
+
+def test_version_install_no_backup_records_skip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--no-backup path records backup.skip and avoids backup creation."""
+    install_root = tmp_path / "srv" / "app"
+    env, _ = _prepare_environment(
+        tmp_path,
+        config_overrides={"install_root": str(install_root)},
+    )
+
+    def fake_install(
+        self: VersionInstaller,
+        version: str,
+        *,
+        env: dict[str, str] | None = None,
+        dry_run: bool = False,
+    ) -> VersionInstallResult:
+        target = install_root / f"v{version}"
+        target.mkdir(parents=True, exist_ok=True)
+        return VersionInstallResult(
+            version=version,
+            path=target,
+            installed_at="2025-10-09T00:00:00Z",
+            metadata={"package": self.package_name},
+            integrity={},
+        )
+
+    monkeypatch.setattr(VersionInstaller, "install", fake_install)
+
+    result = runner.invoke(
+        app,
+        ["version", "install", "27.2.0", "--no-backup"],
+        env=env,
+    )
+
+    assert result.exit_code == 0
+    logs_dir = Path(env["ABSSCTL_CONFIG_FILE"]).parent / "logs"
+    operations_file = logs_dir / "operations.jsonl"
+    lines = operations_file.read_text(encoding="utf-8").splitlines()
+    record = json.loads(lines[-1])
+    step_names = [step["name"] for step in record["steps"]]
+    assert "backup.skip" in step_names
 
 
 def test_version_uninstall_dry_run_preserves_files(tmp_path: Path) -> None:

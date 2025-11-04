@@ -96,7 +96,7 @@ Proposed Test Additions
    - Surface ``VersionInstallError`` when npm succeeds but the package directory is absent.
    - Validate dry-run metadata includes ``npm_args`` and that integrity parsing extracts npm/tarball
      details (including malformed integrity strings returning ``{}``).
-3. **B2-3 – `version install` CLI error handling**
+3. **B2-3 – `version install` CLI error handling** *(Completed 2025-11-03)*
    - Attempt to install an already-registered version (expect rc=2 and no filesystem touch).
    - Bubble up ``VersionInstallError`` from the installer (rc=4, logged error step).
    - ``--dry-run --set-current`` should report deferred switch without altering the symlink.
