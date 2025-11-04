@@ -84,7 +84,7 @@ Coverage Gap Inventory
 Proposed Test Additions
 -----------------------
 
-1. **B2-1 – `providers.version_provider` resilience**
+1. **B2-1 – `providers.version_provider` resilience** *(Completed 2025-11-03)*
    - Assert ``ABSSCTL_SKIP_NPM=1`` short-circuits to ``[]`` without touching disk.
    - Exercise cache preference order (explicit cache path vs ``ABSSCTL_VERSIONS_CACHE``) and ensure
      malformed/missing cache payloads fall back cleanly.

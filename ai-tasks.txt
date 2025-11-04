@@ -4,12 +4,6 @@
 #
 # - AI do not edit above this line! Keep this header!
 
-B2-1 – providers.version_provider resilience
-- Add unit tests covering ABSSCTL_SKIP_NPM short-circuit to [].
-- Exercise cache precedence (explicit cache_path vs env var) and malformed cache JSON fallback.
-- Simulate npm missing, non-zero exit, and malformed stdout to ensure [] is returned without cache writes.
-- Cover refresh_cache success path plus cache write failure tolerance (mock Path.write_text to raise).
-
 B2-2 – providers.version_installer validation & integrity
 - Add tests asserting blank/whitespace versions and pre-existing install directories raise VersionInstallError.
 - Simulate npm success without package directory to confirm VersionInstallError surfaces.
