@@ -239,6 +239,7 @@
 - Added backup snapshot helper, repeat restore/dry-run/reconcile idempotency tests (`tests/test_cli.py`), and validated with `make quick-tests`.
 - Extended doctor coverage with repeat-run and rebuild-state tests (`tests/test_doctor_cli.py`), introduced log/probe snapshot helpers, and ran `make quick-tests`.
 - Added lifecycle repeat-run tests for enable/disable/start/stop/restart/delete with normalized registry/diagnostic snapshots (`tests/test_cli.py`) and kept `make quick-tests` green.
+- Introduced reusable CLI harness/instance snapshot fixtures, richer `_prepare_environment` seeding, and helper factories for TLS/backups to streamline idempotency testing; `make quick-tests` remains green.
 
 ## Wrap up:
 

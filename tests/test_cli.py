@@ -10,6 +10,7 @@ import os
 import pwd
 import shutil
 import subprocess
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -19,7 +20,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
-from typer.testing import CliRunner
+from typer.testing import CliRunner, Result
 
 from abssctl import __version__
 from abssctl.backups import BackupEntryBuilder, BackupsRegistry
@@ -173,6 +174,9 @@ def _prepare_environment(
     instances: list[object] | None = None,
     ports: list[object] | None = None,
     remote_versions: list[str] | None = None,
+    service_user: str | None = None,
+    service_group: str | None = None,
+    backups_entries: list[dict[str, object]] | None = None,
 ) -> tuple[dict[str, str], Path]:
     state_dir = tmp_path / "state"
     logs_dir = tmp_path / "logs"
@@ -191,8 +195,8 @@ def _prepare_environment(
     _write_stub("node", content="#!/bin/sh\necho v18.0.0\nexit 0\n")
     _write_stub("npm", content="#!/bin/sh\necho 10.0.0\nexit 0\n")
     # zstd intentionally omitted so doctor can warn when unavailable by default.
-    owner = pwd.getpwuid(os.getuid()).pw_name
-    group = grp.getgrgid(os.getgid()).gr_name
+    owner = service_user or pwd.getpwuid(os.getuid()).pw_name
+    group = service_group or grp.getgrgid(os.getgid()).gr_name
     tls_root = tmp_path / "tls"
     tls_root.mkdir(parents=True, exist_ok=True)
     system_cert, system_key = _create_tls_fixture(tls_root, name="system-cert")
@@ -273,6 +277,15 @@ def _prepare_environment(
         env.pop("ABSSCTL_SKIP_NPM", None)
     else:
         env["ABSSCTL_SKIP_NPM"] = "1"
+
+    if backups_entries:
+        backups_registry = BackupsRegistry(
+            tmp_path / "backups",
+            tmp_path / "backups" / "backups.json",
+        )
+        backups_registry.ensure_root()
+        for entry in backups_entries:
+            backups_registry.append(entry)
     return env, state_dir
 
 
@@ -2711,13 +2724,36 @@ def _index_steps(record: dict[str, object]) -> dict[str, dict[str, object]]:
     return steps
 
 
-def _instance_snapshot(state_dir: Path, name: str) -> dict[str, object]:
+@dataclass
+class InstanceSnapshot:
+    """Snapshot of an instance registry entry and the latest operations log record."""
+
+    name: str
+    entry: dict[str, object]
+    operations_len: int
+    last_operation: dict[str, object]
+
+    @property
+    def metadata(self) -> dict[str, object]:
+        """Return a copy of the snapshot's metadata dictionary."""
+        raw = self.entry.get("metadata", {})
+        return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _instance_snapshot(state_dir: Path, name: str) -> InstanceSnapshot:
     """Return a copy of the registry entry and latest operation for *name*."""
     instances = _registry_instances(state_dir)
     entry = next((item for item in instances if item.get("name") == name), None)
     assert entry is not None, f"Instance '{name}' missing from registry"
-    log = _latest_operation(state_dir)
-    return {"entry": json.loads(json.dumps(entry)), "log": log}
+    log_path = state_dir.parent / "logs" / "operations.jsonl"
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert lines, "operations log is empty"
+    return InstanceSnapshot(
+        name=name,
+        entry=json.loads(json.dumps(entry)),
+        operations_len=len(lines),
+        last_operation=json.loads(lines[-1]),
+    )
 
 
 def _normalize_diagnostics(diagnostics: dict[str, object]) -> dict[str, object]:
@@ -2731,6 +2767,59 @@ def _normalize_diagnostics(diagnostics: dict[str, object]) -> dict[str, object]:
             filtered.pop(key, None)
         normalized[str(provider)] = filtered
     return normalized
+
+
+@dataclass
+class CliHarness:
+    """Lightweight helper for invoking CLI commands within tests."""
+
+    env: dict[str, str]
+    state_dir: Path
+    tmp_path: Path
+
+    def invoke(
+        self,
+        args: list[str],
+        *,
+        expect_exit: int | None = 0,
+        **kwargs: object,
+    ) -> Result:
+        """Run a CLI command, asserting the expected exit code."""
+        result = runner.invoke(app, args, env=self.env, **kwargs)
+        if expect_exit is not None:
+            assert result.exit_code == expect_exit, result.stdout
+        return result
+
+    def snapshot_instance(self, name: str) -> InstanceSnapshot:
+        """Capture an instance snapshot for later comparison."""
+        return _instance_snapshot(self.state_dir, name)
+
+    def operations_log_len(self) -> int:
+        """Return the number of entries currently in the operations log."""
+        log_path = self.state_dir.parent / "logs" / "operations.jsonl"
+        if not log_path.exists():
+            return 0
+        return len(log_path.read_text(encoding="utf-8").splitlines())
+
+    def make_tls_fixture(self, name: str = "alpha.example") -> tuple[Path, Path]:
+        """Create a TLS certificate/key pair rooted in the harness tmp path."""
+        return _create_tls_fixture(self.tmp_path, name=name)
+
+    def create_backup(
+        self,
+        instance: str,
+        *,
+        compression: str = "none",
+    ) -> tuple[str, dict[str, object]]:
+        """Produce a backup archive for *instance* using the harness environment."""
+        return _create_backup(self.env, instance, compression=compression)
+
+
+@pytest.fixture
+def cli_harness(tmp_path: Path) -> CliHarness:
+    """Provision a CLI harness with an isolated environment for tests."""
+    env, state_dir = _prepare_environment(tmp_path)
+    return CliHarness(env=env, state_dir=state_dir, tmp_path=tmp_path)
 
 
 def test_instance_enable_updates_registry(
@@ -2811,12 +2900,11 @@ def test_instance_enable_dry_run_skips_changes(
 
 
 def test_instance_enable_repeat_run_is_idempotent(
-    tmp_path: Path,
+    cli_harness: CliHarness,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Second enable should keep metadata stable and avoid duplicate provider calls."""
-    env, state_dir = _prepare_environment(tmp_path)
-    _create_instance(env)
+    _create_instance(cli_harness.env)
 
     def fake_systemd_enable(
         self: SystemdProvider,
@@ -2831,29 +2919,29 @@ def test_instance_enable_repeat_run_is_idempotent(
     monkeypatch.setattr(SystemdProvider, "enable", fake_systemd_enable)
     monkeypatch.setattr(NginxProvider, "enable", lambda self, name: None)
 
-    first = runner.invoke(app, ["instance", "enable", "alpha"], env=env)
+    first = cli_harness.invoke(["instance", "enable", "alpha"])
     assert first.exit_code == 0
-    first_snapshot = _instance_snapshot(state_dir, "alpha")
+    first_snapshot = cli_harness.snapshot_instance("alpha")
 
-    second = runner.invoke(app, ["instance", "enable", "alpha"], env=env)
+    second = cli_harness.invoke(["instance", "enable", "alpha"])
     assert second.exit_code == 0
-    second_snapshot = _instance_snapshot(state_dir, "alpha")
+    second_snapshot = cli_harness.snapshot_instance("alpha")
 
-    entry_first = first_snapshot["entry"]
-    entry_second = second_snapshot["entry"]
+    entry_first = first_snapshot.entry
+    entry_second = second_snapshot.entry
     assert entry_second["status"] == entry_first["status"] == "enabled"
     assert entry_second["domain"] == entry_first["domain"]
     assert entry_second["port"] == entry_first["port"]
     assert entry_second["paths"] == entry_first["paths"]
-    metadata_first = entry_first["metadata"]
-    metadata_second = entry_second["metadata"]
+    metadata_first = first_snapshot.metadata
+    metadata_second = second_snapshot.metadata
     diag_first = _normalize_diagnostics(metadata_first.get("diagnostics", {}))
     diag_second = _normalize_diagnostics(metadata_second.get("diagnostics", {}))
     assert diag_second == diag_first
     assert metadata_second.get("enabled_at") >= metadata_first.get("enabled_at")
     assert metadata_second.get("last_changed") >= metadata_first.get("last_changed")
-    assert second_snapshot["log"]["command"] == "instance enable"
-    assert second_snapshot["log"]["result"]["status"] == "success"
+    assert second_snapshot.last_operation["command"] == "instance enable"
+    assert second_snapshot.last_operation["result"]["status"] == "success"
 
 
 def test_instance_enable_systemd_failure_preserves_registry(
@@ -2962,12 +3050,11 @@ def test_instance_disable_dry_run_skips_changes(
 
 
 def test_instance_disable_repeat_run_is_idempotent(
-    tmp_path: Path,
+    cli_harness: CliHarness,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Disabling twice should leave registry/diagnostics unchanged."""
-    env, state_dir = _prepare_environment(tmp_path)
-    _create_instance(env)
+    _create_instance(cli_harness.env)
 
     monkeypatch.setattr(
         SystemdProvider,
@@ -2978,33 +3065,33 @@ def test_instance_disable_repeat_run_is_idempotent(
     )
     monkeypatch.setattr(NginxProvider, "disable", lambda self, name: None)
 
-    first = runner.invoke(app, ["instance", "disable", "alpha"], env=env)
+    first = cli_harness.invoke(["instance", "disable", "alpha"])
     assert first.exit_code == 0
-    first_snapshot = _instance_snapshot(state_dir, "alpha")
+    first_snapshot = cli_harness.snapshot_instance("alpha")
 
-    second = runner.invoke(app, ["instance", "disable", "alpha"], env=env)
+    second = cli_harness.invoke(["instance", "disable", "alpha"])
     assert second.exit_code == 0
-    second_snapshot = _instance_snapshot(state_dir, "alpha")
+    second_snapshot = cli_harness.snapshot_instance("alpha")
 
-    entry_first = first_snapshot["entry"]
-    entry_second = second_snapshot["entry"]
+    entry_first = first_snapshot.entry
+    entry_second = second_snapshot.entry
     assert entry_second["status"] == entry_first["status"] == "disabled"
     assert entry_second["domain"] == entry_first["domain"]
     assert entry_second["port"] == entry_first["port"]
     assert entry_second["paths"] == entry_first["paths"]
-    metadata_first = entry_first["metadata"]
-    metadata_second = entry_second["metadata"]
+    metadata_first = first_snapshot.metadata
+    metadata_second = second_snapshot.metadata
     diag_first = _normalize_diagnostics(metadata_first.get("diagnostics", {}))
     diag_second = _normalize_diagnostics(metadata_second.get("diagnostics", {}))
     assert diag_second == diag_first
     assert metadata_second.get("disabled_at") >= metadata_first.get("disabled_at")
-    diagnostics = second_snapshot["entry"]["metadata"].get("diagnostics", {})
+    diagnostics = metadata_second.get("diagnostics", {})
     assert isinstance(diagnostics, dict)
     systemd_diag = diagnostics.get("systemd", {})
     assert isinstance(systemd_diag, dict)
     assert systemd_diag.get("enabled") is False
-    assert second_snapshot["log"]["command"] == "instance disable"
-    assert second_snapshot["log"]["result"]["status"] == "success"
+    assert second_snapshot.last_operation["command"] == "instance disable"
+    assert second_snapshot.last_operation["result"]["status"] == "success"
 
 
 def test_instance_disable_systemd_failure_preserves_registry(
@@ -3192,12 +3279,11 @@ def test_instance_stop_dry_run_skips_changes(
 
 
 def test_instance_start_repeat_run_is_idempotent(
-    tmp_path: Path,
+    cli_harness: CliHarness,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Starting an already running instance should be a no-op for metadata."""
-    env, state_dir = _prepare_environment(tmp_path)
-    _create_instance(env)
+    _create_instance(cli_harness.env)
 
     monkeypatch.setattr(
         SystemdProvider,
@@ -3207,25 +3293,25 @@ def test_instance_start_repeat_run_is_idempotent(
         ),
     )
 
-    first = runner.invoke(app, ["instance", "start", "alpha"], env=env)
+    first = cli_harness.invoke(["instance", "start", "alpha"])
     assert first.exit_code == 0
-    first_snapshot = _instance_snapshot(state_dir, "alpha")
+    first_snapshot = cli_harness.snapshot_instance("alpha")
 
-    second = runner.invoke(app, ["instance", "start", "alpha"], env=env)
+    second = cli_harness.invoke(["instance", "start", "alpha"])
     assert second.exit_code == 0
-    second_snapshot = _instance_snapshot(state_dir, "alpha")
+    second_snapshot = cli_harness.snapshot_instance("alpha")
 
-    entry_first = first_snapshot["entry"]
-    entry_second = second_snapshot["entry"]
+    entry_first = first_snapshot.entry
+    entry_second = second_snapshot.entry
     assert entry_second["status"] == entry_first["status"] == "running"
     assert entry_second["domain"] == entry_first["domain"]
     assert entry_second["port"] == entry_first["port"]
     assert entry_second["paths"] == entry_first["paths"]
-    metadata_first = entry_first["metadata"]
-    metadata_second = entry_second["metadata"]
+    metadata_first = first_snapshot.metadata
+    metadata_second = second_snapshot.metadata
     assert metadata_second.get("last_started_at") >= metadata_first.get("last_started_at")
-    assert second_snapshot["log"]["command"] == "instance start"
-    assert second_snapshot["log"]["result"]["status"] == "success"
+    assert second_snapshot.last_operation["command"] == "instance start"
+    assert second_snapshot.last_operation["result"]["status"] == "success"
 
 
 def test_instance_stop_systemd_failure_preserves_status(
@@ -3257,12 +3343,11 @@ def test_instance_stop_systemd_failure_preserves_status(
 
 
 def test_instance_stop_repeat_run_is_idempotent(
-    tmp_path: Path,
+    cli_harness: CliHarness,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Stopping repeatedly should retain status metadata."""
-    env, state_dir = _prepare_environment(tmp_path)
-    _create_instance(env)
+    _create_instance(cli_harness.env)
 
     monkeypatch.setattr(
         SystemdProvider,
@@ -3272,28 +3357,28 @@ def test_instance_stop_repeat_run_is_idempotent(
         ),
     )
 
-    first = runner.invoke(app, ["instance", "stop", "alpha"], env=env)
+    first = cli_harness.invoke(["instance", "stop", "alpha"])
     assert first.exit_code == 0
-    first_snapshot = _instance_snapshot(state_dir, "alpha")
+    first_snapshot = cli_harness.snapshot_instance("alpha")
 
-    second = runner.invoke(app, ["instance", "stop", "alpha"], env=env)
+    second = cli_harness.invoke(["instance", "stop", "alpha"])
     assert second.exit_code == 0
-    second_snapshot = _instance_snapshot(state_dir, "alpha")
+    second_snapshot = cli_harness.snapshot_instance("alpha")
 
-    entry_first = first_snapshot["entry"]
-    entry_second = second_snapshot["entry"]
+    entry_first = first_snapshot.entry
+    entry_second = second_snapshot.entry
     assert entry_second["status"] == entry_first["status"] == "stopped"
     assert entry_second["domain"] == entry_first["domain"]
     assert entry_second["port"] == entry_first["port"]
     assert entry_second["paths"] == entry_first["paths"]
-    metadata_first = entry_first["metadata"]
-    metadata_second = entry_second["metadata"]
+    metadata_first = first_snapshot.metadata
+    metadata_second = second_snapshot.metadata
     diag_first = _normalize_diagnostics(metadata_first.get("diagnostics", {}))
     diag_second = _normalize_diagnostics(metadata_second.get("diagnostics", {}))
     assert diag_second == diag_first
     assert metadata_second.get("last_stopped_at") >= metadata_first.get("last_stopped_at")
-    assert second_snapshot["log"]["command"] == "instance stop"
-    assert second_snapshot["log"]["result"]["status"] == "success"
+    assert second_snapshot.last_operation["command"] == "instance stop"
+    assert second_snapshot.last_operation["result"]["status"] == "success"
 
 
 def test_instance_restart_calls_stop_and_start(
@@ -3421,12 +3506,11 @@ def test_instance_restart_systemd_failure_preserves_status(
 
 
 def test_instance_restart_repeat_run_is_idempotent(
-    tmp_path: Path,
+    cli_harness: CliHarness,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Restarting twice should reuse existing metadata and avoid duplicate actions."""
-    env, state_dir = _prepare_environment(tmp_path)
-    _create_instance(env)
+    _create_instance(cli_harness.env)
 
     def fake_stop(self: SystemdProvider, name: str) -> subprocess.CompletedProcess:
         return _fake_systemctl("stop", name)
@@ -3437,25 +3521,25 @@ def test_instance_restart_repeat_run_is_idempotent(
     monkeypatch.setattr(SystemdProvider, "stop", fake_stop)
     monkeypatch.setattr(SystemdProvider, "start", fake_start)
 
-    first = runner.invoke(app, ["instance", "restart", "alpha"], env=env)
+    first = cli_harness.invoke(["instance", "restart", "alpha"])
     assert first.exit_code == 0
-    first_snapshot = _instance_snapshot(state_dir, "alpha")
+    first_snapshot = cli_harness.snapshot_instance("alpha")
 
-    second = runner.invoke(app, ["instance", "restart", "alpha"], env=env)
+    second = cli_harness.invoke(["instance", "restart", "alpha"])
     assert second.exit_code == 0
-    second_snapshot = _instance_snapshot(state_dir, "alpha")
+    second_snapshot = cli_harness.snapshot_instance("alpha")
 
-    entry_first = first_snapshot["entry"]
-    entry_second = second_snapshot["entry"]
+    entry_first = first_snapshot.entry
+    entry_second = second_snapshot.entry
     assert entry_second["status"] == "running" == entry_first["status"]
     assert entry_second["domain"] == entry_first["domain"]
     assert entry_second["port"] == entry_first["port"]
     assert entry_second["paths"] == entry_first["paths"]
-    metadata_first = entry_first["metadata"]
-    metadata_second = entry_second["metadata"]
+    metadata_first = first_snapshot.metadata
+    metadata_second = second_snapshot.metadata
     assert metadata_second.get("last_restarted_at") >= metadata_first.get("last_restarted_at")
-    assert second_snapshot["log"]["command"] == "instance restart"
-    assert second_snapshot["log"]["result"]["status"] == "success"
+    assert second_snapshot.last_operation["command"] == "instance restart"
+    assert second_snapshot.last_operation["result"]["status"] == "success"
 
 
 def test_instance_delete_removes_registry(
