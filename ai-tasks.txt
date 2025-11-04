@@ -33,10 +33,10 @@
       - 5.2.4 (done) – Add lightweight factories/fixtures for generating cert/key pairs, backup archives, and systemd/nginx assets so tests need less manual setup.
       - 5.2.5 (done) – Document fixture usage patterns in tests to keep repeated command scenarios concise and maintainable.
    3. Add targeted tests ensuring repeated command execution is idempotent (double restore, repeated enable, TLS install reruns, etc.).
-      - 5.3.1 – Implement TLS idempotency tests per 5.1.2 (double install, system/custom toggles, dry-run + install) using the new snapshot/fixture helpers.
-      - 5.3.2 – Implement backup restore/reconcile tests per 5.1.3 (repeat restores, dry-run+apply, reconcile replay) validating filesystem/registry stability.
-      - 5.3.3 – Implement doctor rerun tests per 5.1.4 ensuring probe outputs and exit codes remain stable post-rebuild.
-      - 5.3.4 – Implement lifecycle rerun tests per 5.1.5 covering repeated enable/disable/start/stop/restart/delete and cleanup flows.
-      - 5.3.5 – Wire new tests into `make quick-tests`, applying markers where needed to keep quick runs manageable.
-   4. Integrate slow/extended suites under markers so CI can run comprehensive checks while supporting quick local loops.
+      - 5.3.1 (done) – Implement TLS idempotency tests per 5.1.2 (double install, system/custom toggles, dry-run + install) using the new snapshot/fixture helpers.
+      - 5.3.2 (done) – Implement backup restore/reconcile tests per 5.1.3 (repeat restores, dry-run+apply, reconcile replay) validating filesystem/registry stability.
+      - 5.3.3 (done) – Implement doctor rerun tests per 5.1.4 ensuring probe outputs and exit codes remain stable post-rebuild.
+      - 5.3.4 (done) – Implement lifecycle rerun tests per 5.1.5 covering repeated enable/disable/start/stop/restart/delete and cleanup flows.
+      - 5.3.5 (done) – Wire new tests into `make quick-tests`, applying markers where needed to keep quick runs manageable.
+  4. (done) Integrate slow/extended suites under markers so CI can run comprehensive checks while supporting quick local loops.
    5. Track coverage metrics (pytest --cov, mutation tests if feasible) and document remaining risks for future milestones.

@@ -65,7 +65,7 @@ ensure-build-venv: $(BUILD_VENV)/.installed
 quick-tests: $(DEV_VENV)/.installed
 	$(DEV_VENV)/bin/python -m ruff check src tests tools
 	$(DEV_VENV)/bin/python -m mypy src
-	$(DEV_VENV)/bin/python -m pytest
+	$(DEV_VENV)/bin/python -m pytest -m "not slow"
 
 ## lint: Run Ruff via .venv-test (test env)
 .PHONY: lint

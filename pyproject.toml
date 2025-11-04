@@ -93,6 +93,9 @@ allow-direct-references = true
 [tool.pytest.ini_options]
 addopts = "-ra"
 testpaths = ["tests"]
+markers = [
+  "slow: marks tests that take longer to run and are excluded from quick-tests by default"
+]
 
 [tool.ruff]
 line-length = 100

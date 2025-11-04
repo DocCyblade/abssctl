@@ -240,6 +240,8 @@
 - Extended doctor coverage with repeat-run and rebuild-state tests (`tests/test_doctor_cli.py`), introduced log/probe snapshot helpers, and ran `make quick-tests`.
 - Added lifecycle repeat-run tests for enable/disable/start/stop/restart/delete with normalized registry/diagnostic snapshots (`tests/test_cli.py`) and kept `make quick-tests` green.
 - Introduced reusable CLI harness/instance snapshot fixtures, richer `_prepare_environment` seeding, and helper factories for TLS/backups to streamline idempotency testing; `make quick-tests` remains green.
+- Confirmed TLS/backup/doctor/lifecycle idempotency suites run via the new harness, updated `ai-tasks.txt`, and verified `make quick-tests` stays green.
+- Added pytest `slow` marker plumbing and updated `make quick-tests` to skip slow tests by default so we can layer longer suites without slowing daily loops.
 
 ## Wrap up:
 
