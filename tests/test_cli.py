@@ -1811,6 +1811,95 @@ def test_version_switch_dry_run_outputs_plan(tmp_path: Path) -> None:
     assert current_symlink.resolve() == current_dir.resolve()
 
 
+def test_version_switch_invalid_restart_mode(tmp_path: Path) -> None:
+    """Invalid restart flag exits with rc=2 and reports the error."""
+    install_root = tmp_path / "srv" / "app"
+    version_dir = install_root / "v25.8.0"
+    version_dir.mkdir(parents=True, exist_ok=True)
+    env, _ = _prepare_environment(
+        tmp_path,
+        config_overrides={"install_root": str(install_root)},
+        versions=[{"version": "25.8.0", "path": str(version_dir)}],
+    )
+
+    result = runner.invoke(
+        app,
+        ["version", "switch", "25.8.0", "--restart", "fast", "--no-backup"],
+        env=env,
+    )
+
+    assert result.exit_code == 2
+    assert "Invalid restart mode 'fast'" in result.stdout
+
+
+def test_version_switch_unregistered_version(tmp_path: Path) -> None:
+    """Switching to an unknown version returns rc=2."""
+    install_root = tmp_path / "srv" / "app"
+    env, _ = _prepare_environment(
+        tmp_path,
+        config_overrides={"install_root": str(install_root)},
+    )
+
+    result = runner.invoke(app, ["version", "switch", "25.9.0", "--no-backup"], env=env)
+
+    assert result.exit_code == 2
+    assert "Version '25.9.0' is not registered." in result.stdout
+
+
+def test_version_switch_missing_directory_returns_rc3(tmp_path: Path) -> None:
+    """Missing install directory produces rc=3 with a helpful message."""
+    install_root = tmp_path / "srv" / "app"
+    env, state_dir = _prepare_environment(
+        tmp_path,
+        config_overrides={"install_root": str(install_root)},
+        versions=[
+            {
+                "version": "25.9.0",
+                "path": str(install_root / "v25.9.0"),
+                "metadata": {"installed": True},
+            }
+        ],
+    )
+    registry = StateRegistry(state_dir / "registry")
+    assert registry.get_version("25.9.0") is not None
+
+    result = runner.invoke(app, ["version", "switch", "25.9.0", "--no-backup"], env=env)
+
+    assert result.exit_code == 3
+    assert "Installed directory for version '25.9.0' is missing" in result.stdout
+
+
+def test_version_switch_systemd_failure_surface_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Systemd failures during restart bubble as rc=4."""
+    install_root = tmp_path / "srv" / "app"
+    version_dir = install_root / "v25.8.0"
+    version_dir.mkdir(parents=True, exist_ok=True)
+    env, state_dir = _prepare_environment(
+        tmp_path,
+        config_overrides={"install_root": str(install_root)},
+        versions=[{"version": "25.8.0", "path": str(version_dir)}],
+        instances=[{"name": "alpha", "version": "current"}],
+    )
+
+    def failing_stop(self: SystemdProvider, name: str) -> subprocess.CompletedProcess:
+        raise SystemdError("stop failed")
+
+    monkeypatch.setattr(SystemdProvider, "stop", failing_stop)
+
+    result = runner.invoke(app, ["version", "switch", "25.8.0", "--no-backup"], env=env)
+
+    assert result.exit_code == 4
+    assert "systemd stop failed for 'alpha'" in result.stdout
+    registry = StateRegistry(state_dir / "registry")
+    entry = registry.get_version("25.8.0")
+    assert entry is not None
+    metadata = entry.get("metadata", {})
+    assert metadata.get("current") is True
+
+
 def test_version_install_records_registry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2010,6 +2099,24 @@ def test_version_install_no_backup_records_skip(
     record = json.loads(lines[-1])
     step_names = [step["name"] for step in record["steps"]]
     assert "backup.skip" in step_names
+
+
+def test_version_uninstall_unknown_version_returns_rc2(tmp_path: Path) -> None:
+    """Uninstalling an unknown version exits with rc=2."""
+    install_root = tmp_path / "srv" / "app"
+    env, _ = _prepare_environment(
+        tmp_path,
+        config_overrides={"install_root": str(install_root)},
+    )
+
+    result = runner.invoke(
+        app,
+        ["version", "uninstall", "25.9.9", "--no-backup"],
+        env=env,
+    )
+
+    assert result.exit_code == 2
+    assert "Version '25.9.9' is not registered." in result.stdout
 
 
 def test_version_uninstall_dry_run_preserves_files(tmp_path: Path) -> None:
@@ -2280,12 +2387,16 @@ def test_version_uninstall_blocks_in_use(tmp_path: Path) -> None:
                 "metadata": {"installed": True},
             }
         ],
-        instances=[{"name": "alpha", "version": "25.9.0"}],
+        instances=[
+            {"name": "beta", "version": "25.9.0"},
+            {"name": "alpha", "version": "25.9.0"},
+        ],
     )
 
     result = runner.invoke(app, ["version", "uninstall", "25.9.0", "--no-backup"], env=env)
     assert result.exit_code == 2
     assert version_dir.exists()
+    assert "instances: alpha, beta" in result.stdout
 
 
 def test_version_uninstall_removes_version(tmp_path: Path) -> None:
@@ -2311,6 +2422,39 @@ def test_version_uninstall_removes_version(tmp_path: Path) -> None:
 
     registry = StateRegistry(state_dir / "registry")
     assert registry.get_version("25.9.0") is None
+
+
+def test_version_uninstall_missing_path_skips_filesystem_step(tmp_path: Path) -> None:
+    """Uninstall succeeds when path is absent and omits filesystem.remove."""
+    install_root = tmp_path / "srv" / "app"
+    env, state_dir = _prepare_environment(
+        tmp_path,
+        config_overrides={"install_root": str(install_root)},
+        versions=[
+            {
+                "version": "25.4.0",
+                "path": str(install_root / "v25.4.0"),
+                "metadata": {"installed": True},
+            }
+        ],
+    )
+    registry = StateRegistry(state_dir / "registry")
+    assert registry.get_version("25.4.0") is not None
+
+    result = runner.invoke(
+        app,
+        ["version", "uninstall", "25.4.0", "--no-backup"],
+        env=env,
+    )
+
+    assert result.exit_code == 0
+    logs_dir = state_dir.parent / "logs"
+    operations_file = logs_dir / "operations.jsonl"
+    lines = operations_file.read_text(encoding="utf-8").splitlines()
+    record = json.loads(lines[-1])
+    step_names = [step["name"] for step in record["steps"]]
+    assert "filesystem.remove" not in step_names
+    assert registry.get_version("25.4.0") is None
 
 
 def test_instance_list_reads_registry(tmp_path: Path) -> None:

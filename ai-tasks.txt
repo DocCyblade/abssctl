@@ -4,17 +4,6 @@
 #
 # - AI do not edit above this line! Keep this header!
 
-B2-4 – version switch CLI guard rails
-- Cover invalid --restart input (rc=2) and message content.
-- Unregistered version path (rc=2) via _switch_version guard.
-- Missing install directory (rc=3) scenario to confirm messaging.
-- Simulate SystemdError during restart to ensure provider_error -> rc=4 and step logging.
-
-B2-5 – version uninstall CLI safety checks
-- Unknown version (rc=2) before filesystem mutation.
-- Verify in-use guard message lists sorted instances and prevents changes.
-- Path-missing uninstall succeeds: registry entry removed, no filesystem.remove step logged.
-
 B2-6 – version check-updates CLI coverage
 - Remote matches installed -> “up to date” message/JSON assertions.
 - Remote lookup returning [] (no failure) -> “remote-unavailable” status path.

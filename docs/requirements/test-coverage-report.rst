@@ -101,12 +101,12 @@ Proposed Test Additions
    - Bubble up ``VersionInstallError`` from the installer (rc=4, logged error step).
    - ``--dry-run --set-current`` should report deferred switch without altering the symlink.
    - ``--no-backup`` path records ``backup.skip`` and avoids prompting.
-4. **B2-4 – `version switch` CLI guard rails**
+4. **B2-4 – `version switch` CLI guard rails** *(Completed 2025-11-03)*
    - Invalid ``--restart`` value exits with rc=2 and prints the validation error.
    - Unregistered target version triggers rc=2 via ``_switch_version``.
    - Missing install directory triggers rc=3 and surfaces the path in the message.
    - Simulate ``SystemdError`` during restart to ensure ``_provider_error`` converts it to rc=4.
-5. **B2-5 – `version uninstall` CLI safety checks**
+5. **B2-5 – `version uninstall` CLI safety checks** *(Completed 2025-11-03)*
    - Unknown version (absent from registry) exits with rc=2 before filesystem mutation.
    - Confirm error messaging for “in use” guard includes sorted instance list.
    - Path-missing uninstall still succeeds (no ``filesystem.remove`` step) while registry entry drops.
