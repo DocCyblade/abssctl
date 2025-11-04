@@ -266,6 +266,7 @@ Completed Beta idempotency coverage, added reusable test harness/snapshots, wire
 - Delivered B2-5 safety coverage: extended `version uninstall` tests for unknown versions, in-use messaging, and missing path handling; updated docs/tasks and kept quick-tests passing.
 - Delivered B2-6 coverage: enhanced `version check-updates` tests for up-to-date status and JSON remote-unavailable handling; quick-tests remain green.
 - Delivered B2-7 coverage: added `version list` fallback tests for missing npm and malformed caches, and hardened CLI remote error handling.
+- Re-ran `python -m pytest --cov=src/abssctl --cov-report=term-missing`; updated coverage summary to 78 % and refreshed documentation.
 
 ## Wrap up:
 - Drafted Beta2-1 coverage plan outlining remaining version management/CLI error-path test gaps, now tracked as B2-1..B2-7 with ai-tasks context; B2-1 through B2-7 are complete with passing quick-tests.
