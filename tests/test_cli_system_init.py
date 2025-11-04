@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from typer.testing import CliRunner
 
 from abssctl.cli import app
@@ -147,3 +149,19 @@ def test_system_init_rebuild_state_errors_abort(tmp_path: Path) -> None:
     result = runner.invoke(app, args)
     assert result.exit_code == 2
     assert "Cannot rebuild state" in result.stdout
+
+
+def test_system_init_handles_filesystem_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Filesystem failures should surface with exit code 4."""
+    def fail_directory_plan(plan: object, *, dry_run: bool = False) -> None:  # noqa: ARG001
+        raise OSError("permission denied")
+
+    monkeypatch.setattr("abssctl.cli.apply_directory_plan", fail_directory_plan)
+
+    args = _bootstrap_args(tmp_path) + ["--yes", "--allow-create-user"]
+    result = runner.invoke(app, args)
+    assert result.exit_code == 4
+    assert "Filesystem operation failed" in result.stdout

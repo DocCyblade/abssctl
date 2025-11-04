@@ -52,3 +52,30 @@ def test_request_specific_port_and_collision(ports: PortsRegistry) -> None:
 
     with pytest.raises(PortsRegistryError):
         ports.reserve("gamma", requested_port=5005)
+
+
+def test_release_missing_port_raises(ports: PortsRegistry) -> None:
+    """Releasing a port that does not exist raises an error."""
+    ports.reserve("alpha")
+    with pytest.raises(PortsRegistryError):
+        ports.release("beta")
+
+
+def test_reserve_rejects_blank_name(ports: PortsRegistry) -> None:
+    """Blank instance names are rejected."""
+    with pytest.raises(PortsRegistryError):
+        ports.reserve("   ")
+
+
+def test_ports_registry_persist_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Write failures bubble up as errors to callers."""
+    registry = StateRegistry(tmp_path / "registry")
+    ports = PortsRegistry(registry=registry, base_port=5000)
+
+    def fail_write(entries: list[dict[str, int]]) -> None:  # noqa: ARG001 - signature matches
+        raise OSError("disk full")
+
+    monkeypatch.setattr(StateRegistry, "write_ports", fail_write)
+
+    with pytest.raises(OSError):
+        ports.reserve("alpha")

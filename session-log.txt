@@ -268,6 +268,7 @@ Completed Beta idempotency coverage, added reusable test harness/snapshots, wire
 - Delivered B2-7 coverage: added `version list` fallback tests for missing npm and malformed caches, and hardened CLI remote error handling.
 - Re-ran `python -m pytest --cov=src/abssctl --cov-report=term-missing`; updated coverage summary to 78 % and refreshed documentation.
 - B3-1 progress: added support-bundle placeholder test plus `system init` failure coverage for missing `--allow-create-user` and discovery errors; quick-tests remain green.
+- B3-2 progress: added logging failure-mode tests, ports registry error coverage, and `system init` filesystem failure handling; quick-tests remain green.
 
 ## Wrap up:
 - Drafted Beta2-1 coverage plan outlining remaining version management/CLI error-path test gaps, now tracked as B2-1..B2-7 with ai-tasks context; B2-1 through B2-7 are complete with passing quick-tests.
