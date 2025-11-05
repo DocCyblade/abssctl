@@ -249,7 +249,7 @@ Completed Beta idempotency coverage, added reusable test harness/snapshots, wire
 
 -----------------------------------------
 
-# 2025-11-03 Beta2-1 Session (OPEN)
+# 2025-11-03 Beta2-1 Session (CLOSED)
 - Session opened to launch RC coverage workstream Beta2-1 focusing on version management and CLI error-path test gaps.
 - Reviewed primer/Next Steps to confirm priority on mapping coverage and preparing a draft supplementation plan.
 - Preparing to audit existing tests, requirements, and ADR guidance before proposing additions.
@@ -269,22 +269,29 @@ Completed Beta idempotency coverage, added reusable test harness/snapshots, wire
 - Re-ran `python -m pytest --cov=src/abssctl --cov-report=term-missing`; updated coverage summary to 78 % and refreshed documentation.
 - B3-1 progress: added support-bundle placeholder test plus `system init` failure coverage for missing `--allow-create-user` and discovery errors; quick-tests remain green.
 - B3-2 progress: added logging failure-mode tests, ports registry error coverage, and `system init` filesystem failure handling; quick-tests remain green.
-- Kicked off B3-3 mutation-testing pilot: installed mutmut and attempted `mutmut run`, but tests fail
-  in the mutant sandbox because they import `tests.test_cli`; need to switch to relative imports or
-  adjust PYTHONPATH before rerunning.
-- Re-ran mutmut with `PYTHONPATH=$(pwd)/tests:$(pwd)/src`; run completed (3772 killed, 3397 survived, 1479 timeouts, 109 "no tests"). Recorded artifacts under `mutants/` for follow-up triage.
+- Tuned the repo structure: moved AI/ops helper files into `ops/` with updated references across docs.
+- Adapted the test suite (package marker + PYTHONPATH override) so mutmut can run in sandboxes; executed `PYTHONPATH=$(pwd)/tests:$(pwd)/src mutmut run` (3772 killed, 3397 survived, 1479 timeouts, 109 "no tests") and summarised results in `ops/mutation-results.xml`.
 
 ## Wrap up:
-- Drafted Beta2-1 coverage plan outlining remaining version management/CLI error-path test gaps, now tracked as B2-1..B2-7 with ai-tasks context; B2-1 through B2-7 are complete with passing quick-tests.
+- Closed out Beta2 coverage (B2-1..B2-7), delivered B3-1/B3-2 resilience tests, reorganised AI ops files under `ops/`, and captured a full mutation-testing baseline (41 % score) highlighting follow-up areas (doctor/CLI/TLS/discovery coverage and timeout triage).
+
+-----------------------------------------
+
+# 2025-11-03 Beta3-1 Session (OPEN)
+- Session opened to tackle RC mutation coverage follow-ups informed by the mutmut pilot (doctor/CLI/TLS/discovery gaps, timeout hotspots).
+- TODO and Primer updated to focus on survivor triage, timeout mitigation, and support-bundle/doctor `--fix` planning.
+
+## Wrap up:
+- (in progress)
 
 -----------------------------------------
 
 ----------------------- Sessions logging above this line only ----------------------
 
 # Next Steps / TODO:
-- Raise coverage for version management and CLI error paths (npm interactions, install/switch/uninstall failure handling).
-- Begin RC feature implementation: support-bundle command, doctor `--fix`, documentation/CI polish.
-- Plan manual-server migration from tarball installs to npm once abssctl version management is ready.
+- Triage mutmut survivors (doctor helpers, CLI doctor report pipelines, TLS inspector, discovery warnings) and add targeted tests to kill them.
+- Investigate mutation timeouts in `abssctl.config`, `abssctl.cli`, and `abssctl.logging`; trim scope or optimise tests before CI adoption.
+- Begin RC polish: design support-bundle implementation plan, scope doctor `--fix`, and outline doc/CI updates.
 
 # Next Session Primer
-- Kick off RC-track work: target the version-provider/CLI coverage gaps, outline support-bundle/doctor `--fix` plans, and coordinate the manual-server migration strategy.
+- Continue Beta3-1 by reviewing mutmut survivor list, drafting targeted test cases, and capturing a plan for support-bundle/doctor `--fix` plus timeout mitigation so future sessions can execute.

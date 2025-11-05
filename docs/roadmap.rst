@@ -74,6 +74,9 @@ Release Candidate — Quality & Docs
   snapshots, logs, and probe output with redaction per ADR-012/ADR-014/ADR-028.
 - [ ] Harden error handling and map failures to the formal exit-code taxonomy
   (ADR-013), including rich user messaging.
+- [ ] Triage mutation-testing survivors (doctor helpers, CLI report pipelines,
+  TLS inspector, discovery warnings) and expand tests; address mutmut timeouts
+  before rolling the suite into CI.
 - [ ] Generate Sphinx man pages in CI, package them with the wheel/sdist, and
   implement ``abssctl docs man install``/``path`` commands per ADR-002/ADR-019.
 - [ ] Implement shell completion management (``abssctl completion
