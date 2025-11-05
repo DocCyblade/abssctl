@@ -129,3 +129,5 @@ dmypy.json
 # ── Local helper outputs from repo audits ─────────────────────────────────────
 *.patch
 tmp*
+mutants
+mutmut-*

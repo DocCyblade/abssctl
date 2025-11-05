@@ -269,6 +269,10 @@ Completed Beta idempotency coverage, added reusable test harness/snapshots, wire
 - Re-ran `python -m pytest --cov=src/abssctl --cov-report=term-missing`; updated coverage summary to 78 % and refreshed documentation.
 - B3-1 progress: added support-bundle placeholder test plus `system init` failure coverage for missing `--allow-create-user` and discovery errors; quick-tests remain green.
 - B3-2 progress: added logging failure-mode tests, ports registry error coverage, and `system init` filesystem failure handling; quick-tests remain green.
+- Kicked off B3-3 mutation-testing pilot: installed mutmut and attempted `mutmut run`, but tests fail
+  in the mutant sandbox because they import `tests.test_cli`; need to switch to relative imports or
+  adjust PYTHONPATH before rerunning.
+- Re-ran mutmut with `PYTHONPATH=$(pwd)/tests:$(pwd)/src`; run completed (3772 killed, 3397 survived, 1479 timeouts, 109 "no tests"). Recorded artifacts under `mutants/` for follow-up triage.
 
 ## Wrap up:
 - Drafted Beta2-1 coverage plan outlining remaining version management/CLI error-path test gaps, now tracked as B2-1..B2-7 with ai-tasks context; B2-1 through B2-7 are complete with passing quick-tests.
