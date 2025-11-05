@@ -21,7 +21,7 @@ Coding Workflow
 ---------------
 
 1. Fork the repository or create a feature branch from the active milestone
-   integration branch (currently ``dev-alpha5``; check ``session-log.txt`` for
+   integration branch (currently ``dev-alpha5``; check ``ops/session-log.txt`` for
    the latest session information).
 2. Create a Python 3.11 virtual environment stored in ``.venv`` with a prompt label ``dev`` and activate it::
 

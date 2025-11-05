@@ -1,6 +1,5 @@
 - This file to be used when what we want to tell AI is too large for chat.
-- Prompt: Message is to large see file ai-large-message.txt 
+- Prompt: Message is to large see file ops/ai-large-message.txt 
 - 
 - 
 - AI Partners DO NOT EDIT ABOVE THIS LINE. Once done reading file you can remove whats BELOW this line ONLY after you have asked to do solution
-

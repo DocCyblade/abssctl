@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mutmut>
+  <run date="2025-11-03" status="completed" command="PYTHONPATH=$(pwd)/tests:$(pwd)/src mutmut run">
+    <summary>Mutation run finished with 3,397 surviving mutants, 3,772 killed, 1,479 timeouts, and 109 lines marked "no tests" (mutation score ~41%).</summary>
+    <detail>
+      <bullet>Survivors concentrated in `abssctl.cli` (doctor helpers), `abssctl.doctor` aggregation, `abssctl.tls` inspector, and bootstrap discovery; these areas need targeted tests.</bullet>
+      <bullet>Large number of timeouts in `abssctl.config`, `abssctl.cli`, and `abssctl.logging`; consider trimming mutation scope or optimising slow tests before CI integration.</bullet>
+      <bullet>Raw mutmut artifacts were reviewed during the pilot and then discarded to keep the workspace tidy; this summary captures the key findings.</bullet>
+    </detail>
+  </run>
+</mutmut>

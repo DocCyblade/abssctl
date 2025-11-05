@@ -3,7 +3,7 @@ This file is used to help bootstrap AI help/chats to keep things consistent betw
 All new chats I will start with the below text
 Start with: 
 Hello AI Dev Partner, can I call you Albert or Al? :-) you can call me Doc. to get you up to speed and bootstrap this chat session please 
-read the file ai-directives.txt this has all the info you need to get started.
+read the file ops/ai-directives.txt this has all the info you need to get started.
 
 AI Directives for chats for this repo/project
 
@@ -20,7 +20,7 @@ AI Directives for chats for this repo/project
 - Workflow should always be documentation centric. Documentation -> Code -> Write/Run CI Test (where we can) -> Debug -> Change in Code -> Add/Update Docs 
 - Project Documentation should be kept in sync with any major rework or progress. Try and keep docs in check.
    - If docs located or type is not specified work with the developer to get that specified and into the correct specs documents 
-- Large messages may be asked via a file called ai-large-message.txt. 
+- Large messages may be asked via a file called ops/ai-large-message.txt. 
    - Be sure to only remove below the correct line once read.
    - On session startup check this file as it may have longer message for session startup
      - if file is blank (except for header) assume we have no longer message at startup 
@@ -31,7 +31,7 @@ AI Directives for chats for this repo/project
     - Any new function or deviation of specs or ADRs need a new ADR and approved by developers
 - Roadmap file docs/roadmap.rst
     - List the road map for the project. This file should be used to check off when things are done, and be added to if things change issues are found and/or ADRs/scope changes. Changes should be approved by developer
-- Session log to be updated in real time by AI at session-log.txt
+- Session log to be updated in real time by AI at ops/session-log.txt
     - How to read this and update this file is at the top of the file
     - When asked to "session recap" give me:
         - the session wrap up. If not written write it out in the log
@@ -67,7 +67,7 @@ AI Directives for chats for this repo/project
    9. AI will then check the to ensure work was committed and if not let user know, we loop to step 2
 
 
-- Task State on Crash or Failure: AI, to help keep track of longer tasks for a request please use the ai-tasks.txt
+- Task State on Crash or Failure: AI, to help keep track of longer tasks for a request please use the ops/ai-tasks.txt
    - Keep an eye on your session model memory. If getting close let me know so we can start a new session
    - This file is to help you and me abd you in case you crash or failure during multi file edits
    - On a large task or multi task processes write to this file the goals and the steps to take to get there
@@ -78,9 +78,8 @@ AI Directives for chats for this repo/project
 
 Lets get started, once you have read and understand all the directives your first thing to do
 - Tell me you read and understand the documents, list them if would like
-- Read the Next Session Primer in the session-log.txt
+- Read the Next Session Primer in the ops/session-log.txt
     - If the last session is CLOSED read it and start a new session asking for the name of session
     - If the last session is OPEN read it and append to the session
-- Go over the next steps specified in the primer prompt unless there are things in the ai-task.log
-
+- Go over the next steps specified in the primer prompt unless there are things in the ops/ai-tasks.txt
 

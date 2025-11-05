@@ -8,7 +8,7 @@ Purpose
 Maintain list of outstanding work needed to deliver
 abssctl v1.0. Items are grouped by the milestones defined in
 ``docs/requirements/abssctl-app-specs.txt`` and the project README. Move
-completed tasks into ``session-log.txt`` when done.
+completed tasks into ``ops/session-log.txt`` when done.
 
 Planning
 ========

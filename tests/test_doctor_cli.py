@@ -17,7 +17,7 @@ from abssctl.cli import app
 from abssctl.doctor import DoctorImpact
 from abssctl.doctor import probes as doctor_probes
 from abssctl.providers.nginx import NginxError
-from test_cli import _extract_json, _prepare_environment
+from tests.test_cli import _extract_json, _prepare_environment
 
 runner = CliRunner()
 _MockDiskUsage = namedtuple("DiskUsage", "total used free")
