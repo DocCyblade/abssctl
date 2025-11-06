@@ -280,6 +280,12 @@ Completed Beta idempotency coverage, added reusable test harness/snapshots, wire
 # 2025-11-03 Beta3-1 Session (OPEN)
 - Session opened to tackle RC mutation coverage follow-ups informed by the mutmut pilot (doctor/CLI/TLS/discovery gaps, timeout hotspots).
 - TODO and Primer updated to focus on survivor triage, timeout mitigation, and support-bundle/doctor `--fix` planning.
+- Parsed the fresh mutmut run results into `ops/mutation-results-raw.txt`, mapping survivor volume by module (doctor probes, CLI doctor payloads, TLS inspector, discovery, logging) plus timeout hotspots.
+- Added `tests/test_doctor_probes.py` covering state reconciliation, systemd units/status, nginx sites, TLS system certificate, and disk-usage probes to eliminate the 1,002 doctor survivor cluster.
+- Ran `.venv/bin/python -m pytest tests/test_doctor_probes.py` and `make quick-tests` to keep lint/mypy/pytest gates green after the new coverage landed.
+- Extended coverage to remaining survivor clusters: introduced `tests/test_cli_doctor_helpers.py`, new TLS inspector/validator cases in `tests/test_tls.py`, discovery edge-case tests in `tests/test_bootstrap_discovery.py`, and additional logging sanitisation checks in `tests/test_logging.py`.
+- Verified the broader suite by running `make quick-tests` (ruff/mypy/pytest) with all 260 tests passing.
+- Re-ran `PYTHONPATH=$(pwd)/tests:$(pwd)/src mutmut run`; survivors dropped to 3,099 (down ~290) with doctor probes 806 (-196), CLI doctor helpers 20/25 survivors, TLS 228 (-40), discovery 16 (-10), logging 16 (-12), while timeouts eased slightly to 1,337.
 
 ## Wrap up:
 - (in progress)
@@ -289,7 +295,7 @@ Completed Beta idempotency coverage, added reusable test harness/snapshots, wire
 ----------------------- Sessions logging above this line only ----------------------
 
 # Next Steps / TODO:
-- Triage mutmut survivors (doctor helpers, CLI doctor report pipelines, TLS inspector, discovery warnings) and add targeted tests to kill them.
+- Triage remaining mutmut survivors (CLI rendering, doctor probes, TLS validator/inspector, logging) using the fresh results and plan the next wave of targeted tests.
 - Investigate mutation timeouts in `abssctl.config`, `abssctl.cli`, and `abssctl.logging`; trim scope or optimise tests before CI adoption.
 - Begin RC polish: design support-bundle implementation plan, scope doctor `--fix`, and outline doc/CI updates.
 

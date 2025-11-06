@@ -5,5 +5,5 @@
 # - AI do not edit above this line! Keep this header!
 # B3-3 – Pilot mutation testing
 # - Mutmut run completed (`PYTHONPATH=$(pwd)/tests:$(pwd)/src mutmut run`); score ~41% (3772 killed / 3397 survived / 1479 timeouts).
-# - Next: triage surviving mutants (focus on abssctl.cli doctor helpers, abssctl.doctor aggregations, tls inspector, bootstrap discovery) and add targeted tests.
+# - Next: re-run mutmut after adding targeted CLI doctor helper, TLS, discovery, and logging tests to confirm survivor reduction and identify any remaining hotspots.
 # - Investigate timeouts (heavy concentration in abssctl.config/cli/logging) before considering CI integration; possibly limit scope or mark slow tests.

@@ -17,6 +17,8 @@ from abssctl.config import TLSPermissionSpec, TLSValidationConfig, load_config
 from abssctl.tls import (
     TLSConfigurationError,
     TLSInspector,
+    TLSMaterial,
+    TLSSourceSelection,
     TLSValidationSeverity,
     TLSValidator,
 )
@@ -262,3 +264,111 @@ def test_tls_inspector_requires_custom_paths(tmp_path: Path) -> None:
 
     with pytest.raises(TLSConfigurationError):
         inspector.resolve_for_instance("app", entry, source_override="custom")
+
+
+def test_tls_inspector_manual_override_short_circuits(tmp_path: Path) -> None:
+    """Explicit certificate and key parameters should bypass registry lookups."""
+    validation = _create_validation_config()
+    config, _ = _build_config(tmp_path, validation)
+    inspector = TLSInspector(config)
+    cert = tmp_path / "manual.pem"
+    key = tmp_path / "manual.key"
+    cert.write_text("cert", encoding="utf-8")
+    key.write_text("key", encoding="utf-8")
+
+    selection = inspector.resolve_for_instance(
+        "alpha",
+        {},
+        certificate=cert,
+        key=key,
+    )
+
+    assert selection.requested == "custom"
+    assert selection.material.certificate == cert
+    assert selection.material.key == key
+
+
+def test_tls_inspector_destination_for_instance_sanitises_name(tmp_path: Path) -> None:
+    """Derive destination paths using a normalised instance name."""
+    validation = _create_validation_config()
+    config, _ = _build_config(tmp_path, validation)
+    inspector = TLSInspector(config)
+
+    material = inspector.destination_for_instance("foo/bar")
+
+    assert material.certificate.name == "abssctl-foo-bar.pem"
+    assert material.key.name == "abssctl-foo-bar.key"
+    assert material.chain and material.chain.name == "abssctl-foo-bar.chain.pem"
+
+
+def test_tls_validator_reports_missing_files(tmp_path: Path) -> None:
+    """Validator should highlight missing TLS artefacts."""
+    validation = _create_validation_config()
+    validator = TLSValidator(validation)
+    material = TLSMaterial(
+        certificate=tmp_path / "missing-cert.pem",
+        key=tmp_path / "missing-key.pem",
+        chain=None,
+    )
+    selection = TLSSourceSelection(
+        requested="custom",
+        resolved="custom",
+        material=material,
+        domain="alpha.example",
+    )
+
+    report = validator.validate(selection, now=datetime.now(UTC))
+
+    findings = {(finding.scope, finding.check) for finding in report.findings}
+    assert ("certificate", "exists") in findings
+    assert ("key", "exists") in findings
+    assert report.status is TLSValidationSeverity.ERROR
+
+
+def test_tls_validator_flags_permission_mismatch(tmp_path: Path) -> None:
+    """Incorrect permission modes should be reported as errors."""
+    validation = _create_validation_config()
+    config, _ = _build_config(tmp_path, validation)
+    inspector = TLSInspector(config)
+    validator = TLSValidator(validation)
+    cert_path, key_path = _create_self_signed_cert(tmp_path)
+    key_path.chmod(0o400)
+    selection = inspector.resolve_manual(certificate=cert_path, key=key_path)
+
+    report = validator.validate(selection, now=datetime.now(UTC))
+
+    assert any(
+        finding.check == "permissions" and finding.severity is TLSValidationSeverity.ERROR
+        for finding in report.findings
+    )
+
+
+def test_tls_validator_handles_unreadable_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Files failing readability checks should produce errors."""
+    validation = _create_validation_config()
+    config, _ = _build_config(tmp_path, validation)
+    inspector = TLSInspector(config)
+    validator = TLSValidator(validation)
+    cert_path, key_path = _create_self_signed_cert(tmp_path)
+
+    original_access = os.access
+
+    def deny_read(path: Path, mode: int) -> bool:
+        if path == key_path:
+            return False
+        return original_access(path, mode)
+
+    monkeypatch.setattr(os, "access", deny_read)
+    selection = inspector.resolve_manual(certificate=cert_path, key=key_path)
+
+    report = validator.validate(selection, now=datetime.now(UTC))
+
+    assert any(
+        finding.scope == "key"
+        and finding.check == "readable"
+        and finding.severity is TLSValidationSeverity.ERROR
+        for finding in report.findings
+    )
