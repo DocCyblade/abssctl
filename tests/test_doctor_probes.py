@@ -10,13 +10,11 @@ from typing import Never
 import pytest
 
 from abssctl.bootstrap.discovery import DiscoveredInstance, DiscoveryReport
-from abssctl.doctor import (
-    DoctorImpact,
-    ProbeContext,
-    ProbeExecutorOptions,
-    ProbeStatus,
-)
+from abssctl.doctor import DoctorImpact, ProbeContext, ProbeExecutorOptions, ProbeStatus
 from abssctl.doctor import probes as doctor_probes
+from abssctl.ports import PortsRegistryError
+from abssctl.providers.instance_status_provider import InstanceStatus
+from abssctl.providers.nginx import NginxError
 from abssctl.providers.systemd import SystemdError
 from abssctl.tls import TLSConfigurationError, TLSValidationSeverity
 
@@ -198,6 +196,103 @@ def test_probe_state_reconcile_green_when_registry_matches(
     assert result.data is None
 
 
+def test_probe_state_reconcile_when_no_instances(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Empty registry/discovery should report a neutral message."""
+    report = DiscoveryReport(instances=[])
+    monkeypatch.setattr(doctor_probes, "discover_instances", lambda *args, **kwargs: report)
+    registry = DummyRegistry([])
+    config = SimpleNamespace(
+        instance_root=tmp_path / "instances",
+        runtime_dir=tmp_path / "run",
+        logs_dir=tmp_path / "logs",
+        state_dir=tmp_path / "state",
+    )
+    context = _build_context(config=config, registry=registry)
+
+    result = doctor_probes._probe_state_reconcile(context)
+    assert result.status is ProbeStatus.GREEN
+    assert result.message == "No instances discovered; registry is empty"
+
+
+# ---------------------------------------------------------------------------
+# Environment probes
+# ---------------------------------------------------------------------------
+
+
+def test_probe_env_command_required_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fatal env commands should report environment impact when missing."""
+    monkeypatch.setattr(doctor_probes, "_command_exists", lambda command: False)
+    runner = doctor_probes._probe_env_command("node", fatal=True)
+    result = runner(_build_context())
+    assert result.status is ProbeStatus.RED
+    assert result.impact is DoctorImpact.ENVIRONMENT
+
+
+def test_probe_env_command_optional_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Optional env commands should degrade to a warning."""
+    monkeypatch.setattr(doctor_probes, "_command_exists", lambda command: False)
+    runner = doctor_probes._probe_env_command("zstd", fatal=False)
+    result = runner(_build_context())
+    assert result.status is ProbeStatus.YELLOW
+    assert result.warnings == ("missing:zstd",)
+
+
+def test_probe_env_command_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Commands present on PATH should report green status."""
+    monkeypatch.setattr(doctor_probes, "_command_exists", lambda command: True)
+    runner = doctor_probes._probe_env_command("node", fatal=True)
+    result = runner(_build_context())
+    assert result.status is ProbeStatus.GREEN
+    assert result.impact is DoctorImpact.OK
+
+
+def test_probe_env_nginx_reports_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Missing nginx binary should be treated as an environment failure."""
+    monkeypatch.setattr(doctor_probes, "_command_exists", lambda command: False)
+    provider = DummyNginxProvider(tmp_path)
+    context = _build_context(nginx_provider=provider)
+
+    result = doctor_probes._probe_env_nginx(context)
+    assert result.status is ProbeStatus.RED
+    assert result.impact is DoctorImpact.ENVIRONMENT
+
+
+def test_probe_env_nginx_reports_present(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Existing nginx binary should ensure a green result."""
+    monkeypatch.setattr(doctor_probes, "_command_exists", lambda command: True)
+    provider = DummyNginxProvider(tmp_path)
+    context = _build_context(nginx_provider=provider)
+
+    result = doctor_probes._probe_env_nginx(context)
+    assert result.status is ProbeStatus.GREEN
+    assert result.message.startswith("nginx binary")
+
+
+def test_probe_env_systemctl_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Missing systemctl should emit a warning."""
+    monkeypatch.setattr(doctor_probes, "_command_exists", lambda command: False)
+    provider = DummySystemdProvider(tmp_path)
+    context = _build_context(systemd_provider=provider)
+
+    result = doctor_probes._probe_env_systemctl(context)
+    assert result.status is ProbeStatus.YELLOW
+    assert result.warnings == ("missing:systemctl",)
+
+
+def test_probe_env_systemctl_available(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Available systemctl should result in a green status."""
+    monkeypatch.setattr(doctor_probes, "_command_exists", lambda command: True)
+    provider = DummySystemdProvider(tmp_path)
+    context = _build_context(systemd_provider=provider)
+
+    result = doctor_probes._probe_env_systemctl(context)
+    assert result.status is ProbeStatus.GREEN
+    assert result.message.startswith("systemctl binary")
+
+
 # ---------------------------------------------------------------------------
 # Systemd probes
 # ---------------------------------------------------------------------------
@@ -210,6 +305,7 @@ class DummySystemdProvider:
         """Record unit directory and optional status override mapping."""
         self._unit_base = unit_base
         self._status_map = status_map or {}
+        self.systemctl_bin = "systemctl"
 
     def unit_path(self, name: str) -> Path:
         """Return the expected unit path for *name*."""
@@ -294,6 +390,20 @@ def test_probe_systemd_status_handles_missing_systemctl(tmp_path: Path) -> None:
     assert result.warnings == ("systemd:missing",)
 
 
+def test_probe_systemd_status_green(tmp_path: Path) -> None:
+    """Healthy systemd status should yield a green result."""
+    provider = DummySystemdProvider(
+        tmp_path,
+        status_map={"alpha": DummyCompletedProcess(returncode=0, stdout="ok", stderr="")},
+    )
+    registry = DummyRegistry([{"name": "alpha"}])
+    context = _build_context(systemd_provider=provider, registry=registry)
+
+    result = doctor_probes._probe_systemd_status(context)
+    assert result.status is ProbeStatus.GREEN
+    assert result.impact is DoctorImpact.OK
+
+
 # ---------------------------------------------------------------------------
 # Nginx probes
 # ---------------------------------------------------------------------------
@@ -308,11 +418,16 @@ class DummyNginxProvider:
         *,
         existing: set[str] | None = None,
         enabled: set[str] | None = None,
+        test_result: DummyCompletedProcess | None = None,
+        test_error: Exception | None = None,
     ) -> None:
         """Populate fake filesystem state for nginx site checks."""
         self._base = base
         self._existing = existing or set()
         self._enabled = enabled or set()
+        self.nginx_bin = "nginx"
+        self._test_result = test_result or DummyCompletedProcess(returncode=0)
+        self._test_error = test_error
         for name in self._existing:
             self.site_path(name).parent.mkdir(parents=True, exist_ok=True)
             self.site_path(name).write_text("server {}", encoding="utf-8")
@@ -324,6 +439,12 @@ class DummyNginxProvider:
     def is_enabled(self, name: str) -> bool:
         """Return True when the site is tracked as enabled."""
         return name in self._enabled
+
+    def test_config(self) -> DummyCompletedProcess:
+        """Return the configured nginx -t result or raise an error."""
+        if self._test_error is not None:
+            raise self._test_error
+        return self._test_result
 
 
 def test_probe_nginx_sites_reports_missing_configs(tmp_path: Path) -> None:
@@ -358,6 +479,137 @@ def test_probe_nginx_sites_green_when_all_enabled(tmp_path: Path) -> None:
     context = _build_context(nginx_provider=provider, registry=registry)
 
     result = doctor_probes._probe_nginx_sites(context)
+    assert result.status is ProbeStatus.GREEN
+    assert result.impact is DoctorImpact.OK
+
+
+def test_probe_nginx_config_success(tmp_path: Path) -> None:
+    """Successful nginx config validation should report green."""
+    provider = DummyNginxProvider(tmp_path)
+    context = _build_context(nginx_provider=provider)
+
+    result = doctor_probes._probe_nginx_config(context)
+    assert result.status is ProbeStatus.GREEN
+    assert result.message == "nginx -t validation succeeded."
+
+
+def test_probe_nginx_config_handles_error(tmp_path: Path) -> None:
+    """NginxError should produce a provider failure."""
+    provider = DummyNginxProvider(tmp_path, test_error=NginxError("boom"))
+    context = _build_context(nginx_provider=provider)
+
+    result = doctor_probes._probe_nginx_config(context)
+    assert result.status is ProbeStatus.RED
+    assert result.impact is DoctorImpact.PROVIDER
+    assert "boom" in result.message
+
+
+def test_probe_nginx_config_nonzero_exit(tmp_path: Path) -> None:
+    """Non-zero nginx -t exit codes should be captured."""
+    provider = DummyNginxProvider(
+        tmp_path,
+        test_result=DummyCompletedProcess(returncode=1, stdout="bad config", stderr="error"),
+    )
+    context = _build_context(nginx_provider=provider)
+
+    result = doctor_probes._probe_nginx_config(context)
+    assert result.status is ProbeStatus.RED
+    assert "nginx -t exited with 1" in result.message
+
+
+# ---------------------------------------------------------------------------
+# Ports probes
+# ---------------------------------------------------------------------------
+
+
+class DummyPortsRegistry:
+    """Stub ports registry returning canned entries or raising errors."""
+
+    def __init__(
+        self,
+        *,
+        entries: list[dict[str, object]] | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        """Initialise the stub with optional entries or an error to raise."""
+        self._entries = entries or []
+        self._error = error
+
+    def list_entries(self) -> list[dict[str, object]]:
+        """Return configured entries or raise the configured error."""
+        if self._error is not None:
+            raise self._error
+        return list(self._entries)
+
+
+def test_probe_ports_registry_handles_errors() -> None:
+    """Ports registry failures should surface validation errors."""
+    registry = DummyRegistry([{"name": "alpha"}])
+    ports = DummyPortsRegistry(error=PortsRegistryError("registry missing"))
+    context = _build_context(ports=ports, registry=registry)
+
+    result = doctor_probes._probe_ports_registry(context)
+    assert result.status is ProbeStatus.RED
+    assert result.impact is DoctorImpact.VALIDATION
+    assert "registry missing" in result.message
+
+
+def test_probe_ports_registry_detects_duplicate_ports() -> None:
+    """Duplicate port numbers should be reported."""
+    registry = DummyRegistry([{"name": "alpha"}, {"name": "beta"}])
+    ports = DummyPortsRegistry(
+        entries=[
+            {"name": "alpha", "port": 5100},
+            {"name": "beta", "port": 5100},
+        ]
+    )
+    context = _build_context(ports=ports, registry=registry)
+
+    result = doctor_probes._probe_ports_registry(context)
+    assert result.status is ProbeStatus.RED
+    assert "Duplicate ports detected: 5100" in result.message
+
+
+def test_probe_ports_registry_detects_duplicate_names() -> None:
+    """Duplicate reservations by name should be flagged."""
+    registry = DummyRegistry([{"name": "alpha"}, {"name": "beta"}])
+    ports = DummyPortsRegistry(
+        entries=[
+            {"name": "alpha", "port": 5100},
+            {"name": "alpha", "port": 5200},
+        ]
+    )
+    context = _build_context(ports=ports, registry=registry)
+
+    result = doctor_probes._probe_ports_registry(context)
+    assert result.status is ProbeStatus.RED
+    assert "Duplicate port reservations detected: alpha" in result.message
+
+
+def test_probe_ports_registry_warns_on_missing_ports() -> None:
+    """Instances without reserved ports should produce a warning."""
+    registry = DummyRegistry([{"name": "alpha"}, {"name": "beta"}])
+    ports = DummyPortsRegistry(entries=[{"name": "alpha", "port": 5100}])
+    context = _build_context(ports=ports, registry=registry)
+
+    result = doctor_probes._probe_ports_registry(context)
+    assert result.status is ProbeStatus.YELLOW
+    assert result.warnings == ("ports:missing",)
+    assert "beta" in result.message
+
+
+def test_probe_ports_registry_green_when_all_reserved() -> None:
+    """Healthy port reservations should yield a green result."""
+    registry = DummyRegistry([{"name": "alpha"}, {"name": "beta"}])
+    ports = DummyPortsRegistry(
+        entries=[
+            {"name": "alpha", "port": 5100},
+            {"name": "beta", "port": 5200},
+        ]
+    )
+    context = _build_context(ports=ports, registry=registry)
+
+    result = doctor_probes._probe_ports_registry(context)
     assert result.status is ProbeStatus.GREEN
     assert result.impact is DoctorImpact.OK
 
@@ -545,6 +797,161 @@ def test_probe_tls_system_certificate_handles_config_errors(
     assert result.status is ProbeStatus.RED
     assert result.impact is DoctorImpact.VALIDATION
     assert "Failed to resolve system TLS assets" in result.message
+
+
+# ---------------------------------------------------------------------------
+# Filesystem probes
+# ---------------------------------------------------------------------------
+
+
+def _filesystem_config(root: Path) -> object:
+    config_file = root / "etc" / "abssctl" / "config.yaml"
+    registry_dir = root / "var" / "lib" / "abssctl" / "registry"
+    state_dir = root / "var" / "lib" / "abssctl"
+    logs_dir = root / "var" / "log" / "abssctl"
+    runtime_dir = root / "run" / "abssctl"
+    templates_dir = root / "usr" / "share" / "abssctl" / "templates"
+    backups_root = root / "var" / "backups" / "abssctl"
+
+    return SimpleNamespace(
+        config_file=config_file,
+        state_dir=state_dir,
+        registry_dir=registry_dir,
+        logs_dir=logs_dir,
+        runtime_dir=runtime_dir,
+        templates_dir=templates_dir,
+        backups=SimpleNamespace(root=backups_root),
+    )
+
+
+def test_probe_filesystem_directories_reports_missing(tmp_path: Path) -> None:
+    """Missing directories should be reported as validation failures."""
+    config = _filesystem_config(tmp_path)
+    config.config_file.parent.mkdir(parents=True, exist_ok=True)
+    context = _build_context(config=config)
+
+    result = doctor_probes._probe_filesystem_directories(context)
+    assert result.status is ProbeStatus.RED
+    assert result.impact is DoctorImpact.VALIDATION
+    assert "Required directories missing" in result.message
+
+
+def test_probe_filesystem_directories_green(tmp_path: Path) -> None:
+    """When all directories exist probe should return green with permissions."""
+    config = _filesystem_config(tmp_path)
+    for path in [
+        config.config_file.parent,
+        config.state_dir,
+        config.registry_dir,
+        config.logs_dir,
+        config.runtime_dir,
+        config.templates_dir,
+        config.backups.root,
+    ]:
+        Path(path).mkdir(parents=True, exist_ok=True)
+    config.config_file.touch()
+    context = _build_context(config=config)
+
+    result = doctor_probes._probe_filesystem_directories(context)
+    assert result.status is ProbeStatus.GREEN
+    assert result.data is not None
+    assert "permissions" in result.data
+
+
+# ---------------------------------------------------------------------------
+# State probes
+# ---------------------------------------------------------------------------
+
+
+def test_probe_state_instances_detects_duplicates() -> None:
+    """Duplicate instance names should trigger a validation failure."""
+    registry = DummyRegistry([{"name": "alpha"}, {"name": "alpha"}])
+    context = _build_context(registry=registry)
+
+    result = doctor_probes._probe_state_instances(context)
+    assert result.status is ProbeStatus.RED
+    assert result.impact is DoctorImpact.VALIDATION
+    assert "Duplicate instance names detected" in result.message
+
+
+def test_probe_state_instances_reports_counts() -> None:
+    """Healthy registry entries should produce a green status."""
+    registry = DummyRegistry([{"name": "alpha"}, {"name": "beta"}])
+    context = _build_context(registry=registry)
+
+    result = doctor_probes._probe_state_instances(context)
+    assert result.status is ProbeStatus.GREEN
+    assert "2 instance(s) registered." in result.message
+
+
+# ---------------------------------------------------------------------------
+# Application probes
+# ---------------------------------------------------------------------------
+
+
+class DummyInstanceStatusProvider:
+    """Stub instance status provider returning precomputed statuses."""
+
+    def __init__(self, mapping: dict[str, InstanceStatus]) -> None:
+        """Store mapping from instance name to status."""
+        self._mapping = mapping
+
+    def status(self, name: str, entry: object) -> InstanceStatus:
+        """Return the configured status or a default unknown placeholder."""
+        return self._mapping.get(
+            name,
+            InstanceStatus(state="unknown", detail="Status checks not implemented yet."),
+        )
+
+
+def test_probe_app_instance_status_reports_failures() -> None:
+    """Failure states should produce provider failures with diagnostics."""
+    provider = DummyInstanceStatusProvider(
+        {
+            "alpha": InstanceStatus(state="running", detail="ok"),
+            "beta": InstanceStatus(state="failed", detail="boom"),
+        }
+    )
+    registry = DummyRegistry([{"name": "alpha"}, {"name": "beta"}])
+    context = _build_context(instance_status_provider=provider, registry=registry)
+
+    result = doctor_probes._probe_app_instance_status(context)
+    assert result.status is ProbeStatus.RED
+    assert result.impact is DoctorImpact.PROVIDER
+    assert result.data == {
+        "states": {"alpha": "running", "beta": "failed"},
+        "failures": {"beta": "boom"},
+    }
+
+
+def test_probe_app_instance_status_warns_on_unknown() -> None:
+    """Unexpected states should downgrade to a warning."""
+    provider = DummyInstanceStatusProvider(
+        {
+            "alpha": InstanceStatus(state="pending", detail="warming up"),
+        }
+    )
+    registry = DummyRegistry([{"name": "alpha"}])
+    context = _build_context(instance_status_provider=provider, registry=registry)
+
+    result = doctor_probes._probe_app_instance_status(context)
+    assert result.status is ProbeStatus.YELLOW
+    assert result.impact is DoctorImpact.OK
+    assert result.warnings == ("app:status",)
+    assert result.data["warnings"] == {"alpha": "warming up"}
+
+
+def test_probe_app_instance_status_green_for_running() -> None:
+    """Healthy states should produce a green result."""
+    provider = DummyInstanceStatusProvider(
+        {"alpha": InstanceStatus(state="running", detail="ok")}
+    )
+    registry = DummyRegistry([{"name": "alpha"}])
+    context = _build_context(instance_status_provider=provider, registry=registry)
+
+    result = doctor_probes._probe_app_instance_status(context)
+    assert result.status is ProbeStatus.GREEN
+    assert result.data == {"states": {"alpha": "running"}}
 
 
 # ---------------------------------------------------------------------------

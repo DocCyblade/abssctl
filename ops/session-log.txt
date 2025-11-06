@@ -285,7 +285,10 @@ Completed Beta idempotency coverage, added reusable test harness/snapshots, wire
 - Ran `.venv/bin/python -m pytest tests/test_doctor_probes.py` and `make quick-tests` to keep lint/mypy/pytest gates green after the new coverage landed.
 - Extended coverage to remaining survivor clusters: introduced `tests/test_cli_doctor_helpers.py`, new TLS inspector/validator cases in `tests/test_tls.py`, discovery edge-case tests in `tests/test_bootstrap_discovery.py`, and additional logging sanitisation checks in `tests/test_logging.py`.
 - Verified the broader suite by running `make quick-tests` (ruff/mypy/pytest) with all 260 tests passing.
-- Re-ran `PYTHONPATH=$(pwd)/tests:$(pwd)/src mutmut run`; survivors dropped to 3,099 (down ~290) with doctor probes 806 (-196), CLI doctor helpers 20/25 survivors, TLS 228 (-40), discovery 16 (-10), logging 16 (-12), while timeouts eased slightly to 1,337.
+- Re-ran `PYTHONPATH=$(pwd)/tests:$(pwd)/src mutmut run`; survivors now 2,804 (down ~585 from the original 3,389 baseline) with doctor probes at 673 (-329), CLI doctor helpers still showing 20/25 survivors but improved overall, TLS 133 (-135), discovery 16 (-10), logging 16 (-12); timeouts increased to 1,661 (CLI/config/logging dominate, plus TLS at 209) signalling a need for timeout mitigation next.
+- Re-ran `PYTHONPATH=$(pwd)/tests:$(pwd)/src mutmut run`; survivors now 2,816 (down ~573 from the original 3,389 baseline) with doctor probe survivors trimmed to 641 (-361), TLS down to 105 (-163), while CLI/regression areas remain high (verify_backup_entry/normalize_instances). Timeouts dropped slightly to 1,402 after the latest tests but still cluster under `abssctl.config`, `abssctl.cli`, `abssctl.logging`, and `abssctl.tls`.
+- Added focused doctor probe tests for env/systemctl/nginx/ports/filesystem/app/state scenarios plus TLS validator/inspector edge cases and dedicated `_verify_backup_entry` unit tests (`tests/test_cli_backup_helpers.py`); `make quick-tests` (ruff/mypy/pytest) now exercises 296 tests. Mutmut re-run deferred per latest plan.
+- Added `_normalize_instances` unit coverage (`tests/test_cli_instance_helpers.py`) and broadened `_verify_backup_entry` scenarios (`tests/test_cli_backup_helpers.py`) to chip away at CLI survivor clusters without invoking mutmut.
 
 ## Wrap up:
 - (in progress)
@@ -296,7 +299,7 @@ Completed Beta idempotency coverage, added reusable test harness/snapshots, wire
 
 # Next Steps / TODO:
 - Triage remaining mutmut survivors (CLI rendering, doctor probes, TLS validator/inspector, logging) using the fresh results and plan the next wave of targeted tests.
-- Investigate mutation timeouts in `abssctl.config`, `abssctl.cli`, and `abssctl.logging`; trim scope or optimise tests before CI adoption.
+- Investigate mutation timeouts in `abssctl.config`, `abssctl.cli`, `abssctl.logging`, and now `abssctl.tls`; trim scope or optimise tests before CI adoption.
 - Begin RC polish: design support-bundle implementation plan, scope doctor `--fix`, and outline doc/CI updates.
 
 # Next Session Primer

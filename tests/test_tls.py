@@ -21,6 +21,10 @@ from abssctl.tls import (
     TLSSourceSelection,
     TLSValidationSeverity,
     TLSValidator,
+    _load_certificate,
+    _load_private_key,
+    _permission_matches,
+    _public_keys_match,
 )
 
 
@@ -148,6 +152,18 @@ def test_tls_validator_reports_success(tmp_path: Path) -> None:
     assert not report.has_errors
     assert any(
         finding.check == "match"
+        and finding.severity is TLSValidationSeverity.OK
+        for finding in report.findings
+    )
+    assert any(
+        finding.scope == "certificate"
+        and finding.check == "permissions"
+        and finding.severity is TLSValidationSeverity.OK
+        for finding in report.findings
+    )
+    assert any(
+        finding.scope == "key"
+        and finding.check == "permissions"
         and finding.severity is TLSValidationSeverity.OK
         for finding in report.findings
     )
@@ -301,6 +317,54 @@ def test_tls_inspector_destination_for_instance_sanitises_name(tmp_path: Path) -
     assert material.chain and material.chain.name == "abssctl-foo-bar.chain.pem"
 
 
+def test_tls_inspector_resolve_custom_from_entry(tmp_path: Path) -> None:
+    """Registry custom entries should resolve to expanded paths."""
+    validation = _create_validation_config()
+    config, _ = _build_config(tmp_path, validation)
+    inspector = TLSInspector(config)
+    cert_path = tmp_path / "custom-cert.pem"
+    key_path = tmp_path / "custom-key.pem"
+    chain_path = tmp_path / "custom-chain.pem"
+    for path in (cert_path, key_path, chain_path):
+        path.write_text(path.name, encoding="utf-8")
+    entry = {
+        "name": "alpha",
+        "tls": {
+            "source": "custom",
+            "cert": str(cert_path),
+            "key": str(key_path),
+            "chain": str(chain_path),
+        },
+    }
+
+    selection = inspector.resolve_for_instance("alpha", entry)
+
+    assert selection.resolved == "custom"
+    assert selection.material.certificate == cert_path
+    assert selection.material.chain == chain_path
+
+
+def test_tls_inspector_expands_user_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Custom entries containing a tilde should expand to absolute paths."""
+    validation = _create_validation_config()
+    config, _ = _build_config(tmp_path, validation)
+    inspector = TLSInspector(config)
+    cert_path = tmp_path / "cert.pem"
+    key_path = tmp_path / "key.pem"
+    cert_path.write_text("cert", encoding="utf-8")
+    key_path.write_text("key", encoding="utf-8")
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    entry = {
+        "name": "alpha",
+        "tls": {"source": "custom", "cert": "~/cert.pem", "key": "~/key.pem"},
+    }
+
+    selection = inspector.resolve_for_instance("alpha", entry)
+    assert selection.material.certificate == cert_path
+    assert selection.material.key == key_path
+
+
 def test_tls_validator_reports_missing_files(tmp_path: Path) -> None:
     """Validator should highlight missing TLS artefacts."""
     validation = _create_validation_config()
@@ -372,3 +436,113 @@ def test_tls_validator_handles_unreadable_files(
         and finding.severity is TLSValidationSeverity.ERROR
         for finding in report.findings
     )
+
+
+def test_tls_validator_chain_permission_error(tmp_path: Path) -> None:
+    """Chain files should respect configured permission policies."""
+    validation = _create_validation_config()
+    config, _ = _build_config(tmp_path, validation)
+    inspector = TLSInspector(config)
+    validator = TLSValidator(validation)
+    cert_path, key_path = _create_self_signed_cert(tmp_path)
+    chain_path = tmp_path / "chain.pem"
+    chain_path.write_text("chain", encoding="utf-8")
+    chain_path.chmod(0o600)  # more restrictive than allowed 0644
+
+    selection = inspector.resolve_manual(
+        certificate=cert_path,
+        key=key_path,
+        chain=chain_path,
+    )
+
+    report = validator.validate(selection, now=datetime.now(UTC))
+    assert any(
+        finding.scope == "chain"
+        and finding.check == "permissions"
+        and finding.severity is TLSValidationSeverity.ERROR
+        for finding in report.findings
+    )
+
+
+def test_tls_validator_detects_directory_certificate(tmp_path: Path) -> None:
+    """Directory paths should be flagged as invalid certificate locations."""
+    validation = _create_validation_config()
+    config, _ = _build_config(tmp_path, validation)
+    validator = TLSValidator(validation)
+    cert_dir = tmp_path / "certdir"
+    cert_dir.mkdir()
+    key_path = tmp_path / "key.pem"
+    key_path.write_text("key", encoding="utf-8")
+    selection = TLSSourceSelection(
+        requested="custom",
+        resolved="custom",
+        material=TLSMaterial(certificate=cert_dir, key=key_path, chain=None),
+        domain="alpha.example",
+    )
+
+    report = validator.validate(selection, now=datetime.now(UTC))
+    assert any(
+        finding.scope == "certificate"
+        and finding.check == "type"
+        and finding.severity is TLSValidationSeverity.ERROR
+        for finding in report.findings
+    )
+
+
+def test_tls_validator_reports_parse_errors(tmp_path: Path) -> None:
+    """Malformed certificate/key files should record parse errors."""
+    validation = _create_validation_config()
+    config, _ = _build_config(tmp_path, validation)
+    inspector = TLSInspector(config)
+    validator = TLSValidator(validation)
+    cert_path = tmp_path / "broken-cert.pem"
+    key_path = tmp_path / "broken-key.pem"
+    cert_path.write_text("not-a-cert", encoding="utf-8")
+    key_path.write_text("not-a-key", encoding="utf-8")
+    selection = inspector.resolve_manual(certificate=cert_path, key=key_path)
+
+    report = validator.validate(selection, now=datetime.now(UTC))
+
+    assert any(
+        finding.scope == "certificate"
+        and finding.check == "parse"
+        and finding.severity is TLSValidationSeverity.ERROR
+        for finding in report.findings
+    )
+    assert any(
+        finding.scope == "key"
+        and finding.check == "parse"
+        and finding.severity is TLSValidationSeverity.ERROR
+        for finding in report.findings
+    )
+
+
+def test_permission_matches_respects_owner_group_mode() -> None:
+    """_permission_matches should honour owner/group/mode requirements."""
+    owner, group = _current_owner_group()
+    spec = TLSPermissionSpec(owner=owner, group=group, mode=0o640)
+    assert _permission_matches(spec, owner, group, 0o640)
+    assert not _permission_matches(spec, owner, "other", 0o640)
+    assert not _permission_matches(spec, owner, group, 0o600)
+
+
+def test_load_certificate_and_private_key_round_trip(tmp_path: Path) -> None:
+    """Loading certificate/private key should produce matching public keys."""
+    cert_path, key_path = _create_self_signed_cert(tmp_path)
+
+    cert = _load_certificate(cert_path)
+    key = _load_private_key(key_path)
+
+    assert cert.serial_number > 0
+    assert _public_keys_match(cert, key)
+
+    other_key_path = tmp_path / "other.key"
+    other_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    other_key_bytes = other_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    other_key_path.write_bytes(other_key_bytes)
+    mismatched_key = _load_private_key(other_key_path)
+    assert not _public_keys_match(cert, mismatched_key)
