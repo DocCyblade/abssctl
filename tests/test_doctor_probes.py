@@ -10,7 +10,13 @@ from typing import Never
 import pytest
 
 from abssctl.bootstrap.discovery import DiscoveredInstance, DiscoveryReport
-from abssctl.doctor import DoctorImpact, ProbeContext, ProbeExecutorOptions, ProbeStatus
+from abssctl.doctor import (
+    DoctorImpact,
+    ProbeContext,
+    ProbeExecutorOptions,
+    ProbeStatus,
+    collect_probes,
+)
 from abssctl.doctor import probes as doctor_probes
 from abssctl.ports import PortsRegistryError
 from abssctl.providers.instance_status_provider import InstanceStatus
@@ -291,6 +297,20 @@ def test_probe_env_systemctl_available(monkeypatch: pytest.MonkeyPatch, tmp_path
     result = doctor_probes._probe_env_systemctl(context)
     assert result.status is ProbeStatus.GREEN
     assert result.message.startswith("systemctl binary")
+
+
+def test_env_probes_include_expected_ids() -> None:
+    """Env probe catalogue should include the standard binary checks."""
+    definitions = doctor_probes._env_probes()
+    ids = {definition.id for definition in definitions}
+    assert {
+        "env-python",
+        "env-abssctl",
+        "env-platform",
+        "env-node",
+        "env-npm",
+        "env-systemctl",
+    }.issubset(ids)
 
 
 # ---------------------------------------------------------------------------
@@ -1036,3 +1056,12 @@ def test_probe_disk_usage_green_with_healthy_space(
     assert result.status is ProbeStatus.GREEN
     assert result.impact is DoctorImpact.OK
     assert result.data["percent_free"] == pytest.approx(75.0)
+
+
+def test_collect_probes_captures_expected_categories(tmp_path: Path) -> None:
+    """collect_probes should include representative probe identifiers."""
+    config = _filesystem_config(tmp_path)
+    context = _build_context(config=config)
+    definitions = collect_probes(context)
+    ids = {definition.id for definition in definitions}
+    assert {"env-python", "state-reconcile", "fs-directories", "disk-usage"}.issubset(ids)

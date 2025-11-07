@@ -291,6 +291,12 @@ Completed Beta idempotency coverage, added reusable test harness/snapshots, wire
 - Added `_normalize_instances` unit coverage (`tests/test_cli_instance_helpers.py`) and broadened `_verify_backup_entry` scenarios (`tests/test_cli_backup_helpers.py`) to chip away at CLI survivor clusters without invoking mutmut.
 - Captured slowest tests via `pytest --durations=25`, introduced the `mutation_timeout` pytest marker + `tests/conftest.py` skip hook, and tagged the worst-offending CLI/TLS/backup/doctor tests so future mutmut runs can skip them when `MUTANT_UNDER_TEST` is set.
 - Created a dedicated `setup.cfg` with `[mutmut]` configuration to restrict `paths_to_mutate` to `src/abssctl/doctor`, `src/abssctl/tls.py`, and `src/abssctl/cli.py` for the next targeted mutation run.
+- Ran the scoped `mutmut run` using the new configuration (3021 mutants). Survivors now concentrate in CLI (1406), doctor probes (641), TLS (166), doctor engine/models (38 total), and timeouts dropped to 540 (CLI 473 / TLS 67) thanks to the `mutation_timeout` skips. `ops/mutation-results-raw.txt` refreshed with the new breakdown.
+- Added `tests/test_cli_helpers.py` with coverage for `_resolve_bootstrap_options`, `_build_update_payload`, and `_maybe_prompt_backup`, plus expanded `_normalize_instances` scaffolding; `make quick-tests` (ruff/mypy/pytest; 310 tests) remains green ahead of the next mutmut pass.
+- Added more CLI helper coverage (`tests/test_cli_helpers.py`) targeting `_merge_versions`, `_collect_backup_sources`, and `_materialise_backup_payload`, including copy mocking to avoid heavy IO; suite now totals 313 tests and `make quick-tests` stays green.
+- Extended helper coverage to `_resolve_backup_algorithm`, `_compression_extension`, `_create_archive` (success + failure paths), `_build_backup_plan_context`, and `_latest_backups_by_instance`; quick-tests now exercise 321 tests and remain green.
+- Added `_discover_backup_archives`, `_run_instance_backups`, `_create_backup` (dry-run + happy path), `_load_backup_instance_snapshot`, `_infer_backup_algorithm`, and `_compose_backup_metadata` unit tests plus aggregate probe coverage (`tests/test_doctor_probes.py`) to reduce doctor probe survivors; quick-tests now cover 331 tests and remain green.
+- Re-ran the scoped mutmut suite (`PYTHONPATH=$(pwd)/tests:$(pwd)/src .venv/bin/mutmut run`) after the new helper/probe tests landed; survivors now 2,089 (CLI 1,262 / doctor probes 623 / TLS 166 / doctor engine+models 38) with timeouts reduced to 545 (CLI 478 / TLS 67). `ops/mutation-results-raw.txt` updated with the latest breakdown to steer the next coverage wave.
 - Profiled pytest runtime via `.venv/bin/python -m pytest --durations=25` to pinpoint CLI/TLS tests exceeding 0.5–1 s and selected them for mutation-only skipping.
 - Introduced a `mutation_timeout` marker (registered in `pyproject.toml`), a `tests/conftest.py` hook that honors `MUTANT_UNDER_TEST`, and applied the marker to the heaviest TLS/instance/backup CLI cases plus the slow doctor CLI rebuild test so future mutmut runs can skip them.
 
@@ -302,9 +308,9 @@ Completed Beta idempotency coverage, added reusable test harness/snapshots, wire
 ----------------------- Sessions logging above this line only ----------------------
 
 # Next Steps / TODO:
-- Triage remaining mutmut survivors (CLI rendering, doctor probes, TLS validator/inspector, logging) using the fresh results and plan the next wave of targeted tests.
-- Investigate mutation timeouts in `abssctl.config`, `abssctl.cli`, `abssctl.logging`, and now `abssctl.tls`; trim scope or optimise tests before CI adoption.
-- Begin RC polish: design support-bundle implementation plan, scope doctor `--fix`, and outline doc/CI updates.
+- Target the dominant doctor probe survivors from the latest mutmut run (`_probe_state_reconcile`, `_probe_disk_usage`, `_probe_app_instance_status`, `_probe_systemd_status`, `_probe_ports_registry`, `_probe_tls_system_certificate`) with focused unit tests/mocks.
+- Keep chipping away at CLI survivor hotspots (`create_backup`, `_materialise_backup_payload`, `_collect_backup_sources`, `_merge_versions`, `_build_update_payload`) so the next mutmut pass sees a meaningful drop.
+- Plan the follow-up scoped mutmut run once the above coverage lands; continue monitoring mutation timeouts in CLI/TLS.
 
 # Next Session Primer
-- Continue Beta3-1 by reviewing mutmut survivor list, drafting targeted test cases, and capturing a plan for support-bundle/doctor `--fix` plus timeout mitigation so future sessions can execute.
+- Kick off the next chat by focusing on doctor probe coverage improvements (state reconcile, disk usage, app/systemd/tls probes) based on the latest mutmut survivors, then move on to the CLI backup helpers; mutmut rerun comes after those tests are in place.
