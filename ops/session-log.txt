@@ -289,6 +289,10 @@ Completed Beta idempotency coverage, added reusable test harness/snapshots, wire
 - Re-ran `PYTHONPATH=$(pwd)/tests:$(pwd)/src mutmut run`; survivors now 2,816 (down ~573 from the original 3,389 baseline) with doctor probe survivors trimmed to 641 (-361), TLS down to 105 (-163), while CLI/regression areas remain high (verify_backup_entry/normalize_instances). Timeouts dropped slightly to 1,402 after the latest tests but still cluster under `abssctl.config`, `abssctl.cli`, `abssctl.logging`, and `abssctl.tls`.
 - Added focused doctor probe tests for env/systemctl/nginx/ports/filesystem/app/state scenarios plus TLS validator/inspector edge cases and dedicated `_verify_backup_entry` unit tests (`tests/test_cli_backup_helpers.py`); `make quick-tests` (ruff/mypy/pytest) now exercises 296 tests. Mutmut re-run deferred per latest plan.
 - Added `_normalize_instances` unit coverage (`tests/test_cli_instance_helpers.py`) and broadened `_verify_backup_entry` scenarios (`tests/test_cli_backup_helpers.py`) to chip away at CLI survivor clusters without invoking mutmut.
+- Captured slowest tests via `pytest --durations=25`, introduced the `mutation_timeout` pytest marker + `tests/conftest.py` skip hook, and tagged the worst-offending CLI/TLS/backup/doctor tests so future mutmut runs can skip them when `MUTANT_UNDER_TEST` is set.
+- Created a dedicated `setup.cfg` with `[mutmut]` configuration to restrict `paths_to_mutate` to `src/abssctl/doctor`, `src/abssctl/tls.py`, and `src/abssctl/cli.py` for the next targeted mutation run.
+- Profiled pytest runtime via `.venv/bin/python -m pytest --durations=25` to pinpoint CLI/TLS tests exceeding 0.5–1 s and selected them for mutation-only skipping.
+- Introduced a `mutation_timeout` marker (registered in `pyproject.toml`), a `tests/conftest.py` hook that honors `MUTANT_UNDER_TEST`, and applied the marker to the heaviest TLS/instance/backup CLI cases plus the slow doctor CLI rebuild test so future mutmut runs can skip them.
 
 ## Wrap up:
 - (in progress)

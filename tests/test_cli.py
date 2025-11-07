@@ -609,6 +609,7 @@ def test_tls_verify_manual_reports_success(tmp_path: Path) -> None:
     assert "OK" in result.stdout
 
 
+@pytest.mark.mutation_timeout
 def test_tls_install_updates_registry(tmp_path: Path) -> None:
     """`tls install` copies files and records registry state."""
     instances = [{"name": "alpha", "port": 5000, "version": "current"}]
@@ -647,6 +648,7 @@ def test_tls_install_updates_registry(tmp_path: Path) -> None:
     assert f"ssl_certificate_key {tls_block['key']};" in contents
 
 
+@pytest.mark.mutation_timeout
 def test_tls_use_system_switches_source(tmp_path: Path) -> None:
     """`tls use-system` updates TLS source metadata."""
     instances = [{"name": "alpha", "port": 5000, "version": "current"}]
@@ -682,6 +684,7 @@ def test_tls_use_system_switches_source(tmp_path: Path) -> None:
     assert f"ssl_certificate_key {tls_block['key']};" in contents
 
 
+@pytest.mark.mutation_timeout
 def test_tls_install_dry_run_skips_changes(tmp_path: Path) -> None:
     """Dry-run install previews actions without copying or updating the registry."""
     instances = [{"name": "alpha", "port": 5000, "version": "current"}]
@@ -778,6 +781,7 @@ def test_tls_install_permission_error(tmp_path: Path, monkeypatch: pytest.Monkey
     assert "tls" not in entry
 
 
+@pytest.mark.mutation_timeout
 def test_tls_install_reinstall_preserves_state(tmp_path: Path) -> None:
     """Re-running `tls install` keeps registry state stable and creates backups."""
     instances = [{"name": "alpha", "port": 5000, "version": "current"}]
@@ -844,6 +848,7 @@ def test_tls_install_reinstall_preserves_state(tmp_path: Path) -> None:
     assert record["result"]["status"] == "success"
 
 
+@pytest.mark.mutation_timeout
 def test_tls_use_system_toggle_round_trip(tmp_path: Path) -> None:
     """Switching system/custom TLS repeatedly keeps artefacts consistent."""
     instances = [{"name": "alpha", "port": 5000, "version": "current"}]
@@ -1340,7 +1345,7 @@ def test_backup_restore_restores_data(
     assert updated.get("last_restored_at")
     assert updated.get("metadata", {}).get("last_restore_destination")
 
-
+@pytest.mark.mutation_timeout
 def test_backup_restore_repeat_runs_consistent_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1422,6 +1427,7 @@ def test_backup_restore_repeat_runs_consistent_state(
     assert not (data_dir / "extra.txt").exists()
 
 
+@pytest.mark.mutation_timeout
 def test_backup_restore_dry_run_followed_by_apply(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2644,6 +2650,7 @@ def test_instance_show_missing(tmp_path: Path) -> None:
     assert "not found" in result.stdout
 
 
+@pytest.mark.mutation_timeout
 def test_instance_create_acquires_lock(tmp_path: Path) -> None:
     """`instance create` acquires the expected lock and logs wait duration."""
     env, state_dir = _prepare_environment(tmp_path)
@@ -2852,6 +2859,7 @@ def test_instance_env_json(tmp_path: Path) -> None:
     assert payload["ABSSCTL_INSTANCE_ROOT"].endswith("/instances")
 
 
+@pytest.mark.mutation_timeout
 def test_instance_set_fqdn_updates_registry(tmp_path: Path) -> None:
     """`set-fqdn` updates domain in config and registry."""
     env, state_dir = _prepare_environment(tmp_path)
@@ -2894,7 +2902,7 @@ def test_instance_set_fqdn_rejects_invalid_domain(tmp_path: Path) -> None:
     assert result.exit_code == 2
     assert "Domain" in result.stdout
 
-
+@pytest.mark.mutation_timeout
 def test_instance_set_port_updates_registry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3012,6 +3020,7 @@ def test_instance_set_version_updates_registry(
     assert payload["server"]["version"] == "25.9.0"
 
 
+@pytest.mark.mutation_timeout
 def test_instance_delete_purge_data_removes_root(tmp_path: Path) -> None:
     """`instance delete --purge-data` removes the instance root directory."""
     env, _ = _prepare_environment(tmp_path)
@@ -3029,6 +3038,7 @@ def test_instance_delete_purge_data_removes_root(tmp_path: Path) -> None:
     assert not root_path.exists()
 
 
+@pytest.mark.mutation_timeout
 def test_instance_rename_moves_directories(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3275,6 +3285,7 @@ def test_instance_enable_updates_registry(
     assert metadata.get("enabled_at")
 
 
+@pytest.mark.mutation_timeout
 def test_instance_enable_dry_run_skips_changes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3359,6 +3370,7 @@ def test_instance_enable_repeat_run_is_idempotent(
     assert second_snapshot.last_operation["result"]["status"] == "success"
 
 
+@pytest.mark.mutation_timeout
 def test_instance_enable_systemd_failure_preserves_registry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3397,6 +3409,7 @@ def test_instance_enable_systemd_failure_preserves_registry(
     assert result_payload.get("errors")
 
 
+@pytest.mark.mutation_timeout
 def test_instance_disable_updates_registry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3425,6 +3438,7 @@ def test_instance_disable_updates_registry(
     assert systemd_diag.get("enabled") is False
 
 
+@pytest.mark.mutation_timeout
 def test_instance_disable_dry_run_skips_changes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3509,6 +3523,7 @@ def test_instance_disable_repeat_run_is_idempotent(
     assert second_snapshot.last_operation["result"]["status"] == "success"
 
 
+@pytest.mark.mutation_timeout
 def test_instance_disable_systemd_failure_preserves_registry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3547,6 +3562,7 @@ def test_instance_disable_systemd_failure_preserves_registry(
     assert result_payload.get("errors")
 
 
+@pytest.mark.mutation_timeout
 def test_instance_start_updates_status(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3570,6 +3586,7 @@ def test_instance_start_updates_status(
     assert instance["metadata"].get("last_started_at")
 
 
+@pytest.mark.mutation_timeout
 def test_instance_start_dry_run_skips_changes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3637,6 +3654,7 @@ def test_instance_start_systemd_failure_preserves_status(
     assert result_payload.get("errors")
 
 
+@pytest.mark.mutation_timeout
 def test_instance_stop_updates_status(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3693,6 +3711,7 @@ def test_instance_stop_dry_run_skips_changes(
     assert entry["status"] == "enabled"
 
 
+@pytest.mark.mutation_timeout
 def test_instance_start_repeat_run_is_idempotent(
     cli_harness: CliHarness,
     monkeypatch: pytest.MonkeyPatch,
@@ -3729,6 +3748,7 @@ def test_instance_start_repeat_run_is_idempotent(
     assert second_snapshot.last_operation["result"]["status"] == "success"
 
 
+@pytest.mark.mutation_timeout
 def test_instance_stop_systemd_failure_preserves_status(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3957,6 +3977,7 @@ def test_instance_restart_repeat_run_is_idempotent(
     assert second_snapshot.last_operation["result"]["status"] == "success"
 
 
+@pytest.mark.mutation_timeout
 def test_instance_delete_removes_registry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -4067,6 +4088,7 @@ def test_instance_delete_dry_run_keeps_state(
     assert state_instance_dir.exists()
 
 
+@pytest.mark.mutation_timeout
 def test_instance_delete_cleans_files_and_releases_port(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

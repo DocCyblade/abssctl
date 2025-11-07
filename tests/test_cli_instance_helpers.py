@@ -5,7 +5,7 @@ from __future__ import annotations
 from abssctl.cli import _normalize_instances
 
 
-def test_normalize_instances_handles_strings_only():
+def test_normalize_instances_handles_strings_only() -> None:
     """String entries should expand into default dictionaries."""
     result = _normalize_instances(["alpha", "beta"])
     assert [entry["name"] for entry in result] == ["alpha", "beta"]
@@ -13,7 +13,7 @@ def test_normalize_instances_handles_strings_only():
     assert all(entry["status"] == "unknown" for entry in result)
 
 
-def test_normalize_instances_handles_mapping_fields():
+def test_normalize_instances_handles_mapping_fields() -> None:
     """Mappings should retain canonical fields and stash extra keys in metadata."""
     result = _normalize_instances(
         [
@@ -41,7 +41,7 @@ def test_normalize_instances_handles_mapping_fields():
     assert entry["metadata"] == {"extra": "value", "source": "registry"}
 
 
-def test_normalize_instances_derives_status_from_enabled_flag():
+def test_normalize_instances_derives_status_from_enabled_flag() -> None:
     """Enabled boolean should translate into enabled/disabled status strings."""
     result = _normalize_instances(
         [
@@ -53,7 +53,7 @@ def test_normalize_instances_derives_status_from_enabled_flag():
     assert statuses == {"alpha": "enabled", "beta": "disabled"}
 
 
-def test_normalize_instances_handles_mixed_versions_domains():
+def test_normalize_instances_handles_mixed_versions_domains() -> None:
     """version_binding/fqdn/data_dir fallbacks should populate canonical keys."""
     result = _normalize_instances(
         [
@@ -71,7 +71,7 @@ def test_normalize_instances_handles_mixed_versions_domains():
     assert entry["path"] == "/var/lib/alpha"
 
 
-def test_normalize_instances_ignores_invalid_entries():
+def test_normalize_instances_ignores_invalid_entries() -> None:
     """Non-string/mapping entries should be discarded safely."""
     result = _normalize_instances([None, 123, {"name": "alpha"}, "beta"])
     assert [entry["name"] for entry in result] == ["alpha", "beta"]

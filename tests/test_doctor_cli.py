@@ -295,6 +295,7 @@ def test_doctor_cli_repeat_runs_stable(tmp_path: Path, monkeypatch: pytest.Monke
     assert len(lines_after_second) >= len(lines_after_first) + 1
 
 
+@pytest.mark.mutation_timeout
 def test_doctor_cli_rebuild_state_clears_mismatch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

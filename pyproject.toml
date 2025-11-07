@@ -94,7 +94,8 @@ allow-direct-references = true
 addopts = "-ra"
 testpaths = ["tests"]
 markers = [
-  "slow: marks tests that take longer to run and are excluded from quick-tests by default"
+  "slow: marks tests that take longer to run and are excluded from quick-tests by default",
+  "mutation_timeout: marks tests skipped when MUTANT_UNDER_TEST is set to keep mutation runs fast"
 ]
 
 [tool.ruff]
