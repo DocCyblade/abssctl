@@ -282,6 +282,33 @@ def test_tls_inspector_requires_custom_paths(tmp_path: Path) -> None:
         inspector.resolve_for_instance("app", entry, source_override="custom")
 
 
+def test_tls_inspector_auto_uses_recorded_custom(tmp_path: Path) -> None:
+    """Auto sources should reuse recorded custom paths when present."""
+    validation = _create_validation_config()
+    config, _ = _build_config(tmp_path, validation)
+    inspector = TLSInspector(config)
+    cert = tmp_path / "custom-cert.pem"
+    key = tmp_path / "custom-key.pem"
+    cert.write_text("cert", encoding="utf-8")
+    key.write_text("key", encoding="utf-8")
+
+    entry = {
+        "name": "alpha",
+        "domain": "alpha.example",
+        "tls": {
+            "source": "custom",
+            "cert": str(cert),
+            "key": str(key),
+        },
+    }
+
+    selection = inspector.resolve_for_instance("alpha", entry)
+
+    assert selection.resolved == "custom"
+    assert selection.material.certificate == cert
+    assert selection.material.key == key
+
+
 def test_tls_inspector_manual_override_short_circuits(tmp_path: Path) -> None:
     """Explicit certificate and key parameters should bypass registry lookups."""
     validation = _create_validation_config()
@@ -459,6 +486,85 @@ def test_tls_validator_chain_permission_error(tmp_path: Path) -> None:
     assert any(
         finding.scope == "chain"
         and finding.check == "permissions"
+        and finding.severity is TLSValidationSeverity.ERROR
+        for finding in report.findings
+    )
+
+
+def test_tls_validator_reports_missing_chain(tmp_path: Path) -> None:
+    """Missing chain files should trigger an exists error."""
+    validation = _create_validation_config()
+    config, _ = _build_config(tmp_path, validation)
+    inspector = TLSInspector(config)
+    validator = TLSValidator(validation)
+    cert_path, key_path = _create_self_signed_cert(tmp_path)
+    chain_path = tmp_path / "absent-chain.pem"
+
+    selection = inspector.resolve_manual(certificate=cert_path, key=key_path, chain=chain_path)
+    report = validator.validate(selection, now=datetime.now(UTC))
+
+    assert any(
+        finding.scope == "chain"
+        and finding.check == "exists"
+        and finding.severity is TLSValidationSeverity.ERROR
+        for finding in report.findings
+    )
+
+
+def test_tls_validator_marks_certificate_unreadable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unreadable certificates should emit readable errors."""
+    validation = _create_validation_config()
+    config, _ = _build_config(tmp_path, validation)
+    inspector = TLSInspector(config)
+    validator = TLSValidator(validation)
+    cert_path, key_path = _create_self_signed_cert(tmp_path)
+
+    original_access = os.access
+
+    def deny_cert(path: Path, mode: int) -> bool:
+        if path == cert_path:
+            return False
+        return original_access(path, mode)
+
+    monkeypatch.setattr(os, "access", deny_cert)
+    selection = inspector.resolve_manual(certificate=cert_path, key=key_path)
+    report = validator.validate(selection, now=datetime.now(UTC))
+
+    assert any(
+        finding.scope == "certificate"
+        and finding.check == "readable"
+        and finding.severity is TLSValidationSeverity.ERROR
+        for finding in report.findings
+    )
+
+
+def test_tls_validator_flags_non_file_key(tmp_path: Path) -> None:
+    """Non-regular key paths should be classified as type errors."""
+    validation = _create_validation_config()
+    config, _ = _build_config(tmp_path, validation)
+    validator = TLSValidator(validation)
+    cert_path, _ = _create_self_signed_cert(tmp_path)
+    key_dir = tmp_path / "keydir"
+    key_dir.mkdir()
+    selection = TLSSourceSelection(
+        requested="custom",
+        resolved="custom",
+        material=TLSMaterial(
+            certificate=cert_path,
+            key=key_dir,
+            chain=None,
+        ),
+        domain="alpha.example",
+    )
+
+    report = validator.validate(selection, now=datetime.now(UTC))
+
+    assert any(
+        finding.scope == "key"
+        and finding.check == "type"
         and finding.severity is TLSValidationSeverity.ERROR
         for finding in report.findings
     )

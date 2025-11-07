@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import SimpleNamespace
@@ -210,6 +211,13 @@ def test_build_update_payload_up_to_date() -> None:
     assert "up to date" in payload["message"]
 
 
+def test_build_update_payload_requires_stable_versions() -> None:
+    """Remote prerelease-only data should be treated as unavailable."""
+    payload = _build_update_payload("pkg", {"0.9.0"}, ["1.0.0-beta.1"])
+    assert payload["status"] == "remote-unavailable"
+    assert "No stable versions" in payload["message"]
+
+
 def test_compose_backup_metadata_defaults() -> None:
     """Default backup metadata should use Pre prefix and label slug."""
     message, labels = _compose_backup_metadata("version switch", None)
@@ -264,6 +272,19 @@ def test_merge_versions_combines_remote_and_local() -> None:
     assert combined[0]["metadata"] == {"installed": False, "source": "npm"}
     assert any(entry["version"] == "1.0.0" and entry["metadata"]["installed"] for entry in combined)
     assert any(entry["version"] == "0.9.0" for entry in combined)
+
+
+def test_merge_versions_returns_local_when_remote_empty() -> None:
+    """Remote outages should return local entries untouched."""
+    local = [
+        {"version": "1.0.0", "metadata": {"installed": True}},
+        {"version": "0.9.0", "metadata": {"installed": True}},
+    ]
+
+    combined = _merge_versions(local, [])
+
+    assert combined is local
+    assert combined == local
 
 
 def test_maybe_prompt_backup_skips_when_requested(
@@ -378,6 +399,29 @@ def test_collect_backup_sources_with_services(tmp_path: Path) -> None:
     assert sources["registry"]["exists"] is True
 
 
+def test_collect_backup_sources_without_services(tmp_path: Path) -> None:
+    """Data-only backups should omit service entries but still report metadata."""
+    config = _make_config(tmp_path)
+    runtime = SimpleNamespace(
+        config=config,
+        systemd_provider=SimpleNamespace(
+            unit_path=lambda name: tmp_path / "systemd" / f"{name}.service"
+        ),
+        nginx_provider=SimpleNamespace(
+            site_path=lambda name: tmp_path / "nginx" / f"{name}.conf",
+            enabled_path=lambda name: tmp_path / "nginx-enabled" / f"{name}.conf",
+        ),
+    )
+
+    sources = _collect_backup_sources(runtime, "alpha", include_services=False)
+
+    assert "systemd" not in sources
+    assert "nginx_site" not in sources
+    assert sources["data"]["exists"] is False
+    assert sources["registry"]["path"].endswith("registry/instances.yml")
+    assert sources["metadata_instance"]["exists"] is True
+
+
 def test_materialise_backup_payload_copies_sources(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -416,6 +460,47 @@ def test_materialise_backup_payload_copies_sources(
     assert (payload_root / "metadata" / "instance.json").exists()
     assert any(dest.match("*/data") for _, dest in copies)
     assert any(dest.match("*/systemd/alpha.service") for _, dest in copies)
+
+
+def test_materialise_backup_payload_handles_optional_sources(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Optional nginx/registry sources should be copied when present."""
+    nginx_site = tmp_path / "alpha.conf"
+    nginx_site.parent.mkdir(parents=True, exist_ok=True)
+    nginx_site.write_text("site", encoding="utf-8")
+    nginx_enabled = tmp_path / "alpha-enabled.conf"
+    nginx_enabled.write_text("enabled", encoding="utf-8")
+    registry_file = tmp_path / "instances.yml"
+    registry_file.write_text("instances: []", encoding="utf-8")
+
+    copies: list[tuple[Path, Path]] = []
+
+    def fake_copy(src: Path, dest: Path) -> None:
+        copies.append((src, dest))
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+
+    monkeypatch.setattr("abssctl.cli.copy_into", fake_copy)
+
+    sources = {
+        "data": {"path": str(tmp_path / "missing"), "exists": False},
+        "nginx_site": {"path": str(nginx_site), "exists": True},
+        "nginx_enabled": {"path": str(nginx_enabled), "exists": True},
+        "registry": {"path": str(registry_file), "exists": True},
+    }
+    payload_root = tmp_path / "payload"
+
+    _materialise_backup_payload(payload_root, sources, {"name": "alpha"})
+
+    assert (payload_root / "data").is_dir()
+    assert (payload_root / "metadata" / "instance.json").exists()
+    assert any(dest.match("*/nginx/alpha.conf") for _, dest in copies)
+    assert any(dest.match("*/nginx-enabled/alpha-enabled.conf") for _, dest in copies)
+    assert any(dest.match("*/metadata/instances.yml") for _, dest in copies)
+    metadata = json.loads((payload_root / "metadata" / "instance.json").read_text())
+    assert metadata["name"] == "alpha"
 
 
 def test_discover_backup_archives_filters(tmp_path: Path) -> None:
@@ -571,6 +656,77 @@ def test_create_backup_happy_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert result is not None
     assert result["checksum"] == "checksum"
     assert runtime.backups.appended
+
+
+def test_create_backup_respects_data_only_and_output_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """_create_backup should skip service sources and honour custom out_dir."""
+    runtime = SimpleNamespace(
+        config=_make_config(tmp_path),
+        backups=DummyBackups(tmp_path),
+    )
+    monkeypatch.setattr(
+        "abssctl.cli._require_instance",
+        lambda runtime_arg, instance_arg, op: {"name": instance_arg, "meta": "value"},
+    )
+
+    captured: dict[str, object] = {}
+
+    def fake_collect(
+        runtime_arg: object,
+        instance_arg: str,
+        include_services: bool,
+    ) -> dict[str, object]:
+        captured["include_services"] = include_services
+        data_dir = tmp_path / "instance-data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        (data_dir / "file").write_text("payload", encoding="utf-8")
+        return {"data": {"path": str(data_dir), "exists": True}}
+
+    monkeypatch.setattr("abssctl.cli._collect_backup_sources", fake_collect)
+    monkeypatch.setattr("abssctl.cli._materialise_backup_payload", lambda *args, **kwargs: None)
+
+    def fake_create_archive(
+        source_dir: Path,
+        archive_path: Path,
+        algorithm: str,
+        compression_level: int | None,
+    ) -> None:
+        archive_path.parent.mkdir(parents=True, exist_ok=True)
+        archive_path.write_bytes(b"archive")
+
+    monkeypatch.setattr("abssctl.cli._create_archive", fake_create_archive)
+    monkeypatch.setattr("abssctl.cli._compute_checksum", lambda path: "abc123")
+    monkeypatch.setattr(
+        "abssctl.cli._write_checksum_file",
+        lambda path, checksum: path.with_suffix(".sha256"),
+    )
+
+    out_dir = tmp_path / "custom-out"
+    actor = {"user": "tester"}
+
+    with _operation_scope(tmp_path) as op:
+        plan, result = _create_backup(
+            runtime,
+            "alpha",
+            message="backup",
+            labels=["pre-op"],
+            data_only=True,
+            out_dir=out_dir,
+            compression="none",
+            compression_level=None,
+            dry_run=False,
+            actor=actor,
+            op=op,
+        )
+
+    assert captured["include_services"] is False
+    assert plan["status"] == "created"
+    assert plan["checksum"] == "abc123"
+    assert result is not None and result["archive"].startswith(str(out_dir))
+    assert runtime.backups.appended and runtime.backups.appended[0]["id"] == "alpha-id"
 
 
 def test_create_archive_invokes_tar_with_gzip(

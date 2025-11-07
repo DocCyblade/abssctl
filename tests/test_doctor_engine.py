@@ -5,6 +5,8 @@ from __future__ import annotations
 import time
 from types import SimpleNamespace
 
+import pytest
+
 from abssctl.cli import RuntimeContext
 from abssctl.doctor import (
     DoctorEngine,
@@ -17,6 +19,11 @@ from abssctl.doctor import (
     aggregate_results,
     create_probe_context,
     run_probes,
+)
+from abssctl.doctor.engine import (
+    _duration_ms,
+    _run_single_probe,
+    _unexpected_failure,
 )
 
 
@@ -227,3 +234,96 @@ def test_create_probe_context_mirrors_runtime() -> None:
     assert context.config is sentinel
     assert context.nginx_provider is sentinel
     assert context.options.max_concurrency == 3
+
+
+def test_create_probe_context_defaults_options() -> None:
+    """create_probe_context should supply default options when none provided."""
+    sentinel = SimpleNamespace()
+    runtime = RuntimeContext(
+        config=sentinel,
+        registry=sentinel,
+        ports=sentinel,
+        version_provider=sentinel,
+        version_installer=sentinel,
+        instance_status_provider=sentinel,
+        locks=sentinel,
+        logger=sentinel,
+        templates=sentinel,
+        systemd_provider=sentinel,
+        nginx_provider=sentinel,
+        backups=sentinel,
+        tls_inspector=sentinel,
+        tls_validator=sentinel,
+    )
+
+    defaults = ProbeExecutorOptions()
+    context = create_probe_context(runtime)
+    assert isinstance(context.options, ProbeExecutorOptions)
+    assert context.options.max_concurrency == defaults.max_concurrency
+
+
+
+def test_duration_ms_tracks_elapsed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_duration_ms should convert perf_counter deltas to milliseconds."""
+    monkeypatch.setattr("abssctl.doctor.engine.time.perf_counter", lambda: 10.5)
+    assert _duration_ms(10.0) == 500
+
+
+def test_unexpected_failure_wraps_exception() -> None:
+    """_unexpected_failure should capture metadata about probe errors."""
+    probe = ProbeDefinition(
+        id="failing",
+        category="env",
+        run=lambda ctx: ProbeResult(
+            id="failing",
+            category="env",
+            status=ProbeStatus.GREEN,
+            impact=DoctorImpact.OK,
+            message="ok",
+        ),
+    )
+    result = _unexpected_failure(probe, RuntimeError("boom"), 42)
+    assert result.status is ProbeStatus.RED
+    assert result.impact is DoctorImpact.PROVIDER
+    assert "boom" in result.message
+    assert result.duration_ms == 42
+    assert result.warnings == ("unhandled-exception",)
+    assert isinstance(result.data, dict) and "traceback" in result.data
+
+
+def test_run_single_probe_coerces_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_run_single_probe should align id/category and populate duration."""
+    probe = ProbeDefinition(
+        id="expected-id",
+        category="env",
+        run=lambda ctx: ProbeResult(
+            id="mismatch",
+            category="config",
+            status=ProbeStatus.GREEN,
+            impact=DoctorImpact.OK,
+            message="done",
+        ),
+    )
+
+    monkeypatch.setattr("abssctl.doctor.engine.time.perf_counter", lambda: 0.0)
+    monkeypatch.setattr("abssctl.doctor.engine._duration_ms", lambda start: 100)
+    context = _dummy_context(ProbeExecutorOptions())
+    result = _run_single_probe(probe, context)
+    assert result.id == "expected-id"
+    assert result.category == "env"
+    assert result.duration_ms == 100
+
+
+def test_run_single_probe_handles_exceptions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exceptions inside probe.run should be wrapped via _unexpected_failure."""
+    def _broken(ctx: ProbeContext) -> ProbeResult:
+        raise RuntimeError("fail")
+
+    probe = ProbeDefinition(id="broken", category="state", run=_broken)
+    monkeypatch.setattr("abssctl.doctor.engine.time.perf_counter", lambda: 0.0)
+    monkeypatch.setattr("abssctl.doctor.engine._duration_ms", lambda start: 50)
+    context = _dummy_context(ProbeExecutorOptions())
+    result = _run_single_probe(probe, context)
+    assert result.status is ProbeStatus.RED
+    assert result.impact is DoctorImpact.PROVIDER
+    assert result.duration_ms == 50

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import namedtuple
+from datetime import UTC
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Never
@@ -77,6 +78,25 @@ def _build_context(
     )
 
 
+def _discovered_instance(
+    tmp_path: Path,
+    name: str,
+    *,
+    warnings: list[str] | None = None,
+) -> DiscoveredInstance:
+    """Return a discovery record rooted under the tmp_path."""
+    root = tmp_path / "instances" / name
+    data_dir = root / "data"
+    config_path = data_dir / "config.json"
+    return DiscoveredInstance(
+        name=name,
+        root=root,
+        data_dir=data_dir,
+        config_path=config_path,
+        warnings=warnings or [],
+    )
+
+
 # ---------------------------------------------------------------------------
 # State reconciliation
 # ---------------------------------------------------------------------------
@@ -140,6 +160,57 @@ def test_probe_state_reconcile_highlights_registry_mismatches(
     assert "registry entries missing on disk: beta" in result.message
 
 
+def test_probe_state_reconcile_reports_filesystem_only_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Filesystem additions with missing registry entries should be reported."""
+    report = DiscoveryReport(
+        instances=[
+            _discovered_instance(tmp_path, "alpha"),
+            _discovered_instance(tmp_path, "beta"),
+        ]
+    )
+    monkeypatch.setattr(doctor_probes, "discover_instances", lambda *args, **kwargs: report)
+    registry = DummyRegistry([{"name": "alpha"}])
+    config = SimpleNamespace(
+        instance_root=tmp_path / "instances",
+        runtime_dir=tmp_path / "run",
+        logs_dir=tmp_path / "logs",
+        state_dir=tmp_path / "state",
+    )
+    context = _build_context(config=config, registry=registry)
+
+    result = doctor_probes._probe_state_reconcile(context)
+    assert result.status is ProbeStatus.RED
+    assert result.data == {"discovered_only": ["beta"]}
+    assert "filesystem instances not registered: beta" in result.message
+    assert "registry entries missing on disk" not in result.message
+
+
+def test_probe_state_reconcile_reports_registry_only_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Registry entries missing on disk should be highlighted independently."""
+    report = DiscoveryReport(instances=[_discovered_instance(tmp_path, "alpha")])
+    monkeypatch.setattr(doctor_probes, "discover_instances", lambda *args, **kwargs: report)
+    registry = DummyRegistry([{"name": "alpha"}, {"name": "beta"}])
+    config = SimpleNamespace(
+        instance_root=tmp_path / "instances",
+        runtime_dir=tmp_path / "run",
+        logs_dir=tmp_path / "logs",
+        state_dir=tmp_path / "state",
+    )
+    context = _build_context(config=config, registry=registry)
+
+    result = doctor_probes._probe_state_reconcile(context)
+    assert result.status is ProbeStatus.RED
+    assert result.data == {"registry_only": ["beta"]}
+    assert "registry entries missing on disk: beta" in result.message
+    assert "filesystem instances not registered" not in result.message
+
+
 def test_probe_state_reconcile_handles_discovery_warnings(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -171,6 +242,32 @@ def test_probe_state_reconcile_handles_discovery_warnings(
     assert result.data == {
         "instance_warnings": {"alpha": ["config.json missing"]},
     }
+
+
+def test_probe_state_reconcile_warns_on_instance_only_warnings(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Instance-level warnings without global warnings should still downgrade."""
+    report = DiscoveryReport(
+        instances=[
+            _discovered_instance(tmp_path, "alpha", warnings=["config missing"]),
+        ]
+    )
+    monkeypatch.setattr(doctor_probes, "discover_instances", lambda *args, **kwargs: report)
+    registry = DummyRegistry([{"name": "alpha"}])
+    config = SimpleNamespace(
+        instance_root=tmp_path / "instances",
+        runtime_dir=tmp_path / "run",
+        logs_dir=tmp_path / "logs",
+        state_dir=tmp_path / "state",
+    )
+    context = _build_context(config=config, registry=registry)
+
+    result = doctor_probes._probe_state_reconcile(context)
+    assert result.status is ProbeStatus.YELLOW
+    assert result.warnings == ()
+    assert result.data == {"instance_warnings": {"alpha": ["config missing"]}}
 
 
 def test_probe_state_reconcile_green_when_registry_matches(
@@ -395,6 +492,21 @@ def test_probe_systemd_status_collects_failures(tmp_path: Path) -> None:
     assert result.data == {"failures": {"alpha": "unit failed"}}
 
 
+def test_probe_systemd_status_surfaces_other_systemd_errors(tmp_path: Path) -> None:
+    """Systemd errors unrelated to missing binaries should bubble up as failures."""
+    provider = DummySystemdProvider(
+        tmp_path,
+        status_map={"alpha": SystemdError("start limit hit")},
+    )
+    registry = DummyRegistry([{"name": "alpha"}])
+    context = _build_context(systemd_provider=provider, registry=registry)
+
+    result = doctor_probes._probe_systemd_status(context)
+    assert result.status is ProbeStatus.RED
+    assert result.data == {"failures": {"alpha": "start limit hit"}}
+    assert "Systemd status checks failed." in result.message
+
+
 def test_probe_systemd_status_handles_missing_systemctl(tmp_path: Path) -> None:
     """SystemdError indicating missing binary should translate to a warning."""
     provider = DummySystemdProvider(
@@ -587,6 +699,7 @@ def test_probe_ports_registry_detects_duplicate_ports() -> None:
 
     result = doctor_probes._probe_ports_registry(context)
     assert result.status is ProbeStatus.RED
+    assert result.impact is DoctorImpact.VALIDATION
     assert "Duplicate ports detected: 5100" in result.message
 
 
@@ -603,6 +716,7 @@ def test_probe_ports_registry_detects_duplicate_names() -> None:
 
     result = doctor_probes._probe_ports_registry(context)
     assert result.status is ProbeStatus.RED
+    assert result.impact is DoctorImpact.VALIDATION
     assert "Duplicate port reservations detected: alpha" in result.message
 
 
@@ -632,6 +746,24 @@ def test_probe_ports_registry_green_when_all_reserved() -> None:
     result = doctor_probes._probe_ports_registry(context)
     assert result.status is ProbeStatus.GREEN
     assert result.impact is DoctorImpact.OK
+    assert result.message == "2 port reservation(s) recorded."
+
+
+def test_probe_ports_registry_green_reports_count_message() -> None:
+    """Healthy registries should report the actual reservation count."""
+    registry = DummyRegistry([{"name": "alpha"}, {"name": "beta"}, {"name": "gamma"}])
+    ports = DummyPortsRegistry(
+        entries=[
+            {"name": "alpha", "port": 5100},
+            {"name": "beta", "port": 5200},
+            {"name": "gamma", "port": 5300},
+        ]
+    )
+    context = _build_context(ports=ports, registry=registry)
+
+    result = doctor_probes._probe_ports_registry(context)
+    assert result.status is ProbeStatus.GREEN
+    assert result.message == "3 port reservation(s) recorded."
 
 
 # ---------------------------------------------------------------------------
@@ -819,6 +951,38 @@ def test_probe_tls_system_certificate_handles_config_errors(
     assert "Failed to resolve system TLS assets" in result.message
 
 
+def test_probe_tls_system_certificate_passes_current_time_to_validator(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Validator should receive the current UTC timestamp and the inspector selection."""
+    inspector = DummyTLSInspector(selection=object())
+    sentinel_now = object()
+
+    class _DummyDateTime:
+        @staticmethod
+        def now(tz: object) -> object:
+            assert tz is UTC
+            return sentinel_now
+
+    monkeypatch.setattr(doctor_probes, "datetime", _DummyDateTime)
+    report = DummyTLSReport(
+        TLSValidationSeverity.OK,
+        [],
+        {"findings": [], "not_valid_after": None},
+    )
+    validator = DummyTLSValidator(report)
+    context = _build_context(
+        config=_tls_config(tmp_path),
+        tls_inspector=inspector,
+        tls_validator=validator,
+    )
+
+    doctor_probes._probe_tls_system_certificate(context)
+    assert validator.calls[0]["now"] is sentinel_now
+    assert validator.calls[0]["selection"] is inspector._selection
+
+
 # ---------------------------------------------------------------------------
 # Filesystem probes
 # ---------------------------------------------------------------------------
@@ -974,6 +1138,17 @@ def test_probe_app_instance_status_green_for_running() -> None:
     assert result.data == {"states": {"alpha": "running"}}
 
 
+def test_probe_app_instance_status_handles_case_insensitive_failures() -> None:
+    """Failure detection should be case-insensitive."""
+    provider = DummyInstanceStatusProvider({"alpha": InstanceStatus(state="FAILED", detail="boom")})
+    registry = DummyRegistry([{"name": "alpha"}])
+    context = _build_context(instance_status_provider=provider, registry=registry)
+
+    result = doctor_probes._probe_app_instance_status(context)
+    assert result.status is ProbeStatus.RED
+    assert result.data["failures"] == {"alpha": "boom"}
+
+
 # ---------------------------------------------------------------------------
 # Disk usage probe
 # ---------------------------------------------------------------------------
@@ -1039,6 +1214,25 @@ def test_probe_disk_usage_yellow_when_below_ten_percent(
     assert result.warnings == ("disk:low-free",)
 
 
+def test_probe_disk_usage_exactly_five_percent_warns(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exactly 5% free space should emit a warning instead of a failure."""
+    config = SimpleNamespace(state_dir=tmp_path)
+    context = _build_context(config=config)
+    monkeypatch.setattr(
+        doctor_probes.shutil,
+        "disk_usage",
+        lambda path: DiskUsage(total=100, used=95, free=5),
+    )
+
+    result = doctor_probes._probe_disk_usage(context)
+    assert result.status is ProbeStatus.YELLOW
+    assert result.warnings == ("disk:low-free",)
+    assert result.data["percent_free"] == pytest.approx(5.0)
+
+
 def test_probe_disk_usage_green_with_healthy_space(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1056,6 +1250,24 @@ def test_probe_disk_usage_green_with_healthy_space(
     assert result.status is ProbeStatus.GREEN
     assert result.impact is DoctorImpact.OK
     assert result.data["percent_free"] == pytest.approx(75.0)
+
+
+def test_probe_disk_usage_ten_percent_is_green(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Free space at the 10% boundary should remain green."""
+    config = SimpleNamespace(state_dir=tmp_path)
+    context = _build_context(config=config)
+    monkeypatch.setattr(
+        doctor_probes.shutil,
+        "disk_usage",
+        lambda path: DiskUsage(total=100, used=90, free=10),
+    )
+
+    result = doctor_probes._probe_disk_usage(context)
+    assert result.status is ProbeStatus.GREEN
+    assert result.data["percent_free"] == pytest.approx(10.0)
 
 
 def test_collect_probes_captures_expected_categories(tmp_path: Path) -> None:

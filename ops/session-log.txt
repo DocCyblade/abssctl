@@ -215,7 +215,7 @@
 
 -----------------------------------------
 
-# 2025-10-30 Beta1.0 Session3 (OPEN)
+# 2025-10-30 Beta1.0 Session3 (CLOSED)
 - Session opened per Next Session Primer; focus remains ai-tasks item 5 idempotency coverage initiatives.
 - Awaiting Ken's questions before outlining the coverage gap inventory plan.
 - ADR 0035 accepted; next step is updating requirements/docs and scheduling implementation.
@@ -299,6 +299,19 @@ Completed Beta idempotency coverage, added reusable test harness/snapshots, wire
 - Re-ran the scoped mutmut suite (`PYTHONPATH=$(pwd)/tests:$(pwd)/src .venv/bin/mutmut run`) after the new helper/probe tests landed; survivors now 2,089 (CLI 1,262 / doctor probes 623 / TLS 166 / doctor engine+models 38) with timeouts reduced to 545 (CLI 478 / TLS 67). `ops/mutation-results-raw.txt` updated with the latest breakdown to steer the next coverage wave.
 - Profiled pytest runtime via `.venv/bin/python -m pytest --durations=25` to pinpoint CLI/TLS tests exceeding 0.5–1 s and selected them for mutation-only skipping.
 - Introduced a `mutation_timeout` marker (registered in `pyproject.toml`), a `tests/conftest.py` hook that honors `MUTANT_UNDER_TEST`, and applied the marker to the heaviest TLS/instance/backup CLI cases plus the slow doctor CLI rebuild test so future mutmut runs can skip them.
+- Re-read `ops/ai-directives.txt`, `ops/ai-tasks.txt`, and the Next Session Primer, then outlined the doctor probe survivor plan (state reconcile/disk usage/app/systemd/ports/TLS) ahead of implementing the targeted tests Doc requested.
+- Added focused doctor probe unit tests hitting the survivor branches (state reconcile single-sided mismatches + instance-only warnings, systemd error propagation, ports registry count reporting, TLS validator timestamp wiring, case-insensitive app states, disk-usage boundary checks) plus helper plumbing for reusable discovery fixtures.
+- Ran `make quick-tests` (ruff, mypy, pytest -m \"not slow\") to keep the acceptance gate green after the expanded coverage landed.
+- Extended CLI backup helper coverage: added data-only `_collect_backup_sources`/`_materialise_backup_payload` exercises (including optional nginx/registry copies), ensured `_create_backup` honors custom output dirs + service filtering, and tightened `_merge_versions`/`_build_update_payload` edge cases (remote outages, prerelease-only feeds).
+- Re-ran `make quick-tests` (ruff, mypy, pytest -m \"not slow\"; 345 tests) to validate the new coverage and keep the acceptance gate green.
+- Ran the scoped doctor/TLS/CLI mutmut suite (`.venv/bin/mutmut run` with `PYTHONPATH=$(pwd)/tests:$(pwd)/src`); 5,789 mutants total → 3,155 killed / 2,089 survived / 545 timeouts (CLI 1,262 survivors + 478 timeouts, doctor probes 623 survivors, TLS 166 survivors + 67 timeouts, doctor engine/models 38 survivors). `ops/mutation-results-raw.txt` captured the full breakdown for tracking.
+- Noted the remaining hotspots: CLI backup helpers (`create_backup`, `_materialise_backup_payload`, `_collect_backup_sources`, `_build_update_payload`), TLS validator severities/expiry data, and doctor engine aggregation helpers; next actions pivot to TLS + doctor engine since they’re the smallest buckets.
+- Added TLS-focused unit tests (`tests/test_tls.py`) for recorded custom fallback, missing chain archives, unreadable certificate files, and non-regular key paths to hammer the TLS survivor bucket.
+- Re-ran `make quick-tests` (ruff, mypy, pytest -m "not slow"; 349 tests) to validate the TLS additions and keep the acceptance gate green.
+- Extended doctor engine coverage (`tests/test_doctor_engine.py`) with direct unit tests for `_duration_ms`, `_unexpected_failure`, `_run_single_probe` (success + exception paths), and `create_probe_context` defaults to shrink the remaining engine/model survivor set.
+- Re-ran `make quick-tests` (ruff, mypy, pytest -m "not slow"; 354 tests) after the doctor engine additions to ensure the acceptance gate stays green.
+
+
 
 ## Wrap up:
 - (in progress)
@@ -308,9 +321,9 @@ Completed Beta idempotency coverage, added reusable test harness/snapshots, wire
 ----------------------- Sessions logging above this line only ----------------------
 
 # Next Steps / TODO:
-- Target the dominant doctor probe survivors from the latest mutmut run (`_probe_state_reconcile`, `_probe_disk_usage`, `_probe_app_instance_status`, `_probe_systemd_status`, `_probe_ports_registry`, `_probe_tls_system_certificate`) with focused unit tests/mocks.
-- Keep chipping away at CLI survivor hotspots (`create_backup`, `_materialise_backup_payload`, `_collect_backup_sources`, `_merge_versions`, `_build_update_payload`) so the next mutmut pass sees a meaningful drop.
-- Plan the follow-up scoped mutmut run once the above coverage lands; continue monitoring mutation timeouts in CLI/TLS.
+- Re-run the scoped doctor/TLS/CLI mutmut suite to measure the TLS survivor drop from the new tests and capture the updated counts/timeouts in `ops/mutation-results-raw.txt`.
+- Follow up with doctor engine/model survivors (38) by adding unit coverage for `_duration_ms`, `_unexpected_failure`, `_run_single_probe`, and probe-context assembly edge cases.
+- Continue monitoring the large CLI survivor cluster while designing faster fixtures for `_create_backup`/`_materialise_backup_payload`/`_build_update_payload`; keep an eye on mutation timeout markers in CLI/TLS and extend stubbing if they creep upward.
 
 # Next Session Primer
-- Kick off the next chat by focusing on doctor probe coverage improvements (state reconcile, disk usage, app/systemd/tls probes) based on the latest mutmut survivors, then move on to the CLI backup helpers; mutmut rerun comes after those tests are in place.
+- Kick off with the next scoped mutmut rerun to confirm TLS survivor reductions, then pivot to doctor engine aggregation tests before revisiting the CLI survivor backlog and planning the subsequent coverage wave.
