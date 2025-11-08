@@ -125,11 +125,12 @@ Non‑Goals for v1.0
   files ``instances.yml``/``ports.yml`` (and creates ``config.yml`` if missing) from the discovery results so the CLI is in sync
   with running deployments. ``--dry-run`` previews, ``--json`` emits machine-readable plans/results, and ``--allow-create-user``
   gates automated service-account creation when it is absent.
-- abssctl doctor [--fix] [--verbose]
+- abssctl doctor [--fix] [--dry-run] [--yes]
   Validates: python/env, node/npm versions, npm reachability, presence of required tools (tar, zstd), service user & directory perms,
   free port scan, systemd unit status, nginx site syntax (no reload), instance TCP health checks, and reconciles the registry against
   filesystem discovery. ``--only``/``--exclude`` narrow probe categories; timeout/retry flags tune execution. ``--json`` emits a structured
-  report, and ``--fix`` remains a placeholder for future safe remediations. Validation failures now advise running
+  report, while ``--fix`` now applies safe remediations (state-directory rebuild, registry file/permission repair, stale-lock cleanup). Use
+  ``--dry-run`` to preview planned repairs and ``--yes`` for automated confirmation. Validation failures advise running
   ``abssctl system init --rebuild-state`` when mismatches are detected; exit codes follow ADR-013.
 - abssctl support-bundle [--no-redact] [--out PATH]
   Collects configs, logs, versions, doctor output into a tarball; redacts sensitive paths by default can include if requested. Supports --json to print bundle metadata (path, size, redaction status).

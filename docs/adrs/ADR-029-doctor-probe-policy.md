@@ -48,11 +48,9 @@ Choose the **worst** present: **provider/system (4)** > **environment (3)** > **
 
 ### `--fix` remediation (safe & non-destructive)
 Allowed:
-- Create **service user** `actual-sync` if missing.
-- Create missing dirs (`/var/lib/abssctl/registry`, `/var/log/abssctl`, `/run/abssctl`) with correct owner/modes.
-- Migrate legacy state from `/etc/abssctl` → `/var/lib/abssctl/registry` with **read-only** compat symlinks (ADR-024).
-- Normalize file perms (0600 TLS keys; 0640 files; 0750 dirs).
-- Write default skeleton config files **only if absent**.
+- Create/repair core abssctl directories (state/log/runtime) with correct owner/modes.
+- Normalize registry/config file permissions (0640 files; 0750 dirs) and create default registry files when absent.
+- Remove stale lock files when the recorded PID is gone and the lock is older than **2×** the timeout threshold (ADR-027).
 Not allowed:
 - Changing ports, modifying nginx templates, reloading nginx, restarting services, installing packages, or upgrading Node. Print precise next-step commands instead.
 

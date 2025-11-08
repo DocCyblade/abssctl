@@ -219,6 +219,7 @@ exit 0
         "logs_dir": str(logs_dir),
         "runtime_dir": str(runtime_dir),
         "templates_dir": str(templates_dir),
+        "service_user": owner,
         "instance_root": str(tmp_path / "instances"),
         "backups": {"root": str(tmp_path / "backups")},
         "systemd": {

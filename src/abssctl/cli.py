@@ -71,6 +71,7 @@ from .doctor import (
     collect_probes,
     create_probe_context,
 )
+from .doctor.repairs import RepairAction, plan_repairs
 from .locking import LockManager
 from .logging import OperationScope, StructuredLogger
 from .node_compat import (
@@ -238,7 +239,17 @@ DOCTOR_MAX_CONCURRENCY_OPTION = typer.Option(
 DOCTOR_FIX_OPTION = typer.Option(
     False,
     "--fix",
-    help="Attempt safe remediations (not yet implemented).",
+    help="Attempt safe remediations (state dir rebuild, perms, stale locks).",
+)
+DOCTOR_YES_OPTION = typer.Option(
+    False,
+    "--yes",
+    help="Apply doctor --fix repairs without prompting.",
+)
+DOCTOR_DRY_RUN_OPTION = typer.Option(
+    False,
+    "--dry-run",
+    help="Show the doctor --fix repair plan without applying changes.",
 )
 
 NODE_VERSION_OPTION = typer.Option(
@@ -1864,6 +1875,8 @@ def doctor(
     retries: int | None = DOCTOR_RETRIES_OPTION,
     max_concurrency: int | None = DOCTOR_MAX_CONCURRENCY_OPTION,
     fix: bool = DOCTOR_FIX_OPTION,
+    yes: bool = DOCTOR_YES_OPTION,
+    dry_run: bool = DOCTOR_DRY_RUN_OPTION,
 ) -> None:
     """Run environment and service health checks."""
     runtime = _get_runtime(ctx)
@@ -1877,9 +1890,16 @@ def doctor(
             "retries": retries,
             "max_concurrency": max_concurrency,
             "fix": fix,
+            "dry_run": dry_run,
+            "yes": yes,
         },
         target={"kind": "system", "scope": "health"},
     ) as op:
+        if dry_run and not fix:
+            _command_error(op, "--dry-run is only supported together with --fix.", rc=2)
+        if yes and not fix:
+            _command_error(op, "--yes is only meaningful when combined with --fix.", rc=2)
+
         include_categories = _parse_probe_categories(only)
         exclude_categories = _parse_probe_categories(exclude)
 
@@ -1898,6 +1918,20 @@ def doctor(
         )
         if timeout_seconds is not None:
             timeout_seconds = max(timeout_seconds, 0.001)
+
+        repair_actions: list[RepairAction] = []
+        if fix:
+            repair_actions = plan_repairs(runtime)
+            _render_doctor_fix_plan(repair_actions)
+            if dry_run and repair_actions:
+                for action in repair_actions:
+                    op.add_step(action.step_id, status="planned", detail=action.detail)
+                console.print(
+                    "[yellow]Dry-run complete. Re-run with --yes to apply these repairs.[/yellow]"
+                )
+            if not dry_run and repair_actions:
+                _confirm_doctor_fix(yes)
+                _apply_doctor_repairs(op, repair_actions)
 
         defaults = ProbeExecutorOptions()
         options = ProbeExecutorOptions(
@@ -2011,6 +2045,47 @@ def doctor(
             context=log_context,
         )
         raise typer.Exit(code=summary.exit_code)
+
+
+def _render_doctor_fix_plan(actions: Sequence[RepairAction]) -> None:
+    if not actions:
+        console.print("[green]doctor --fix: no repairs required.[/green]")
+        return
+    console.print("[bold]doctor --fix plan:[/bold]")
+    for idx, action in enumerate(actions, start=1):
+        console.print(f"  {idx}. {action.description}")
+
+
+def _confirm_doctor_fix(assume_yes: bool) -> None:
+    if assume_yes:
+        return
+    if sys.stdin.isatty():
+        confirmed = typer.confirm("Apply the repairs listed above?", default=False)
+        if not confirmed:
+            console.print("[yellow]doctor --fix aborted; no repairs applied.[/yellow]")
+            raise typer.Exit(code=2)
+    else:
+        console.print("[red]doctor --fix requires --yes in non-interactive mode.[/red]")
+        raise typer.Exit(code=2)
+
+
+def _apply_doctor_repairs(op: OperationScope, actions: Sequence[RepairAction]) -> None:
+    applied = 0
+    for action in actions:
+        try:
+            action.apply()
+        except Exception as exc:  # pragma: no cover - defensive
+            op.error(
+                f"doctor --fix failed while applying {action.description}",
+                errors=[str(exc)],
+                rc=4,
+            )
+            raise
+        op.add_step(action.step_id, status="success", detail=action.detail)
+        applied += 1
+    if applied:
+        plural = "s" if applied != 1 else ""
+        console.print(f"[green]Applied {applied} doctor repair{plural}.[/green]")
 
 
 @app.command()

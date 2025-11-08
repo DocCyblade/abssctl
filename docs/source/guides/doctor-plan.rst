@@ -81,12 +81,13 @@ Execution Model
 CLI Surface
 ===========
 
-``abssctl doctor [--json] [--only category,...] [--exclude category,...] [--timeout-ms N] [--retries N] [--yes] [--fix]``\*
+``abssctl doctor [--json] [--only category,...] [--exclude category,...] [--timeout-ms N] [--retries N] [--fix] [--dry-run] [--yes]``\*
 
 * ``--json``: emit ``{"probes": [...], "summary": {...}}`` for automation.
 * ``--only``/``--exclude``: scope categories (env, config, fs, ports, systemd, nginx, tls, app, disk).
 * ``--timeout-ms`` / ``--retries``: tweak global defaults (per ADR-029).
-* ``--fix`` (future): gated scaffolding with ``--yes`` required; initially prints “Not yet implemented” and exits with success to avoid surprise behaviour.
+* ``--fix``: applies safe remediations (state-directory rebuild, registry file/permission repair, stale-lock cleanup). Requires explicit confirmation (``--yes`` or interactive prompt) and is fully previewable via ``--dry-run``.
+* ``--dry-run``: show the repair plan (if any) without mutating state; pairs with ``--fix``.
 
 Implementation Tasks
 ====================
@@ -112,7 +113,7 @@ Implementation Tasks
 
 5. **Documentation & Follow-up**
    - [x] Update CLI reference + README doctor sections with current behaviour.
-   - [ ] Record probe catalogue + remediation guidance once probes are implemented; expand ``--fix`` behaviour in a future milestone (tie-in with ADR-029 safe actions).
+   - [x] Record probe catalogue + remediation guidance once probes are implemented; expand ``--fix`` behaviour with the initial safe actions (state dir rebuild, perms, stale locks) and document the workflow (tie-in with ADR-029).
 
 Open Questions
 ==============

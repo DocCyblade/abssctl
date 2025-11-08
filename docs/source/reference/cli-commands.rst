@@ -202,9 +202,11 @@ System Diagnostics & Backups
    ``--timeout-ms``, ``--retries``, and ``--max-concurrency`` override executor
    defaults. Exit codes follow ADR-013, mapping the worst probe impact (``0``
    success, ``2`` validation/config errors, ``3`` environment/dependency
-   failures, ``4`` provider/runtime failures). ``--fix`` remains advisory for
-   future safe remediations. The state probes now cross-check the registry
-   against filesystem discovery and recommend ``abssctl system init
+   failures, ``4`` provider/runtime failures). ``--fix`` now applies safe
+   remediations (state-directory creation, registry file permissions, stale-lock
+   cleanup). Combine it with ``--dry-run`` to preview the repair plan and
+   ``--yes`` for fully non-interactive runs. The state probes cross-check the
+   registry against filesystem discovery and recommend ``abssctl system init
    --rebuild-state`` whenever mismatches are detected.
 
 ``abssctl backup create <instance> [--message TEXT] [--label LABELS] [--data-only] [--out-dir PATH] [--compression {auto,zstd,gzip,none}] [--compression-level N] [--json] [--dry-run]``

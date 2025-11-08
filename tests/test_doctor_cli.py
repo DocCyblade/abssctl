@@ -6,6 +6,7 @@ import grp
 import json
 import os
 import pwd
+import time
 from collections import namedtuple
 from pathlib import Path
 
@@ -236,21 +237,68 @@ def test_doctor_cli_only_filter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     assert categories <= {"env"}
 
 
-def test_doctor_cli_fix_flag_reports_placeholder(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_doctor_fix_dry_run_previews_repairs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """--fix should report that remediation is not yet implemented."""
+    """Doctor --fix --dry-run should show the plan without mutating state."""
     instances = [{"name": "alpha", "status": "running"}]
     ports = [{"name": "alpha", "port": 5100}]
-    env, _ = _prepare_environment(tmp_path, instances=instances, ports=ports)
+    env, state_dir = _prepare_environment(tmp_path, instances=instances, ports=ports)
     _patch_disk_usage(monkeypatch, percent_free=50.0)
     _setup_instance_assets(tmp_path, "alpha")
     _write_instance_config(tmp_path / "instances", "alpha", 5100)
 
-    result = _invoke_doctor(["--fix"], env)
+    runtime_dir = tmp_path / "run"
+    lock_path = runtime_dir / "abssctl.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text(json.dumps({"pid": 999_999}), encoding="utf-8")
+    old = time.time() - 600
+    os.utime(lock_path, (old, old))
 
-    assert result.exit_code == 0
-    assert "--fix is not implemented yet" in result.stdout
+    result = _invoke_doctor(["--fix", "--dry-run"], env)
+
+    assert "doctor --fix plan" in result.stdout
+    assert lock_path.exists()
+
+
+def test_doctor_fix_applies_repairs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Doctor --fix --yes should repair registry files, perms, and stale locks."""
+    instances = [{"name": "alpha", "status": "running"}]
+    ports = [{"name": "alpha", "port": 5100}]
+    env, state_dir = _prepare_environment(tmp_path, instances=instances, ports=ports)
+    _patch_disk_usage(monkeypatch, percent_free=50.0)
+    _setup_instance_assets(tmp_path, "alpha")
+    _write_instance_config(tmp_path / "instances", "alpha", 5100)
+
+    registry_dir = state_dir / "registry"
+    instances_file = registry_dir / "instances.yml"
+    instances_file.unlink()
+
+    runtime_dir = tmp_path / "run"
+    lock_path = runtime_dir / "abssctl.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text(json.dumps({"pid": 999_999}), encoding="utf-8")
+    old = time.time() - 600
+    os.utime(lock_path, (old, old))
+
+    state_dir.chmod(0o777)
+
+    _invoke_doctor(["--fix", "--yes", "--json"], env)
+    assert instances_file.exists()
+    assert yaml.safe_load(instances_file.read_text(encoding="utf-8")).get("instances") == []
+    assert oct(state_dir.stat().st_mode & 0o777) == "0o750"
+    assert not lock_path.exists()
+
+    operations = _operations_log_lines(state_dir)
+    assert operations, "operations log should record doctor --fix steps"
+    payload = json.loads(operations[-1])
+    step_names = [step["name"] for step in payload.get("steps", [])]
+    assert "repair.registry.create" in step_names
+    assert "repair.locks.cleanup" in step_names
 
 
 def test_doctor_cli_repeat_runs_stable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

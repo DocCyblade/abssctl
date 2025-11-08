@@ -46,6 +46,9 @@
 - 11/08/2025 17:35:00: Updated the systemd template + CLI context so every unit sources `/etc/default/abssctl-node` and execs `/usr/local/bin/abssctl-node-run`, matching the compatibility plan.
 - 11/08/2025 17:45:00: Refreshed the manual install script/plan/spec to install the official wrapper and run `abssctl node ensure`, then reinstalled docs/tests + `make quick-tests`.
 - 11/08/2025 17:55:00: Retired `ops/node-compat-plan.md` (tasks are now baked into docs + tooling) and updated TODO/primer references.
+- 11/08/2025 18:20:00: Scoped ``doctor --fix`` expectations (state dir rebuild, perms, stale locks, `--yes`/`--dry-run` flow) via ADR references and test harness updates.
+- 11/08/2025 18:50:00: Implemented the doctor repair planner/executor, added CLI prompts/options, documentation updates, and regression tests; `make quick-tests` now passes with the new behaviour.
+- 11/08/2025 19:00:00: Prepped for next chat by refreshing the TODO list and session primer (support-bundle focus next).
 - 11/08/2025 17:25:00: Added configurable `node_compat_file` support, refreshed tests/docs, and revalidated with `make quick-tests` after polishing the new probes + CLI.
 
 ## Wrap up:
@@ -54,13 +57,11 @@
 -----------------------------------------
 
 # Next Steps / TODO:
-0. Review `docs/requirements/node-compatibility.rst` / `docs/requirements/node-compat.yaml` to keep Node runtime expectations in sync before tackling other roadmap items.
-1. Ship ``doctor --fix`` auto-remediation (state dir repair, permission cleanup, lock pruning) with dry-run/telemetry plus wrap-up docs/tests.
-2. Implement the support-bundle command (collection, redaction, size limits) and document secure hand-off workflows.
-3. Harden CLI exit-code/error mapping to align with ADR-013, expanding regression tests + user messaging.
-4. Close out targeted mutation survivors (CLI doctor helpers, doctor engine/probes, TLS inspector/validator) and keep the scoped mutmut suite stable.
-5. Build the docs packaging pipeline: generate/publish man pages via CI and add ``abssctl docs man install|path`` helpers.
-6. Add shell completion management (show/install/uninstall for bash/zsh/fish) with packaged scripts and tests.
+0. Implement the support-bundle command (collection, redaction, size limits) and document secure hand-off workflows.
+1. Harden CLI exit-code/error mapping to align with ADR-013, expanding regression tests + user messaging.
+2. Close out targeted mutation survivors (CLI doctor helpers, doctor engine/probes, TLS inspector/validator) and keep the scoped mutmut suite stable.
+3. Build the docs packaging pipeline: generate/publish man pages via CI and add ``abssctl docs man install|path`` helpers.
+4. Add shell completion management (show/install/uninstall for bash/zsh/fish) with packaged scripts and tests.
 
 # Next Session Primer
-- Start by reviewing `docs/requirements/node-compatibility.rst` (Node/runtime baseline) and then design/implement ``doctor --fix`` auto-remediation (state dir/permissions/locks) before rolling directly into the support-bundle CLI work.
+- Pick up the ``support-bundle create`` work next: design the data collection/redaction plan, wire the CLI skeleton, and outline tests/docs so we can ship it immediately after the new doctor fixes. Once the bundle basics are in place, circle back to the exit-code hardening backlog.
