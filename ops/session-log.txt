@@ -41,6 +41,7 @@
 -----------------------------------------
 
 # Next Steps / TODO:
+0. Read `ops/node-compat-plan.md` for the active Node compatibility/`n` wrapper tasks before picking up other roadmap items.
 1. Ship ``doctor --fix`` auto-remediation (state dir repair, permission cleanup, lock pruning) with dry-run/telemetry plus wrap-up docs/tests.
 2. Implement the support-bundle command (collection, redaction, size limits) and document secure hand-off workflows.
 3. Harden CLI exit-code/error mapping to align with ADR-013, expanding regression tests + user messaging.
@@ -49,4 +50,4 @@
 6. Add shell completion management (show/install/uninstall for bash/zsh/fish) with packaged scripts and tests.
 
 # Next Session Primer
-- Begin 1108 Sprint 1 by designing/implementing ``doctor --fix`` auto-remediation (state dir/permissions/locks), then roll directly into the support-bundle CLI implementation before tackling the remaining roadmap items.
+- Start by reviewing `ops/node-compat-plan.md` so the Node/runtime tasks stay front-of-mind, then design/implement ``doctor --fix`` auto-remediation (state dir/permissions/locks) before rolling directly into the support-bundle CLI work.
