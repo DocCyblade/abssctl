@@ -12,6 +12,8 @@ if TYPE_CHECKING:
     from ..config import AppConfig
     from ..locking import LockManager
     from ..logging import StructuredLogger
+    from ..node_compat import NodeCompatibilityMatrix
+    from ..node_runtime import NodeRuntimeManager
     from ..ports import PortsRegistry
     from ..providers.instance_status_provider import InstanceStatusProvider
     from ..providers.nginx import NginxProvider
@@ -116,6 +118,8 @@ class ProbeContext:
     tls_inspector: TLSInspector
     tls_validator: TLSValidator
     options: ProbeExecutorOptions
+    node_runtime: NodeRuntimeManager
+    node_compat: NodeCompatibilityMatrix | None
 
 
 @dataclass(slots=True, frozen=True)

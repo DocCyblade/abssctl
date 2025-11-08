@@ -15,6 +15,8 @@ from typing import Any
 
 from .. import __version__
 from ..bootstrap import discover_instances
+from ..node_compat import NodeVersionSpec
+from ..node_runtime import NodeVersionInfo
 from ..ports import PortsRegistryError
 from ..providers.nginx import NginxError
 from ..providers.systemd import SystemdError
@@ -111,6 +113,7 @@ def _env_probes() -> Sequence[ProbeDefinition]:
         _make_probe("env-abssctl", "env", _probe_env_abssctl),
         _make_probe("env-platform", "env", _probe_env_platform),
         _make_probe("env-node", "env", _probe_env_command("node", fatal=True)),
+        _make_probe("env-node-compat", "env", _probe_env_node_compat),
         _make_probe("env-npm", "env", _probe_env_command("npm", fatal=True)),
         _make_probe("env-tar", "env", _probe_env_command("tar", fatal=True)),
         _make_probe("env-gzip", "env", _probe_env_command("gzip", fatal=True)),
@@ -189,6 +192,100 @@ def _probe_env_command(
         )
 
     return _run
+
+
+def _node_satisfies(info: NodeVersionInfo, requirement: NodeVersionSpec) -> bool:
+    """Return True when the detected Node version meets the requirement."""
+    if info.major > requirement.major:
+        return True
+    if info.major < requirement.major:
+        return False
+    detected_tuple = (info.major, info.minor, info.patch)
+    required_tuple = requirement.min_tuple()
+    return detected_tuple >= required_tuple
+
+
+def _probe_env_node_compat(context: ProbeContext) -> ProbeResult:
+    runtime = context.node_runtime
+    detected = runtime.detect_version()
+    if detected is None:
+        return ProbeResult(
+            id="env-node-compat",
+            category="env",
+            status=ProbeStatus.YELLOW,
+            impact=DoctorImpact.OK,
+            message="Node binary not detected; compatibility check skipped.",
+            warnings=("node-missing",),
+        )
+
+    if context.node_compat is None:
+        return ProbeResult(
+            id="env-node-compat",
+            category="env",
+            status=ProbeStatus.YELLOW,
+            impact=DoctorImpact.OK,
+            message=(
+                "Node compatibility data unavailable. "
+                "Refresh docs/requirements/node-compat.yaml."
+            ),
+            warnings=("node-compat-missing",),
+            data={"detected": detected.version},
+        )
+
+    requirement = context.node_compat.preferred_node_version()
+    if requirement is None:
+        return ProbeResult(
+            id="env-node-compat",
+            category="env",
+            status=ProbeStatus.YELLOW,
+            impact=DoctorImpact.OK,
+            message="Node compatibility matrix missing node_versions entries.",
+            warnings=("node-compat-empty",),
+            data={"detected": detected.version},
+        )
+
+    if _node_satisfies(detected, requirement):
+        return ProbeResult(
+            id="env-node-compat",
+            category="env",
+            status=ProbeStatus.GREEN,
+            impact=DoctorImpact.OK,
+            message=(
+                f"Node {detected.version} satisfies required {requirement.major}.x"
+                f" (>= {requirement.min_patch})."
+            ),
+            data={
+                "detected": detected.version,
+                "required_major": requirement.major,
+                "required_min_patch": requirement.min_patch,
+                "requirement_status": requirement.status,
+            },
+        )
+
+    message = (
+        f"Detected Node {detected.version} but the compatibility matrix requires "
+        f"{requirement.major}.x (>= {requirement.min_patch})."
+    )
+    remediation = (
+        "Install the required Node version via `abssctl node ensure` or update "
+        "/etc/default/abssctl-node to match the compatibility matrix."
+    )
+    return ProbeResult(
+        id="env-node-compat",
+        category="env",
+        status=ProbeStatus.YELLOW,
+        impact=DoctorImpact.OK,
+        message=message,
+        remediation=remediation,
+        warnings=("node-version-mismatch",),
+        data={
+            "detected": detected.version,
+            "detected_major": detected.major,
+            "required_major": requirement.major,
+            "required_min_patch": requirement.min_patch,
+            "requirement_status": requirement.status,
+        },
+    )
 
 
 def _probe_env_nginx(context: ProbeContext) -> ProbeResult:

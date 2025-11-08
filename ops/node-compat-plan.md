@@ -37,6 +37,8 @@ Owner: AI/Doc
 4. Document the wrapper in `tmp-personal-server/README-context.md` and the compatibility doc (operators can bump Node by editing `/etc/default/abssctl-node` + running `abssctl node ensure`).
 5. Add doctor probe(s) that compare `node --version` to the YAML and warn/error if the host is out of compliance.
 
+_Status 2025-11-08_: `tools/abssctl-node-run.sh`, `abssctl node ensure`, and the doctor compatibility probe are implemented; remaining work is to wire the wrapper into the systemd/nginx templates and update the manual server artifacts.
+
 ### C. Manual Server Impact
 
 1. `000-manual-install.sh` must:

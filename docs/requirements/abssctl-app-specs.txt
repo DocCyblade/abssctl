@@ -305,7 +305,7 @@ Permissions: Archives and indexes are created with secure defaults (dirs 0750, f
 - Performance: list/show < 300 ms typical; create < 5 s.
 - CLI UX: all mutating commands accept --dry-run and print planned actions without making changes.
 - Security: least privilege, validated inputs (domains/ports/paths), perms: dirs 0750, files 0640, TLS keys 0600.
-- Compatibility: verify Actual/Node constraints at install time (parse npm metadata where available). Track the canonical matrix in ``docs/requirements/node-compat.yaml`` (refresh via ``python3 tools/list-sync-versions.py``) so docs stay in sync with upstream releases.
+- Compatibility: verify Actual/Node constraints at install time (parse npm metadata where available). Track the canonical matrix in ``docs/requirements/node-compat.yaml`` (refresh via ``python3 tools/list-sync-versions.py``) so docs stay in sync with upstream releases, ship ``tools/abssctl-node-run.sh`` for systemd units, and expose ``abssctl node ensure`` so operators can pre-install the recorded Node version via ``n``. The matrix path can be overridden via ``node_compat_file`` in the config or ``ABSSCTL_NODE_COMPAT_FILE`` for ad-hoc testing.
 - No telemetry; local logs only.
 - Backups integrity: archives accompanied by SHA‑256 checksum; index updates are atomic (write‑to‑temp then rename).
 - Backups performance: creating a default backup for a typical instance (< 200 MB data) completes within a reasonable time on TKL; operations are streamed to avoid excessive temp space.

@@ -25,6 +25,7 @@ except Exception as exc:  # pragma: no cover - PyYAML is a dev dependency alread
 DEFAULT_PACKAGE = "@actual-app/sync-server"
 DEFAULT_LIMIT = 12
 DEFAULT_OUTPUT = Path("docs/requirements/node-compat.yaml")
+DEFAULT_PACKAGE_OUTPUT = Path("src/abssctl/data/node-compat.yaml")
 DEFAULT_RST = Path("docs/requirements/node-compatibility.rst")
 NPM_REGISTRY = "https://registry.npmjs.org"
 SCHEMA_VERSION = 1
@@ -56,6 +57,12 @@ def _parse_args() -> argparse.Namespace:
         type=Path,
         default=DEFAULT_RST,
         help="Rendered compatibility doc destination (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--package-output",
+        type=Path,
+        default=DEFAULT_PACKAGE_OUTPUT,
+        help="Package data destination (default: %(default)s)",
     )
     parser.add_argument(
         "--no-rst",
@@ -386,16 +393,20 @@ def main() -> int:
         "actual_versions": _merge_existing(rows, existing_rows),
     }
 
+    yaml_text = yaml.safe_dump(
+        data,
+        sort_keys=False,
+        allow_unicode=False,
+    )
+
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    with args.output.open("w", encoding="utf-8") as handle:
-        yaml.safe_dump(
-            data,
-            handle,
-            sort_keys=False,
-            allow_unicode=False,
-        )
+    args.output.write_text(yaml_text, encoding="utf-8")
 
     outputs = [f"Wrote {args.output} with {len(rows)} releases"]
+    if args.package_output:
+        args.package_output.parent.mkdir(parents=True, exist_ok=True)
+        args.package_output.write_text(yaml_text, encoding="utf-8")
+        outputs.append(str(args.package_output))
 
     if not args.no_rst:
         rst_text = _render_rst_document(data)

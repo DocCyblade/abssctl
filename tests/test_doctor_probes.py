@@ -19,6 +19,8 @@ from abssctl.doctor import (
     collect_probes,
 )
 from abssctl.doctor import probes as doctor_probes
+from abssctl.node_compat import ActualVersionSpec, NodeCompatibilityMatrix, NodeVersionSpec
+from abssctl.node_runtime import NodeVersionInfo
 from abssctl.ports import PortsRegistryError
 from abssctl.providers.instance_status_provider import InstanceStatus
 from abssctl.providers.nginx import NginxError
@@ -40,6 +42,56 @@ class DummyRegistry:
         return {"instances": list(self._instances)}
 
 
+class DummyNodeRuntime:
+    """Simple stub that returns a fixed Node version for probes."""
+
+    def __init__(self, version: str | None = "18.18.0") -> None:
+        """Record the version string to emit."""
+        self._version = version
+
+    def detect_version(self) -> NodeVersionInfo | None:
+        """Return a synthetic NodeVersionInfo for tests."""
+        if self._version is None:
+            return None
+        parts = [int(part) for part in self._version.split(".")]
+        while len(parts) < 3:
+            parts.append(0)
+        return NodeVersionInfo(
+            raw=f"v{self._version}",
+            version=self._version,
+            major=parts[0],
+            minor=parts[1],
+            patch=parts[2],
+        )
+
+
+def _compat_matrix(node_versions: list[NodeVersionSpec]) -> NodeCompatibilityMatrix:
+    """Return a minimal compatibility matrix for tests."""
+    return NodeCompatibilityMatrix(
+        schema_version=1,
+        generated_at=None,
+        package=None,
+        source=None,
+        limit=None,
+        node_versions=tuple(node_versions),
+        actual_versions=tuple(
+            [
+                ActualVersionSpec(
+                    version="0.0.0",
+                    release_date=None,
+                    node_constraint=None,
+                    node_major=None,
+                    status="untested",
+                    tested_at=None,
+                    notes=None,
+                    npm_dist_tags=(),
+                )
+            ]
+        ),
+        path=None,
+    )
+
+
 def _build_context(
     *,
     config: object | None = None,
@@ -57,6 +109,8 @@ def _build_context(
     tls_inspector: object | None = None,
     tls_validator: object | None = None,
     options: ProbeExecutorOptions | None = None,
+    node_runtime: object | None = None,
+    node_compat: object | None = None,
 ) -> ProbeContext:
     """Return a ProbeContext populated with defaults and overrides."""
     return ProbeContext(
@@ -75,6 +129,8 @@ def _build_context(
         tls_inspector=tls_inspector or _SENTINEL,
         tls_validator=tls_validator or _SENTINEL,
         options=options or ProbeExecutorOptions(),
+        node_runtime=node_runtime or _SENTINEL,
+        node_compat=node_compat,
     )
 
 
@@ -350,6 +406,53 @@ def test_probe_env_command_available(monkeypatch: pytest.MonkeyPatch) -> None:
     result = runner(_build_context())
     assert result.status is ProbeStatus.GREEN
     assert result.impact is DoctorImpact.OK
+
+
+def test_probe_env_node_compat_green_when_version_meets_min() -> None:
+    """Node versions that meet the compatibility matrix should stay green."""
+    compat = _compat_matrix([NodeVersionSpec(major=18, min_patch="18.17.0")])
+    context = _build_context(
+        node_runtime=DummyNodeRuntime("18.18.0"),
+        node_compat=compat,
+    )
+    result = doctor_probes._probe_env_node_compat(context)
+    assert result.status is ProbeStatus.GREEN
+    assert "Node 18.18.0" in result.message
+
+
+def test_probe_env_node_compat_warns_when_version_too_low() -> None:
+    """Older Node versions should trigger a warning per ADR-018."""
+    compat = _compat_matrix([NodeVersionSpec(major=18, min_patch="18.17.0")])
+    context = _build_context(
+        node_runtime=DummyNodeRuntime("18.16.0"),
+        node_compat=compat,
+    )
+    result = doctor_probes._probe_env_node_compat(context)
+    assert result.status is ProbeStatus.YELLOW
+    assert ">= 18.17.0" in result.message
+
+
+def test_probe_env_node_compat_warns_without_data() -> None:
+    """Missing compatibility data should result in a warning."""
+    context = _build_context(
+        node_runtime=DummyNodeRuntime("18.18.0"),
+        node_compat=None,
+    )
+    result = doctor_probes._probe_env_node_compat(context)
+    assert result.status is ProbeStatus.YELLOW
+    assert "compatibility data unavailable" in result.message
+
+
+def test_probe_env_node_compat_warns_when_node_missing() -> None:
+    """Absent node binary should surface as a warning for this probe."""
+    compat = _compat_matrix([NodeVersionSpec(major=18, min_patch="18.17.0")])
+    context = _build_context(
+        node_runtime=DummyNodeRuntime(None),
+        node_compat=compat,
+    )
+    result = doctor_probes._probe_env_node_compat(context)
+    assert result.status is ProbeStatus.YELLOW
+    assert "Node binary not detected" in result.message
 
 
 def test_probe_env_nginx_reports_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -40,6 +40,10 @@
 - 11/08/2025 15:55:00: Implemented `tools/list-sync-versions.py` to pull @actual-app/sync-server metadata from npm and seed `docs/requirements/node-compat.yaml` with the most recent stable releases + Node baseline rows.
 - 11/08/2025 16:05:00: Extended the script to auto-render `docs/requirements/node-compatibility.rst` and updated the specs/roadmap to point at the YAML source-of-truth and refresh workflow.
 - 11/08/2025 16:15:00: Ran `make quick-tests` (ruff, mypy, pytest) to lock in the new tooling/docs without regressions.
+- 11/08/2025 16:35:00: Added packaged node-compat data, the Node compatibility loader/runtime helpers, and the `tools/abssctl-node-run.sh` wrapper script for systemd usage.
+- 11/08/2025 16:55:00: Delivered `abssctl node ensure`, doctor node-version probe/warnings, updated docs (spec/roadmap/manual context), and comprehensive tests covering the new workflow.
+- 11/08/2025 17:10:00: Re-ran `make quick-tests` to validate the expanded Node compatibility tooling + CLI changes.
+- 11/08/2025 17:25:00: Added configurable `node_compat_file` support, refreshed tests/docs, and revalidated with `make quick-tests` after polishing the new probes + CLI.
 
 ## Wrap up:
 - (in progress)

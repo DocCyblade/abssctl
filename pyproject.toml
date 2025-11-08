@@ -68,6 +68,8 @@ include = [
   "CHANGELOG.rst",
   "docs/support/actual-support-matrix.rst",
   "docs/requirements/abssctl-app-specs.txt",
+  "docs/requirements/node-compat.yaml",
+  "docs/requirements/node-compatibility.rst",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -81,6 +83,8 @@ include = [
   "CHANGELOG.rst",
   "docs/support/actual-support-matrix.rst",
   "docs/requirements/abssctl-app-specs.txt",
+  "docs/requirements/node-compat.yaml",
+  "docs/requirements/node-compatibility.rst",
 ]
 core-metadata-version = "2.3"
 

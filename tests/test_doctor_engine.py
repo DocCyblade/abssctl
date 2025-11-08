@@ -48,6 +48,8 @@ def _dummy_context(options: ProbeExecutorOptions) -> ProbeContext:
         tls_inspector=sentinel,
         tls_validator=sentinel,
         options=options,
+        node_runtime=sentinel,
+        node_compat=sentinel,
     )
 
 
@@ -229,6 +231,8 @@ def test_create_probe_context_mirrors_runtime() -> None:
         backups=sentinel,
         tls_inspector=sentinel,
         tls_validator=sentinel,
+        node_runtime=sentinel,
+        node_compat=sentinel,
     )
 
     options = ProbeExecutorOptions(max_concurrency=3)
@@ -256,6 +260,8 @@ def test_create_probe_context_defaults_options() -> None:
         backups=sentinel,
         tls_inspector=sentinel,
         tls_validator=sentinel,
+        node_runtime=sentinel,
+        node_compat=sentinel,
     )
 
     defaults = ProbeExecutorOptions()
@@ -281,6 +287,8 @@ def test_create_probe_context_mirrors_all_runtime_fields() -> None:
         backups="backups",
         tls_inspector="inspector",
         tls_validator="validator",
+        node_runtime="node-runtime",
+        node_compat="compat",
     )
     options = ProbeExecutorOptions(max_concurrency=5)
     context = create_probe_context(runtime, options)
@@ -298,6 +306,8 @@ def test_create_probe_context_mirrors_all_runtime_fields() -> None:
     assert context.backups == "backups"
     assert context.tls_inspector == "inspector"
     assert context.tls_validator == "validator"
+    assert context.node_runtime == "node-runtime"
+    assert context.node_compat == "compat"
     assert context.options is options
 
 

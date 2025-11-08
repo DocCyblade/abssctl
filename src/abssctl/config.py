@@ -207,6 +207,7 @@ class AppConfig:
     tls: TLSConfig
     backups: BackupConfig
     systemd: SystemdConfig
+    node_compat_file: Path | None
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-serialisable representation of the config."""
@@ -228,6 +229,7 @@ class AppConfig:
             "tls": self.tls.to_dict(),
             "backups": self.backups.to_dict(),
             "systemd": self.systemd.to_dict(),
+            "node_compat_file": str(self.node_compat_file) if self.node_compat_file else None,
         }
 
 
@@ -281,6 +283,7 @@ DEFAULTS: dict[str, object] = {
         "systemctl_bin": "systemctl",
         "journalctl_bin": "journalctl",
     },
+    "node_compat_file": None,
 }
 
 ALLOWED_TOP_LEVEL_KEYS = set(DEFAULTS.keys())
@@ -469,6 +472,13 @@ def _build_app_config(raw: Mapping[str, object]) -> AppConfig:
     logs_dir = _to_path(raw.get("logs_dir"))
     runtime_dir = _to_path(raw.get("runtime_dir"))
     templates_dir = _to_path(raw.get("templates_dir"))
+    node_compat_value = raw.get("node_compat_file")
+    node_compat_file: Path | None = None
+    if isinstance(node_compat_value, (str, Path)):
+        if str(node_compat_value).strip():
+            node_compat_file = _to_path(node_compat_value)
+    elif node_compat_value not in (None, ""):
+        raise ConfigError("node_compat_file must be a string, Path, or null.")
     lock_timeout = _expect_positive_float(raw.get("lock_timeout"), "lock_timeout", default=30.0)
 
     registry_dir_value = raw.get("registry_dir")
@@ -612,6 +622,7 @@ def _build_app_config(raw: Mapping[str, object]) -> AppConfig:
         tls=tls,
         backups=backups,
         systemd=systemd,
+        node_compat_file=node_compat_file,
     )
 
 

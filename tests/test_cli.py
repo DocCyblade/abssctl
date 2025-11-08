@@ -198,6 +198,15 @@ def _prepare_environment(
     _write_stub("nginx")
     _write_stub("node", content="#!/bin/sh\necho v18.0.0\nexit 0\n")
     _write_stub("npm", content="#!/bin/sh\necho 10.0.0\nexit 0\n")
+    _write_stub(
+        "n",
+        content="""#!/bin/sh
+if [ "$1" = "which" ]; then
+  exit 1
+fi
+exit 0
+""",
+    )
     # zstd intentionally omitted so doctor can warn when unavailable by default.
     owner = service_user or pwd.getpwuid(os.getuid()).pw_name
     group = service_group or grp.getgrgid(os.getgid()).gr_name
@@ -4195,3 +4204,37 @@ def test_instance_delete_cleans_files_and_releases_port(
     steps = _index_steps(record)
     assert steps["ports.release"]["status"] == "success"
     assert steps["registry.remove"]["status"] == "success"
+
+
+def test_node_ensure_dry_run_with_explicit_version(tmp_path: Path) -> None:
+    """Node ensure should honour the explicit version flag."""
+    env, _ = _prepare_environment(tmp_path)
+    result = runner.invoke(
+        app,
+        ["node", "ensure", "--dry-run", "--version", "18.17.0"],
+        env=env,
+    )
+    assert result.exit_code == 0
+    assert "Would ensure Node 18.17.0" in result.stdout
+
+
+def test_node_ensure_uses_compat_file_when_version_not_supplied(tmp_path: Path) -> None:
+    """Compatibility data should supply the default Node version."""
+    env, _ = _prepare_environment(tmp_path)
+    compat_payload = {
+        "schema_version": 1,
+        "node_versions": [
+            {"major": 18, "min_patch": "18.19.0", "status": "supported"},
+        ],
+        "actual_versions": [],
+    }
+    compat_file = tmp_path / "node-compat.yaml"
+    compat_file.write_text(yaml.safe_dump(compat_payload), encoding="utf-8")
+    env["ABSSCTL_NODE_COMPAT_FILE"] = str(compat_file)
+    result = runner.invoke(
+        app,
+        ["node", "ensure", "--dry-run"],
+        env=env,
+    )
+    assert result.exit_code == 0
+    assert "Would ensure Node 18.19.0" in result.stdout

@@ -127,6 +127,8 @@ def create_probe_context(
         tls_inspector=runtime.tls_inspector,
         tls_validator=runtime.tls_validator,
         options=effective_options,
+        node_runtime=runtime.node_runtime,
+        node_compat=runtime.node_compat,
     )
 
 

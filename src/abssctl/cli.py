@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import secrets
@@ -51,7 +52,13 @@ from .bootstrap import (
     rebuild_registry_from_report,
     write_config_file,
 )
-from .config import ALLOWED_BACKUP_COMPRESSION, AppConfig, TLSPermissionSpec, load_config
+from .config import (
+    ALLOWED_BACKUP_COMPRESSION,
+    ENV_PREFIX,
+    AppConfig,
+    TLSPermissionSpec,
+    load_config,
+)
 from .doctor import (
     PROBE_CATEGORY_VALUES,
     DoctorEngine,
@@ -65,6 +72,12 @@ from .doctor import (
 )
 from .locking import LockManager
 from .logging import OperationScope, StructuredLogger
+from .node_compat import (
+    NodeCompatibilityError,
+    NodeCompatibilityMatrix,
+    load_node_compatibility,
+)
+from .node_runtime import NodeRuntimeError, NodeRuntimeManager
 from .ports import PortsRegistry, PortsRegistryError
 from .providers import (
     InstanceStatusProvider,
@@ -223,6 +236,36 @@ DOCTOR_FIX_OPTION = typer.Option(
     "--fix",
     help="Attempt safe remediations (not yet implemented).",
 )
+
+NODE_VERSION_OPTION = typer.Option(
+    None,
+    "--version",
+    "-v",
+    help="Override the Node version to install (defaults to the compatibility matrix).",
+)
+NODE_ENV_FILE_OPTION = typer.Option(
+    None,
+    "--env-file",
+    help="Override /etc/default/abssctl-node for env file writes.",
+    dir_okay=False,
+)
+NODE_N_BIN_OPTION = typer.Option(
+    None,
+    "--n-bin",
+    help="Path to the `n` binary (default: n).",
+)
+NODE_COMPAT_FILE_OPTION = typer.Option(
+    None,
+    "--compat-file",
+    help="Load compatibility data from this file instead of the packaged default.",
+    dir_okay=False,
+)
+NODE_DRY_RUN_OPTION = typer.Option(
+    False,
+    "--dry-run",
+    help="Preview actions without installing Node or editing env files.",
+)
+NODE_COMPAT_ENV_VAR = f"{ENV_PREFIX}NODE_COMPAT_FILE"
 
 SYSTEM_INIT_CONFIG_FILE_OPTION = typer.Option(
     None,
@@ -510,6 +553,8 @@ class RuntimeContext:
     backups: BackupsRegistry
     tls_inspector: TLSInspector
     tls_validator: TLSValidator
+    node_runtime: NodeRuntimeManager
+    node_compat: NodeCompatibilityMatrix | None
 
 
 @dataclass(slots=True)
@@ -1096,6 +1141,21 @@ def _ensure_runtime(
     backups_registry.ensure_root()
     tls_inspector = TLSInspector(config)
     tls_validator = TLSValidator(config.tls.validation)
+    node_runtime = NodeRuntimeManager(logger=logger)
+    compat_override = os.environ.get(NODE_COMPAT_ENV_VAR)
+    compat_path: Path | None = None
+    if compat_override:
+        compat_path = Path(compat_override)
+    elif config.node_compat_file is not None:
+        compat_path = config.node_compat_file
+    node_compat: NodeCompatibilityMatrix | None = None
+    try:
+        node_compat = load_node_compatibility(compat_path)
+    except NodeCompatibilityError as exc:
+        logging.getLogger(__name__).warning(
+            "Node compatibility data unavailable: %s",
+            exc,
+        )
     runtime = RuntimeContext(
         config=config,
         registry=registry,
@@ -1111,6 +1171,8 @@ def _ensure_runtime(
         backups=backups_registry,
         tls_inspector=tls_inspector,
         tls_validator=tls_validator,
+        node_runtime=node_runtime,
+        node_compat=node_compat,
     )
     ctx.obj = runtime
     return runtime
@@ -1264,6 +1326,43 @@ def _normalize_instances(raw_entries: object) -> list[dict[str, Any]]:
             )
 
     return normalized
+
+
+def _resolve_node_manager(
+    runtime: RuntimeContext,
+    env_file: Path | None,
+    n_bin: str | None,
+) -> NodeRuntimeManager:
+    """Return a NodeRuntimeManager respecting CLI overrides."""
+    base = runtime.node_runtime
+    if env_file is None and n_bin is None:
+        return base
+    return NodeRuntimeManager(
+        logger=runtime.logger,
+        env_file=env_file or base.env_file,
+        n_bin=n_bin or base.n_bin,
+        node_bin=base.node_bin,
+    )
+
+
+def _resolve_required_node_version(
+    explicit: str | None,
+    compat: NodeCompatibilityMatrix | None,
+) -> str:
+    """Select the Node version to enforce."""
+    if explicit:
+        normalized = explicit.strip().lstrip("v")
+        if not normalized:
+            raise ValueError("Node version cannot be blank.")
+        return normalized
+    if compat is not None:
+        preferred = compat.preferred_node_version()
+        if preferred is not None:
+            return preferred.min_patch
+    raise ValueError(
+        "Node compatibility data is unavailable. Provide --version or refresh "
+        "docs/requirements/node-compat.yaml."
+    )
 
 
 def _merge_versions(
@@ -1925,6 +2024,7 @@ def support_bundle(ctx: typer.Context) -> None:
 
 
 system_app = typer.Typer(help="Manage system bootstrap and recovery tasks.")
+node_app = typer.Typer(help="Manage Node runtime compatibility tasks.")
 
 
 @system_app.command("init")
@@ -2199,12 +2299,82 @@ config_app = typer.Typer(help="Inspect and manage global configuration.")
 tls_app = typer.Typer(help="Manage TLS certificates and validation.")
 
 app.add_typer(system_app, name="system")
+app.add_typer(node_app, name="node")
 app.add_typer(instances_app, name="instance")
 app.add_typer(ports_app, name="ports")
 app.add_typer(versions_app, name="version")
 app.add_typer(backups_app, name="backup")
 app.add_typer(config_app, name="config")
 app.add_typer(tls_app, name="tls")
+
+
+@node_app.command("ensure")
+def node_ensure(
+    ctx: typer.Context,
+    version: str | None = NODE_VERSION_OPTION,
+    env_file: Path | None = NODE_ENV_FILE_OPTION,
+    n_bin: str | None = NODE_N_BIN_OPTION,
+    compat_file: Path | None = NODE_COMPAT_FILE_OPTION,
+    dry_run: bool = NODE_DRY_RUN_OPTION,
+) -> None:
+    """Ensure the required Node runtime is installed and recorded."""
+    runtime = _get_runtime(ctx)
+    compat = runtime.node_compat
+    if compat_file is not None:
+        try:
+            compat = load_node_compatibility(compat_file)
+        except NodeCompatibilityError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=2) from exc
+    try:
+        required_version = _resolve_required_node_version(version, compat)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from exc
+
+    manager = _resolve_node_manager(runtime, env_file, n_bin)
+
+    args = {
+        "version": required_version,
+        "env_file": str(manager.env_file),
+        "n_bin": manager.n_bin,
+        "dry_run": dry_run,
+        "compat": str(compat_file) if compat_file else ("packaged" if compat else None),
+        "source": "cli" if version else "matrix",
+    }
+    with runtime.logger.operation(
+        "node ensure",
+        args=args,
+        target={"kind": "system", "scope": "node"},
+    ) as op:
+        try:
+            result = manager.ensure_version(required_version, dry_run=dry_run)
+        except NodeRuntimeError as exc:
+            _command_error(op, str(exc), rc=3)
+
+        detail = {
+            "installed": result.installed,
+            "installation_performed": result.installation_performed,
+            "env_changed": result.env_changed,
+            "env_file": str(result.env_file),
+            "dry_run": dry_run,
+        }
+        status = "planned" if dry_run else "success"
+        op.add_step("node.ensure", status=status, detail=json.dumps(detail, sort_keys=True))
+
+        changed = int(result.installation_performed) + int(result.env_changed)
+        if dry_run:
+            console.print(
+                f"[yellow]Would ensure Node {required_version}; env file {result.env_file} "
+                "would be updated.[/yellow]"
+            )
+            op.success("Planned Node ensure run.", changed=0)
+        else:
+            console.print(
+                f"[green]Node {required_version} ready; env file {result.env_file} "
+                f"{'updated' if result.env_changed else 'unchanged'}.[/green]"
+            )
+            op.success("Node ensure completed.", changed=changed)
 
 
 @tls_app.command("verify")
