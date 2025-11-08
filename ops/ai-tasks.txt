@@ -3,9 +3,4 @@
 #   file and try to recover where it was in the long task.
 #
 # - AI do not edit above this line! Keep this header!
-# B3-3 – Pilot mutation testing
-# - Mutmut run completed (`PYTHONPATH=$(pwd)/tests:$(pwd)/src mutmut run`); score ~41% (3772 killed / 3397 survived / 1479 timeouts).
-# - Scoped mutmut run (doctor/tls/cli only) complete: survivors CLI=1406 (create_backup, resolve_bootstrap_options, verify_backup_entry, materialise_backup_payload, merge_versions), doctor.probes=641 (state_reconcile, env/systemctl/disk/ports/tls), tls=166 (validate/check_file/check_permissions). Timeouts now limited to CLI (473) + TLS (67) via mutation_timeout marker.
-# - Latest mutmut run (scoped to doctor/tls/cli) reports 2,089 survivors (CLI 1,262 / doctor probes 623 / TLS 166 / doctor engine+models 38) and 545 timeouts (CLI 478 / TLS 67). Remaining hotspots: CLI backup helpers (`create_backup`, `_materialise_backup_payload`, `_collect_backup_sources`, `_merge_versions`, `_build_update_payload`), doctor probes (`state_reconcile`, `disk_usage`, `app_instance_status`, `systemd_status`, `ports_registry`, `tls_system_certificate`), and TLS validator branches. Continue targeted unit tests before the next mutation pass.
-# - Continue refining timeout mitigation (ensure `mutation_timeout` coverage stays aligned with the slowest tests; consider further stubbing of backup/TLS fixtures if timeouts resurface).
-# - Investigate timeouts (heavy concentration in abssctl.config/cli/logging) before considering CI integration; possibly limit scope or mark slow tests.
+

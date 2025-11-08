@@ -34,6 +34,12 @@
 # 2025-11-08 1108 Sprint 1 (OPEN)
 - 11/08/2025 14:10:00: Session opened under the new directives; focus is finishing the v1.0.0 roadmap items (doctor --fix, support bundle, exit-code polish, mutation scope, docs packaging, completions).
 - 11/08/2025 14:15:00: Reviewed the latest scoped mutmut run (2,016 survivors; CLI 1,262 / doctor probes 623 / doctor engine/models 33 / TLS 166; 532 timeouts) and confirmed only those subsystems need mutation coverage; docs/roadmap/test-coverage report updated accordingly.
+- 11/08/2025 15:30:00: Re-read ops/ai-directives + ops/ai-tasks to recover context for 1108 Sprint 1, confirming outstanding mutation-testing follow-ups.
+- 11/08/2025 15:32:00: Reviewed ops/node-compat-plan.md per primer so Node wrapper + compatibility deliverables stay front-of-mind before tackling `doctor --fix`.
+- 11/08/2025 15:40:00: Surveyed existing Node references (ADR-018 warn-only policy, specs/roadmap) to prep for the new compatibility automation + wrapper work so updates stay consistent.
+- 11/08/2025 15:55:00: Implemented `tools/list-sync-versions.py` to pull @actual-app/sync-server metadata from npm and seed `docs/requirements/node-compat.yaml` with the most recent stable releases + Node baseline rows.
+- 11/08/2025 16:05:00: Extended the script to auto-render `docs/requirements/node-compatibility.rst` and updated the specs/roadmap to point at the YAML source-of-truth and refresh workflow.
+- 11/08/2025 16:15:00: Ran `make quick-tests` (ruff, mypy, pytest) to lock in the new tooling/docs without regressions.
 
 ## Wrap up:
 - (in progress)

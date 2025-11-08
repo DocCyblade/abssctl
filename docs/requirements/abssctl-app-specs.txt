@@ -305,7 +305,7 @@ Permissions: Archives and indexes are created with secure defaults (dirs 0750, f
 - Performance: list/show < 300 ms typical; create < 5 s.
 - CLI UX: all mutating commands accept --dry-run and print planned actions without making changes.
 - Security: least privilege, validated inputs (domains/ports/paths), perms: dirs 0750, files 0640, TLS keys 0600.
-- Compatibility: verify Actual/Node constraints at install time (parse npm metadata where available).
+- Compatibility: verify Actual/Node constraints at install time (parse npm metadata where available). Track the canonical matrix in ``docs/requirements/node-compat.yaml`` (refresh via ``python3 tools/list-sync-versions.py``) so docs stay in sync with upstream releases.
 - No telemetry; local logs only.
 - Backups integrity: archives accompanied by SHA‑256 checksum; index updates are atomic (write‑to‑temp then rename).
 - Backups performance: creating a default backup for a typical instance (< 200 MB data) completes within a reasonable time on TKL; operations are streamed to avoid excessive temp space.
@@ -322,6 +322,7 @@ Permissions: Archives and indexes are created with secure defaults (dirs 0750, f
 - abssctl-app-specs.txt (this file): stored under docs/ requirements/.
 - Architecture Decision Records (ADRs) under docs/adrs/ (e.g., ADR‑001 Language/Framework [Python], ADR‑002 Docs/Man page pipeline, ADR‑003 Packaging).
 - Support Matrix: actual-support-matrix.rst (AUTO‑GENERATED from YAML via tools/gen_support_matrix.py).
+- Node Compatibility Matrix: docs/requirements/node-compatibility.rst (AUTO-GENERATED from ``node-compat.yaml`` via ``tools/list-sync-versions.py``).
 
 7.2 Python Doc Standards
 - Type hints everywhere; docstrings in Google or NumPy style; module headers include brief change log (last 10 entries) and link to global CHANGELOG.

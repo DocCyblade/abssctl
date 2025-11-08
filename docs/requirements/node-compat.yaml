@@ -1,0 +1,85 @@
+schema_version: 1
+generated_at: '2025-11-08T18:00:38.409119+00:00'
+package: '@actual-app/sync-server'
+source: https://registry.npmjs.org/%40actual-app%2Fsync-server
+limit: 12
+node_versions:
+- major: 18
+  min_patch: 18.17.0
+  status: supported
+  adr: ADR-018
+  notes: TKL Node.js image ships Node 18; abssctl targets this baseline.
+actual_versions:
+- version: 25.11.0
+  release_date: '2025-11-03'
+  node_constraint: null
+  node_major: null
+  npm_dist_tags:
+  - latest
+  status: untested
+  tested_at: null
+  notes: null
+- version: 25.10.0
+  release_date: '2025-10-02'
+  node_constraint: null
+  node_major: null
+  npm_dist_tags: []
+  status: untested
+  tested_at: null
+  notes: null
+- version: 25.9.0
+  release_date: '2025-09-03'
+  node_constraint: null
+  node_major: null
+  npm_dist_tags: []
+  status: untested
+  tested_at: null
+  notes: null
+- version: 25.8.0
+  release_date: '2025-08-02'
+  node_constraint: null
+  node_major: null
+  npm_dist_tags: []
+  status: untested
+  tested_at: null
+  notes: null
+- version: 25.7.1
+  release_date: '2025-07-03'
+  node_constraint: null
+  node_major: null
+  npm_dist_tags: []
+  status: untested
+  tested_at: null
+  notes: null
+- version: 25.7.0
+  release_date: '2025-07-01'
+  node_constraint: null
+  node_major: null
+  npm_dist_tags: []
+  status: untested
+  tested_at: null
+  notes: null
+- version: 25.6.0
+  release_date: '2025-06-04'
+  node_constraint: null
+  node_major: null
+  npm_dist_tags: []
+  status: untested
+  tested_at: null
+  notes: null
+- version: 25.6.1
+  release_date: '2025-06-04'
+  node_constraint: null
+  node_major: null
+  npm_dist_tags: []
+  status: untested
+  tested_at: null
+  notes: null
+- version: 25.5.0
+  release_date: '2025-05-03'
+  node_constraint: null
+  node_major: null
+  npm_dist_tags: []
+  status: untested
+  tested_at: null
+  notes: null

@@ -74,6 +74,7 @@ Roadmap to v1.0.0
       examples, and support matrix automation.
    b. Publish the release-notes template and update docs/requirements to reflect
       the frozen v1 feature set.
+   c. Maintain the new Node compatibility source of truth (``docs/requirements/node-compat.yaml`` + rendered RST) via ``tools/list-sync-versions.py`` so operators always see the latest Actual/Node matrix.
 
 8. Manual Integration Test Protocol (MITP) publication
 
