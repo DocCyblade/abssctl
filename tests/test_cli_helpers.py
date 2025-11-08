@@ -10,14 +10,13 @@ from types import SimpleNamespace
 import pytest
 import typer
 
+from abssctl.archive import compression_extension, create_archive
 from abssctl.backups import BackupError
 from abssctl.cli import (
     _build_backup_plan_context,
     _build_update_payload,
     _collect_backup_sources,
     _compose_backup_metadata,
-    _compression_extension,
-    _create_archive,
     _create_backup,
     _discover_backup_archives,
     _infer_backup_algorithm,
@@ -245,9 +244,9 @@ def test_resolve_backup_algorithm_rejects_invalid() -> None:
 
 def test_compression_extension_mappings() -> None:
     """Compression extension helper should map algorithms."""
-    assert _compression_extension("gzip") == "tar.gz"
-    assert _compression_extension("zstd") == "tar.zst"
-    assert _compression_extension("tar") == "tar"
+    assert compression_extension("gzip") == "tar.gz"
+    assert compression_extension("zstd") == "tar.zst"
+    assert compression_extension("tar") == "tar"
 
 
 def test_infer_backup_algorithm_from_entry_and_suffix(tmp_path: Path) -> None:
@@ -737,7 +736,7 @@ def test_create_archive_invokes_tar_with_gzip(
     archive = tmp_path / "backup.tar.gz"
     called: dict[str, object] = {}
 
-    monkeypatch.setattr("abssctl.cli.shutil.which", lambda cmd: "/usr/bin/tar")
+    monkeypatch.setattr("abssctl.archive.shutil.which", lambda cmd: "/usr/bin/tar")
 
     def fake_run(
         cmd: list[str],
@@ -750,12 +749,12 @@ def test_create_archive_invokes_tar_with_gzip(
         called["env"] = env
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    monkeypatch.setattr("abssctl.cli.subprocess.run", fake_run)
-    monkeypatch.setattr("abssctl.cli.os.chmod", lambda *args, **kwargs: None)
+    monkeypatch.setattr("abssctl.archive.subprocess.run", fake_run)
+    monkeypatch.setattr("abssctl.archive.os.chmod", lambda *args, **kwargs: None)
 
     source = tmp_path / "payload"
     (source / "data").mkdir(parents=True)
-    _create_archive(source, archive, "gzip", 9)
+    create_archive(source, archive, "gzip", 9)
 
     assert "/usr/bin/tar" in called["cmd"][0]
     assert "-czf" in called["cmd"]
@@ -767,15 +766,15 @@ def test_create_archive_raises_on_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Tar failures should raise BackupError with stderr context."""
-    monkeypatch.setattr("abssctl.cli.shutil.which", lambda cmd: "/usr/bin/tar")
+    monkeypatch.setattr("abssctl.archive.shutil.which", lambda cmd: "/usr/bin/tar")
 
     def fake_run(*args: object, **kwargs: object) -> SimpleNamespace:
         return SimpleNamespace(returncode=1, stdout="out", stderr="error")
 
-    monkeypatch.setattr("abssctl.cli.subprocess.run", fake_run)
+    monkeypatch.setattr("abssctl.archive.subprocess.run", fake_run)
 
     with pytest.raises(BackupError):
-        _create_archive(tmp_path / "payload", tmp_path / "backup.tar", "tar", None)
+        create_archive(tmp_path / "payload", tmp_path / "backup.tar", "tar", None)
 
 
 def test_build_backup_plan_context_serialises_sources(tmp_path: Path) -> None:

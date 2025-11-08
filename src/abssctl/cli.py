@@ -7,7 +7,6 @@ success code to keep automated smoke tests green.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
@@ -32,6 +31,7 @@ from rich.console import Console
 from rich.table import Table
 
 from . import __version__
+from . import archive as archive_utils
 from .backups import (
     BackupEntryBuilder,
     BackupError,
@@ -72,6 +72,7 @@ from .doctor import (
     create_probe_context,
 )
 from .doctor.repairs import RepairAction, plan_repairs
+from .doctor.utils import serialize_report
 from .locking import LockManager
 from .logging import OperationScope, StructuredLogger
 from .node_compat import (
@@ -93,6 +94,7 @@ from .providers import (
     VersionProvider,
 )
 from .state import StateRegistry, StateRegistryError
+from .support_bundle import SupportBundleBuilder, SupportBundleError
 from .templates import TemplateEngine
 from .tls import (
     TLSConfigurationError,
@@ -402,6 +404,25 @@ SYSTEM_INIT_REBUILD_STATE_OPTION = typer.Option(
     help="Rebuild registry/config state from discovery results (implies --discover).",
 )
 
+SUPPORT_BUNDLE_OUT_OPTION = typer.Option(
+    None,
+    "--out",
+    help="Directory or archive path for the support bundle (defaults to logs/support-bundles).",
+    file_okay=True,
+    dir_okay=True,
+    resolve_path=True,
+)
+SUPPORT_BUNDLE_NO_REDACT_OPTION = typer.Option(
+    False,
+    "--no-redact",
+    help="Include absolute paths without redaction.",
+)
+SUPPORT_BUNDLE_JSON_OPTION = typer.Option(
+    False,
+    "--json",
+    help="Emit support bundle metadata as JSON.",
+)
+
 _PROBE_CATEGORY_SET = frozenset(PROBE_CATEGORY_VALUES)
 _PROBE_STATUS_STYLE = {
     ProbeStatus.GREEN: "[green]PASS[/green]",
@@ -427,64 +448,6 @@ def _parse_probe_categories(raw: str | None) -> set[str]:
         return set()
     values = {part.strip().lower() for part in raw.split(",") if part.strip()}
     return values
-
-
-def _sanitize_doctor_payload(value: object) -> object:
-    """Sanitise doctor payload values for JSON/log contexts."""
-    if value is None:
-        return None
-    if isinstance(value, (str, int, float, bool)):
-        return value
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, Mapping):
-        return {str(key): _sanitize_doctor_payload(item) for key, item in value.items()}
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return [_sanitize_doctor_payload(item) for item in value]
-    return str(value)
-
-
-def _serialize_doctor_report(report: DoctorReport) -> dict[str, object]:
-    """Convert a doctor report into a JSON-serialisable mapping."""
-    totals = {
-        status.value: int(report.summary.totals.get(status, 0))
-        for status in ProbeStatus
-    }
-    summary_payload = {
-        "status": report.summary.status.value,
-        "impact": report.summary.impact.name.lower(),
-        "impact_code": report.summary.impact.value,
-        "exit_code": report.summary.exit_code,
-        "totals": totals,
-    }
-    results_payload: list[dict[str, object]] = []
-    for result in report.results:
-        result_payload: dict[str, object] = {
-            "id": result.id,
-            "category": result.category,
-            "status": result.status.value,
-            "impact": result.impact.name.lower(),
-            "impact_code": result.impact.value,
-            "message": result.message,
-        }
-        if result.remediation:
-            result_payload["remediation"] = result.remediation
-        if result.duration_ms is not None:
-            result_payload["duration_ms"] = result.duration_ms
-        if result.data:
-            result_payload["data"] = _sanitize_doctor_payload(result.data)
-        if result.warnings:
-            result_payload["warnings"] = list(result.warnings)
-        results_payload.append(result_payload)
-
-    metadata_payload = (
-        _sanitize_doctor_payload(report.metadata) if report.metadata else {}
-    )
-    return {
-        "summary": summary_payload,
-        "results": results_payload,
-        "metadata": metadata_payload,
-    }
 
 
 def _collect_status_identifiers(
@@ -1984,7 +1947,7 @@ def doctor(
 
         engine = DoctorEngine(context)
         report = engine.run(matched_probes, metadata=metadata)
-        report_payload = _serialize_doctor_report(report)
+        report_payload = serialize_report(report)
 
         if fix and not json_output:
             console.print(
@@ -2089,19 +2052,74 @@ def _apply_doctor_repairs(op: OperationScope, actions: Sequence[RepairAction]) -
 
 
 @app.command()
-def support_bundle(ctx: typer.Context) -> None:
-    """Create a diagnostic bundle for support cases (coming soon)."""
+def support_bundle(
+    ctx: typer.Context,
+    out: Path | None = SUPPORT_BUNDLE_OUT_OPTION,
+    no_redact: bool = SUPPORT_BUNDLE_NO_REDACT_OPTION,
+    json_output: bool = SUPPORT_BUNDLE_JSON_OPTION,
+) -> None:
+    """Create a diagnostic bundle with configs, logs, and doctor output."""
     runtime = _get_runtime(ctx)
-    message = "Support bundle generation is planned for the Beta milestone."
+    args_payload = {
+        "out": str(out) if out else None,
+        "redacted": not no_redact,
+        "json": json_output,
+    }
     with runtime.logger.operation(
         "support-bundle",
+        args=args_payload,
         target={"kind": "system", "scope": "support-bundle"},
     ) as op:
-        _placeholder(message)
-        op.warning(
-            "Support-bundle placeholder executed.",
-            warnings=["unimplemented"],
+        builder = SupportBundleBuilder(runtime, redacted=not no_redact)
+        try:
+            result = builder.build(out_path=out, op=op)
+        except SupportBundleError as exc:
+            error_payload: dict[str, object] = {"error": str(exc)}
+            op.error(
+                "Support bundle creation failed.",
+                errors=[str(exc)],
+                rc=4,
+            )
+            if json_output:
+                console.print(
+                    json.dumps(error_payload, indent=2),
+                    soft_wrap=True,
+                    overflow="ignore",
+                )
+            else:
+                console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=4) from exc
+
+        result_payload = {"result": result.to_payload()}
+        op.success(
+            "Support bundle created.",
+            context={"bundle": result_payload["result"]},
+            changed=1,
         )
+
+        if json_output:
+            console.print(
+                json.dumps(result_payload, indent=2),
+                soft_wrap=True,
+                overflow="ignore",
+            )
+            return
+
+        size_mib = result.size_bytes / (1024 * 1024)
+        mode = "redacted" if result.redacted else "unredacted"
+        console.print(
+            f"[green]Support bundle saved to {result.path} "
+            f"({size_mib:.2f} MiB, {mode}).[/green]"
+        )
+        console.print(f"Checksum (SHA-256): {result.checksum}")
+        doctor_summary = result.doctor_report.get("summary", {})
+        if doctor_summary:
+            console.print(
+                "Doctor summary: "
+                f"{doctor_summary.get('status')} "
+                f"(impact={doctor_summary.get('impact')}, "
+                f"exit={doctor_summary.get('exit_code')})."
+            )
 
 
 system_app = typer.Typer(help="Manage system bootstrap and recovery tasks.")
@@ -3556,7 +3574,7 @@ def _maybe_prompt_backup(
 
 def _detect_zstd_support() -> bool:
     """Return True when tar/zstd tooling is available."""
-    return shutil.which("tar") is not None and shutil.which("zstd") is not None
+    return archive_utils.detect_zstd_support()
 
 
 def _resolve_backup_algorithm(preference: str | None, default: str) -> str:
@@ -3572,11 +3590,7 @@ def _resolve_backup_algorithm(preference: str | None, default: str) -> str:
 
 def _compression_extension(algorithm: str) -> str:
     """Return the archive file extension for *algorithm*."""
-    if algorithm == "gzip":
-        return "tar.gz"
-    if algorithm == "zstd":
-        return "tar.zst"
-    return "tar"
+    return archive_utils.compression_extension(algorithm)
 
 
 def _collect_backup_sources(
@@ -3660,63 +3674,17 @@ def _create_archive(
     compression_level: int | None,
 ) -> None:
     """Create an archive from *source_dir* at *archive_path*."""
-    tar_bin = shutil.which("tar")
-    if tar_bin is None:
-        raise BackupError("The 'tar' command is required to create backups.")
-
-    env = os.environ.copy()
-    cmd: list[str] = [tar_bin]
-
-    if algorithm == "gzip":
-        cmd.extend(["-czf", str(archive_path)])
-        if compression_level is not None:
-            env["GZIP"] = f"-{compression_level}"
-    elif algorithm == "zstd":
-        cmd.extend(["--zstd", "-cf", str(archive_path)])
-        if compression_level is not None:
-            env["ZSTD_CLEVEL"] = str(compression_level)
-    else:
-        cmd.extend(["-cf", str(archive_path)])
-
-    cmd.extend(["-C", str(source_dir.parent), source_dir.name])
-
-    result = subprocess.run(  # noqa: S603, S607 - controlled command
-        cmd,
-        capture_output=True,
-        text=True,
-        env=env,
-        check=False,
-    )
-    if result.returncode != 0:
-        message = result.stderr or result.stdout or "tar command failed"
-        raise BackupError(message.strip())
-
-    try:
-        os.chmod(archive_path, 0o640)
-    except OSError:
-        pass
+    archive_utils.create_archive(source_dir, archive_path, algorithm, compression_level)
 
 
 def _compute_checksum(path: Path) -> str:
     """Return the SHA-256 checksum for *path*."""
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            if not chunk:
-                break
-            digest.update(chunk)
-    return digest.hexdigest()
+    return archive_utils.compute_checksum(path)
 
 
 def _write_checksum_file(archive_path: Path, checksum: str) -> Path:
     """Write ``<archive>.sha256`` and return the checksum path."""
-    checksum_path = archive_path.with_name(f"{archive_path.name}.sha256")
-    checksum_path.write_text(f"{checksum}  {archive_path.name}\n", encoding="utf-8")
-    try:
-        os.chmod(checksum_path, 0o640)
-    except OSError:
-        pass
-    return checksum_path
+    return archive_utils.write_checksum_file(archive_path, checksum)
 
 
 def _build_backup_plan_context(

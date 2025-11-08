@@ -132,8 +132,13 @@ Non‑Goals for v1.0
   report, while ``--fix`` now applies safe remediations (state-directory rebuild, registry file/permission repair, stale-lock cleanup). Use
   ``--dry-run`` to preview planned repairs and ``--yes`` for automated confirmation. Validation failures advise running
   ``abssctl system init --rebuild-state`` when mismatches are detected; exit codes follow ADR-013.
-- abssctl support-bundle [--no-redact] [--out PATH]
-  Collects configs, logs, versions, doctor output into a tarball; redacts sensitive paths by default can include if requested. Supports --json to print bundle metadata (path, size, redaction status).
+- abssctl support-bundle [--no-redact] [--out PATH] [--json]
+  Captures a redacted diagnostics archive (config summary, registry snapshots, abssctl logs,
+  and a fresh doctor report) into ``logs/support-bundles/support-bundle-<ts>.tar.{zst|gz}``.
+  Bundles default to redacting absolute paths/secrets and enforce a 50 MB cap with per-log
+  truncation; ``--no-redact`` preserves full paths for internal hand-offs. ``--out`` accepts either
+  a destination directory or explicit archive path, while ``--json`` emits bundle metadata
+  (path, checksum, algorithm, redaction mode, doctor summary) for automation workflows.
 - abssctl backup create <instance> [--message|-m <text>] [--label <str>] [--data-only] [--out-dir PATH] [--compression {auto,zstd,gzip,none}] [--compression-level N] [--json]
   Creates a point-in-time backup archive for the specified instance, recording a free‑text message and metadata into the global index. Default contents include the instance data dir, systemd unit, and nginx vhost. Writes a checksum alongside the archive.
 - abssctl backup list [<instance>] [--json]

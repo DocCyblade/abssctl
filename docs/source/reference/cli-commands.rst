@@ -194,7 +194,7 @@ TLS Commands
 System Diagnostics & Backups
 ============================
 
-``abssctl doctor`` and ``abssctl support-bundle``
+``abssctl doctor``
    ``doctor`` wires the ADR-029 health-check engine and emits both human and
    JSON summaries (via ``--json``). ``--only``/``--exclude`` accept
    comma-separated probe categories (``env``, ``config``, ``state``, ``fs``,
@@ -208,6 +208,17 @@ System Diagnostics & Backups
    ``--yes`` for fully non-interactive runs. The state probes cross-check the
    registry against filesystem discovery and recommend ``abssctl system init
    --rebuild-state`` whenever mismatches are detected.
+
+``abssctl support-bundle [--no-redact] [--out PATH] [--json]``
+   Creates a diagnostics archive that includes a redacted config summary, registry
+   snapshots, recent ``abssctl`` logs (with per-file truncation), and a freshly
+   generated doctor report. Bundles default to ``logs/support-bundles`` and prefer
+   ``.tar.zst`` when zstd is available, falling back to ``.tar.gz``. ``--no-redact``
+   preserves absolute paths for internal-only bundles, ``--out`` accepts either a
+   destination directory or explicit archive path, and ``--json`` emits the bundle
+   metadata (path, checksum, algorithm, redaction mode, doctor summary). A built-in
+   size cap (50 MB by default) guards against oversized log captures; exceeding the
+   limit aborts the command with actionable guidance.
 
 ``abssctl backup create <instance> [--message TEXT] [--label LABELS] [--data-only] [--out-dir PATH] [--compression {auto,zstd,gzip,none}] [--compression-level N] [--json] [--dry-run]``
    Captures an instance snapshot beneath the configured backup root (defaults to

@@ -8,8 +8,9 @@ from typing import Any
 
 import pytest
 
-from abssctl.cli import _render_doctor_report, _sanitize_doctor_payload, _serialize_doctor_report
+from abssctl.cli import _render_doctor_report
 from abssctl.doctor import DoctorImpact, DoctorReport, DoctorSummary, ProbeResult, ProbeStatus
+from abssctl.doctor.utils import serialize_report
 
 
 class _Unserialisable:
@@ -45,29 +46,6 @@ def _build_report(*results: ProbeResult, metadata: dict[str, Any] | None = None)
     return DoctorReport(results=results, summary=summary, metadata=metadata)
 
 
-def test_sanitize_doctor_payload_handles_paths_and_objects(tmp_path: Path) -> None:
-    """Non-serialisable doctor payload values should become JSON-safe."""
-    payload = {
-        tmp_path / "key.pem": tmp_path,
-        "values": [
-            Path("logs"),
-            {"set": {1, 2}},
-            _Unserialisable(),
-        ],
-    }
-
-    result = _sanitize_doctor_payload(payload)
-
-    assert result == {
-        str(tmp_path / "key.pem"): str(tmp_path),
-        "values": [
-            str(Path("logs")),
-            {"set": "{1, 2}"},
-            "<unserialisable>",
-        ],
-    }
-
-
 def test_serialize_doctor_report_includes_sanitised_results(tmp_path: Path) -> None:
     """Serialisation should emit human/JSON friendly structures."""
     red_result = ProbeResult(
@@ -92,10 +70,20 @@ def test_serialize_doctor_report_includes_sanitised_results(tmp_path: Path) -> N
     report = _build_report(
         red_result,
         yellow_result,
-        metadata={"paths": {Path("/var/lib"): Path("/tmp")}},
+        metadata={
+            "paths": {Path("/var/lib"): Path("/tmp")},
+            "misc": {
+                tmp_path / "key.pem": tmp_path,
+                "values": [
+                    Path("logs"),
+                    {"set": {1, 2}},
+                    _Unserialisable(),
+                ],
+            },
+        },
     )
 
-    payload = _serialize_doctor_report(report)
+    payload = serialize_report(report)
 
     assert payload["summary"]["status"] == "red"
     assert payload["summary"]["exit_code"] == DoctorImpact.VALIDATION.value
@@ -104,7 +92,15 @@ def test_serialize_doctor_report_includes_sanitised_results(tmp_path: Path) -> N
         "path": str(tmp_path),
         "warnings": ["note"],
     }
-    assert payload["metadata"] == {"paths": {"/var/lib": "/tmp"}}
+    assert payload["metadata"]["paths"] == {"/var/lib": "/tmp"}
+    assert payload["metadata"]["misc"] == {
+        str(tmp_path / "key.pem"): str(tmp_path),
+        "values": [
+            str(Path("logs")),
+            {"set": "{1, 2}"},
+            "<unserialisable>",
+        ],
+    }
 
 
 def test_render_doctor_report_outputs_expected_sections(monkeypatch: pytest.MonkeyPatch) -> None:

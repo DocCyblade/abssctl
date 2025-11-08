@@ -50,6 +50,10 @@
 - 11/08/2025 18:50:00: Implemented the doctor repair planner/executor, added CLI prompts/options, documentation updates, and regression tests; `make quick-tests` now passes with the new behaviour.
 - 11/08/2025 19:00:00: Prepped for next chat by refreshing the TODO list and session primer (support-bundle focus next).
 - 11/08/2025 17:25:00: Added configurable `node_compat_file` support, refreshed tests/docs, and revalidated with `make quick-tests` after polishing the new probes + CLI.
+- 11/08/2025 20:05:00: Reviewed ADR-012/spec targets and drafted the support-bundle collection/redaction/size-limit plan with CLI/JSON expectations for Doc’s approval.
+- 11/08/2025 20:45:00: Added shared archive helpers, the new `support_bundle` builder (manifest, doctor capture, redaction map, bundle cap), and wired `support-bundle --out/--no-redact/--json` into the CLI with structured logging.
+- 11/08/2025 21:20:00: Replaced the placeholder test suite with real CLI coverage (archive extraction, redaction toggles, size-limit failure), refreshed docs/specs, and prepared to rerun `make quick-tests`.
+- 11/08/2025 21:55:00: `make quick-tests` hit the sandbox timeout, so I ran the underlying `ruff check`, `mypy src`, and `pytest -m "not slow"` individually—everything passed on the refreshed support-bundle implementation.
 
 ## Wrap up:
 - (in progress)
@@ -57,11 +61,10 @@
 -----------------------------------------
 
 # Next Steps / TODO:
-0. Implement the support-bundle command (collection, redaction, size limits) and document secure hand-off workflows.
-1. Harden CLI exit-code/error mapping to align with ADR-013, expanding regression tests + user messaging.
-2. Close out targeted mutation survivors (CLI doctor helpers, doctor engine/probes, TLS inspector/validator) and keep the scoped mutmut suite stable.
-3. Build the docs packaging pipeline: generate/publish man pages via CI and add ``abssctl docs man install|path`` helpers.
-4. Add shell completion management (show/install/uninstall for bash/zsh/fish) with packaged scripts and tests.
+0. Harden CLI exit-code/error mapping to align with ADR-013, expanding regression tests + user messaging.
+1. Close out targeted mutation survivors (CLI doctor helpers, doctor engine/probes, TLS inspector/validator) and keep the scoped mutmut suite stable.
+2. Build the docs packaging pipeline: generate/publish man pages via CI and add ``abssctl docs man install|path`` helpers.
+3. Add shell completion management (show/install/uninstall for bash/zsh/fish) with packaged scripts and tests.
 
 # Next Session Primer
-- Pick up the ``support-bundle create`` work next: design the data collection/redaction plan, wire the CLI skeleton, and outline tests/docs so we can ship it immediately after the new doctor fixes. Once the bundle basics are in place, circle back to the exit-code hardening backlog.
+- Shift focus to the exit-code hardening backlog: audit CLI/doctor/backup/tls surfaces against ADR-013, tighten messaging/tests, then resume the mutation-survivor triage before tackling docs packaging + completion helpers.

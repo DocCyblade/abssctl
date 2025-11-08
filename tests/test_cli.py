@@ -10,6 +10,7 @@ import os
 import pwd
 import shutil
 import subprocess
+import tarfile
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -24,7 +25,7 @@ from typer.testing import CliRunner, Result
 
 from abssctl import __version__
 from abssctl.backups import BackupEntryBuilder, BackupsRegistry
-from abssctl.cli import app
+from abssctl.cli import RuntimeContext, app
 from abssctl.providers.nginx import NginxProvider
 from abssctl.providers.systemd import SystemdError, SystemdProvider
 from abssctl.providers.version_installer import (
@@ -1753,22 +1754,94 @@ def test_version_check_updates_remote_unavailable_json(
     assert payload["message"].startswith("Unable to retrieve versions for demo")
 
 
-def test_support_bundle_placeholder_warns(tmp_path: Path) -> None:
-    """`support-bundle` placeholder emits warning and logs the operation."""
+def _extract_bundle(archive_path: Path, dest: Path) -> Path:
+    """Extract *archive_path* into *dest* and return the bundle root."""
+    dest.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(archive_path, mode="r:*") as bundle:
+        bundle.extractall(dest)
+    return dest / "support-bundle"
+
+
+def test_support_bundle_creates_redacted_archive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """support-bundle should emit a redacted archive with manifest + doctor report."""
+    env, _ = _prepare_environment(tmp_path)
+    monkeypatch.setattr("abssctl.archive.detect_zstd_support", lambda: False)
+
+    result = runner.invoke(app, ["support-bundle", "--json"], env=env)
+
+    assert result.exit_code == 0, result.stdout
+    payload = _extract_json(result.stdout)
+    bundle_info = payload["result"]
+    archive_path = Path(bundle_info["path"])
+    assert archive_path.exists()
+    extracted_root = _extract_bundle(archive_path, tmp_path / "bundle")
+
+    manifest_path = extracted_root / "manifest.json"
+    doctor_path = extracted_root / "doctor" / "report.json"
+    assert manifest_path.exists()
+    assert doctor_path.exists()
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["redacted"] is True
+    assert manifest["config"]["state_dir"].startswith("<STATE_DIR>")
+    assert any(entry["path"] == "doctor/report.json" for entry in manifest["files"])
+
+    doctor_payload = json.loads(doctor_path.read_text(encoding="utf-8"))
+    assert doctor_payload["summary"]["status"] in {"green", "yellow", "red"}
+    assert "results" in doctor_payload
+
+
+def test_support_bundle_honours_no_redact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--no-redact should preserve absolute paths in the manifest."""
     env, state_dir = _prepare_environment(tmp_path)
+    monkeypatch.setattr("abssctl.archive.detect_zstd_support", lambda: False)
+
+    result = runner.invoke(app, ["support-bundle", "--no-redact", "--json"], env=env)
+
+    assert result.exit_code == 0, result.stdout
+    payload = _extract_json(result.stdout)
+    archive_path = Path(payload["result"]["path"])
+    extracted_root = _extract_bundle(archive_path, tmp_path / "bundle-no-redact")
+    manifest = json.loads((extracted_root / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["redacted"] is False
+    assert manifest["config"]["state_dir"] == str(state_dir)
+
+
+def test_support_bundle_aborts_when_size_limit_exceeded(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Builder should abort and return rc=4 when bundle exceeds size cap."""
+    env, state_dir = _prepare_environment(tmp_path)
+    logs_dir = state_dir.parent / "logs"
+    big_log = logs_dir / "abssctl.log"
+    big_log.write_text("X" * (1024 * 4), encoding="utf-8")
+
+    monkeypatch.setattr("abssctl.archive.detect_zstd_support", lambda: False)
+
+    from abssctl import support_bundle as sb
+
+    class TinyBundleBuilder(sb.SupportBundleBuilder):
+        def __init__(self, runtime: RuntimeContext, redacted: bool = True) -> None:
+            super().__init__(
+                runtime,
+                redacted=redacted,
+                max_bundle_bytes=1024,
+                max_log_bytes=256,
+            )
+
+    monkeypatch.setattr("abssctl.cli.SupportBundleBuilder", TinyBundleBuilder)
 
     result = runner.invoke(app, ["support-bundle"], env=env)
 
-    assert result.exit_code == 0
-    assert "Support bundle generation is planned" in result.stdout
-
-    logs_dir = state_dir.parent / "logs"
-    operations_file = logs_dir / "operations.jsonl"
-    record = json.loads(operations_file.read_text(encoding="utf-8").splitlines()[-1])
-    assert record["command"] == "support-bundle"
-    result_block = record["result"]
-    assert result_block["status"] == "warning"
-    assert result_block["warnings"] == ["unimplemented"]
+    assert result.exit_code == 4
+    assert "size limit" in result.stdout.lower()
 
 
 def test_version_check_updates_handles_remote_failure(
