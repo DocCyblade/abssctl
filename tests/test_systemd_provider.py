@@ -52,6 +52,7 @@ def _context(instance: str) -> dict[str, Any]:
         "service_user": "actual-sync",
         "working_directory": f"/srv/app/{instance}",
         "exec_start": "/usr/bin/node server.js",
+        "environment_file": "/etc/default/abssctl-node",
         "environment": [
             "NODE_ENV=production",
             f"ABSSCTL_INSTANCE={instance}",

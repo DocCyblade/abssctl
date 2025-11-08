@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import secrets
+import shlex
 import shutil
 import subprocess
 import sys
@@ -102,6 +103,9 @@ from .tls import (
 )
 
 console = Console()
+
+NODE_WRAPPER_PATH = Path("/usr/local/bin/abssctl-node-run")
+NODE_ENV_FILE_PATH = Path("/etc/default/abssctl-node")
 
 CONFIG_FILE_OPTION = typer.Option(
     None,
@@ -1432,12 +1436,14 @@ def _build_systemd_context(
         f"ABSSCTL_DATA_DIR={paths.data}",
         f"ABSSCTL_VERSION={version}",
     ]
+    exec_command = f"{shlex.quote(str(NODE_WRAPPER_PATH))} {shlex.quote(str(exec_path))}"
     return {
         "instance_name": instance,
         "service_user": config.service_user,
         "working_directory": str(paths.root),
-        "exec_start": str(exec_path),
+        "exec_start": exec_command,
         "environment": environment,
+        "environment_file": str(NODE_ENV_FILE_PATH),
     }
 
 

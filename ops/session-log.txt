@@ -43,6 +43,9 @@
 - 11/08/2025 16:35:00: Added packaged node-compat data, the Node compatibility loader/runtime helpers, and the `tools/abssctl-node-run.sh` wrapper script for systemd usage.
 - 11/08/2025 16:55:00: Delivered `abssctl node ensure`, doctor node-version probe/warnings, updated docs (spec/roadmap/manual context), and comprehensive tests covering the new workflow.
 - 11/08/2025 17:10:00: Re-ran `make quick-tests` to validate the expanded Node compatibility tooling + CLI changes.
+- 11/08/2025 17:35:00: Updated the systemd template + CLI context so every unit sources `/etc/default/abssctl-node` and execs `/usr/local/bin/abssctl-node-run`, matching the compatibility plan.
+- 11/08/2025 17:45:00: Refreshed the manual install script/plan/spec to install the official wrapper and run `abssctl node ensure`, then reinstalled docs/tests + `make quick-tests`.
+- 11/08/2025 17:55:00: Retired `ops/node-compat-plan.md` (tasks are now baked into docs + tooling) and updated TODO/primer references.
 - 11/08/2025 17:25:00: Added configurable `node_compat_file` support, refreshed tests/docs, and revalidated with `make quick-tests` after polishing the new probes + CLI.
 
 ## Wrap up:
@@ -51,7 +54,7 @@
 -----------------------------------------
 
 # Next Steps / TODO:
-0. Read `ops/node-compat-plan.md` for the active Node compatibility/`n` wrapper tasks before picking up other roadmap items.
+0. Review `docs/requirements/node-compatibility.rst` / `docs/requirements/node-compat.yaml` to keep Node runtime expectations in sync before tackling other roadmap items.
 1. Ship ``doctor --fix`` auto-remediation (state dir repair, permission cleanup, lock pruning) with dry-run/telemetry plus wrap-up docs/tests.
 2. Implement the support-bundle command (collection, redaction, size limits) and document secure hand-off workflows.
 3. Harden CLI exit-code/error mapping to align with ADR-013, expanding regression tests + user messaging.
@@ -60,4 +63,4 @@
 6. Add shell completion management (show/install/uninstall for bash/zsh/fish) with packaged scripts and tests.
 
 # Next Session Primer
-- Start by reviewing `ops/node-compat-plan.md` so the Node/runtime tasks stay front-of-mind, then design/implement ``doctor --fix`` auto-remediation (state dir/permissions/locks) before rolling directly into the support-bundle CLI work.
+- Start by reviewing `docs/requirements/node-compatibility.rst` (Node/runtime baseline) and then design/implement ``doctor --fix`` auto-remediation (state dir/permissions/locks) before rolling directly into the support-bundle CLI work.

@@ -17,6 +17,7 @@ def test_render_to_string_uses_builtin_templates(tmp_path: Path) -> None:
             "service_user": "actual-sync",
             "working_directory": "/srv/app/alpha",
             "exec_start": "/usr/bin/node server.js",
+            "environment_file": "/etc/default/abssctl-node",
             "environment": ["NODE_ENV=production"],
         },
     )
@@ -38,6 +39,7 @@ def test_render_to_path_writes_with_mode(tmp_path: Path) -> None:
             "service_user": "actual-sync",
             "working_directory": "/srv/app/beta",
             "exec_start": "/usr/bin/node server.js",
+            "environment_file": "/etc/default/abssctl-node",
             "environment": ["NODE_ENV=production"],
         },
         mode=0o600,
@@ -56,6 +58,7 @@ def test_render_to_path_writes_with_mode(tmp_path: Path) -> None:
             "service_user": "actual-sync",
             "working_directory": "/srv/app/beta",
             "exec_start": "/usr/bin/node server.js",
+            "environment_file": "/etc/default/abssctl-node",
             "environment": ["NODE_ENV=production"],
         },
         mode=0o600,
@@ -80,6 +83,7 @@ def test_override_path_takes_precedence(tmp_path: Path) -> None:
             "service_user": "actual-sync",
             "working_directory": "/srv/app/gamma",
             "exec_start": "/usr/bin/node server.js",
+            "environment_file": "/etc/default/abssctl-node",
             "environment": [],
         },
     )

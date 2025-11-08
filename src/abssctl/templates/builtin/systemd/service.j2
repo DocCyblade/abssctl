@@ -5,6 +5,9 @@ After=network.target
 [Service]
 Type=simple
 User={{ service_user }}
+{% if environment_file %}
+EnvironmentFile={{ environment_file }}
+{% endif %}
 WorkingDirectory={{ working_directory }}
 ExecStart={{ exec_start }}
 Restart=on-failure
