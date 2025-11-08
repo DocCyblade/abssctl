@@ -54,6 +54,8 @@
 - 11/08/2025 20:45:00: Added shared archive helpers, the new `support_bundle` builder (manifest, doctor capture, redaction map, bundle cap), and wired `support-bundle --out/--no-redact/--json` into the CLI with structured logging.
 - 11/08/2025 21:20:00: Replaced the placeholder test suite with real CLI coverage (archive extraction, redaction toggles, size-limit failure), refreshed docs/specs, and prepared to rerun `make quick-tests`.
 - 11/08/2025 21:55:00: `make quick-tests` hit the sandbox timeout, so I ran the underlying `ruff check`, `mypy src`, and `pytest -m "not slow"` individually—everything passed on the refreshed support-bundle implementation.
+- 11/08/2025 22:15:00: Introduced `ExitCode` helpers, hardened backup list/show/verify/prune/restore to treat registry read failures as rc=3, and taught the support-bundle builder/CLI to distinguish env (size limit/tooling) vs provider (tar failure) exits per ADR-013.
+- 11/08/2025 22:40:00: Extended CLI tests (backup index corruption, support-bundle tar/tooling cases), updated docs/README to call out the clarified exit codes, and re-ran ruff/mypy/pytest (all green).
 
 ## Wrap up:
 - (in progress)
@@ -61,10 +63,9 @@
 -----------------------------------------
 
 # Next Steps / TODO:
-0. Harden CLI exit-code/error mapping to align with ADR-013, expanding regression tests + user messaging.
-1. Close out targeted mutation survivors (CLI doctor helpers, doctor engine/probes, TLS inspector/validator) and keep the scoped mutmut suite stable.
-2. Build the docs packaging pipeline: generate/publish man pages via CI and add ``abssctl docs man install|path`` helpers.
-3. Add shell completion management (show/install/uninstall for bash/zsh/fish) with packaged scripts and tests.
+0. Close out targeted mutation survivors (CLI doctor helpers, doctor engine/probes, TLS inspector/validator) and keep the scoped mutmut suite stable.
+1. Build the docs packaging pipeline: generate/publish man pages via CI and add ``abssctl docs man install|path`` helpers.
+2. Add shell completion management (show/install/uninstall for bash/zsh/fish) with packaged scripts and tests.
 
 # Next Session Primer
-- Shift focus to the exit-code hardening backlog: audit CLI/doctor/backup/tls surfaces against ADR-013, tighten messaging/tests, then resume the mutation-survivor triage before tackling docs packaging + completion helpers.
+- Shift focus to mutation reliability closure next (target the remaining doctor/TLS/CLI survivors and tighten the scoped mutmut suite), then move on to the docs packaging pipeline and completion helpers once the mutation work lands.

@@ -15,6 +15,7 @@ from . import archive as archive_utils
 from .backups import BackupError
 from .doctor import DoctorEngine, collect_probes, create_probe_context
 from .doctor.utils import serialize_report
+from .exit_codes import ExitCode
 
 if TYPE_CHECKING:
     from .cli import RuntimeContext
@@ -36,6 +37,11 @@ LOG_PATTERNS = (
 
 class SupportBundleError(RuntimeError):
     """Raised when support bundle creation fails."""
+
+    def __init__(self, message: str, *, exit_code: ExitCode = ExitCode.PROVIDER) -> None:
+        """Persist the failure message and exit code."""
+        super().__init__(message)
+        self.exit_code = exit_code
 
 
 @dataclass(slots=True)
@@ -162,6 +168,7 @@ class SupportBundleBuilder:
                 raise SupportBundleError(
                     "Support bundle exceeds the configured size limit "
                     f"({size_bytes} bytes > {self._max_bundle_bytes}).",
+                    exit_code=ExitCode.ENVIRONMENT,
                 )
 
             return SupportBundleResult(
@@ -176,7 +183,10 @@ class SupportBundleBuilder:
             )
         except BackupError as exc:
             # Promote archive errors to support bundle failures for clearer messaging.
-            raise SupportBundleError(str(exc)) from exc
+            raise SupportBundleError(
+                str(exc),
+                exit_code=self._classify_archive_error(exc),
+            ) from exc
         finally:
             shutil.rmtree(staging_root, ignore_errors=True)
 
@@ -235,7 +245,8 @@ class SupportBundleBuilder:
         if self._staged_bytes > self._max_bundle_bytes:
             raise SupportBundleError(
                 "Support bundle contents exceed the configured size limit "
-                f"({self._staged_bytes} bytes > {self._max_bundle_bytes})."
+                f"({self._staged_bytes} bytes > {self._max_bundle_bytes}).",
+                exit_code=ExitCode.ENVIRONMENT,
             )
 
     def _collect_config(self, payload_root: Path, manifest: dict[str, Any]) -> None:
@@ -393,3 +404,10 @@ class SupportBundleBuilder:
             key: value for key, value in replacements.items() if key
         }
         return self._redaction_cache
+
+    def _classify_archive_error(self, exc: BackupError) -> ExitCode:
+        """Return the exit code to use for archive-related failures."""
+        message = str(exc).lower()
+        if ("tar" in message and "required" in message) or "zstd" in message:
+            return ExitCode.ENVIRONMENT
+        return ExitCode.PROVIDER

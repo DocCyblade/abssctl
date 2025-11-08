@@ -22,31 +22,23 @@ Completed Phases
 4. Beta — Backup/TLS/doctor/system-init commands shipped together with
    idempotent test coverage and CLI safety flags.
 
+Recently Completed Milestones
+=============================
+
+- Doctor auto-remediation (``doctor --fix``) now delivers real repair planning +
+  execution, including dry-run previews, confirmation prompts, and regression
+  tests documenting the guardrails.
+- The support-bundle command ships with redaction, size limits, secure hand-off
+  guidance, and CLI/JSON integration so operators can gather diagnostics on
+  demand.
+- Exit-code & error mapping was hardened across CLI surfaces (backups, doctor,
+  support-bundle), aligning every failure path with ADR-013 semantics and
+  updating docs/tests accordingly.
+
 Roadmap to v1.0.0
 =================
 
-1. Doctor auto-remediation (``doctor --fix``)
-
-   a. Deliver safe repair actions (state-directory rebuilds, permission fixes,
-      stale-lock cleanup) with dry-run previews and telemetry.
-   b. Add regression tests + docs describing guardrails, logging, and rollback
-      expectations.
-
-2. Support-bundle command
-
-   a. Implement ``support-bundle create`` that collects configs, registries,
-      logs, and probe output with redaction and size limits.
-   b. Integrate bundles with doctor/support workflows and document secure
-      transfer guidance.
-
-3. Exit-code & error mapping hardening
-
-   a. Audit CLI/doctor/backups/TLS surfaces to map failures to ADR-013 exit
-      codes with consistent messaging.
-   b. Expand unit/integration tests for representative error paths and update
-      troubleshooting docs.
-
-4. Mutation reliability closure
+1. Mutation reliability closure
 
    a. Target the remaining TLS inspector/validator, doctor engine, and CLI
       survivor clusters with focused coverage; document intentional exclusion
@@ -54,21 +46,21 @@ Roadmap to v1.0.0
    b. Finish timeout mitigation so the scoped mutmut suite can run in CI, and
       constrain mutation testing to the high-impact subsystems listed above.
 
-5. Documentation packaging pipeline
+2. Documentation packaging pipeline
 
    a. Generate Sphinx man pages in CI, ensure they ship in wheels/sdists, and
       provide ``abssctl docs man install|path`` helpers.
    b. Wire documentation builds into release artifacts (HTML/PDF/man) with
       checksum verification.
 
-6. Shell completion management
+3. Shell completion management
 
    a. Add ``abssctl completion show|install|uninstall`` leveraging Typer’s
       completion hooks for bash/zsh/fish.
    b. Package completion scripts in the distribution and add smoke tests covering
       install/uninstall flows.
 
-7. Admin & developer documentation final pass
+4. Admin & developer documentation final pass
 
    a. Finalise README, CHANGELOG, Admin Guide, Developer Guide, sudoers
       examples, and support matrix automation.
@@ -76,35 +68,35 @@ Roadmap to v1.0.0
       the frozen v1 feature set.
    c. Maintain the new Node compatibility source of truth (``docs/requirements/node-compat.yaml`` + rendered RST) via ``tools/list-sync-versions.py`` so operators always see the latest Actual/Node matrix.
 
-8. Manual Integration Test Protocol (MITP) publication
+5. Manual Integration Test Protocol (MITP) publication
 
    a. Publish MITP checklists + scripts, covering install, upgrade, backup,
       TLS, doctor, and support-bundle scenarios.
    b. Integrate critical MITP smoke tests into CI (or a nightly job) with
       documented pass/fail gating.
 
-9. CI/CD release automation
+6. CI/CD release automation
 
    a. Extend CI to run packaging smoke tests, build support bundles, and stage
       release artifacts (wheel, sdist, manpage tarball, completion scripts).
    b. Add automation to push signed artifacts to staging buckets and validate
       installation on clean environments.
 
-10. System validation & MITP execution
+7. System validation & MITP execution
 
     a. Run the MITP on current TurnKey Linux Node.js appliances plus the ten
        supported back versions, updating the support matrix.
     b. Capture structured logs/support bundles for each run to aid future
        troubleshooting.
 
-11. Release-candidate burn-in & rollback drills
+8. Release-candidate burn-in & rollback drills
 
     a. Perform extended burn-in on RC builds covering upgrade/rollback,
        backups, TLS, doctor, and support-bundle flows.
     b. Document gating criteria and residual risks, feeding results back into
        docs and CI dashboards.
 
-12. GA launch & communications
+9. GA launch & communications
 
     a. Final documentation sign-off, PyPI release from ``main``, tagged GitHub
        release (with artifacts), and docs site refresh.

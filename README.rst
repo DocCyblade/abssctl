@@ -120,7 +120,9 @@ CLI Conventions
   (auto-confirm prompts for non-interactive workflows).
 - Exit codes follow ADR-013 across the tool: ``0`` success, ``2`` validation or
   user input issues, ``3`` environment errors (permissions, missing files,
-  insufficient disk), and ``4`` provider/system failures (systemd/nginx/TLS).
+  insufficient disk, unreadable backup indexes, missing ``tar``/``zstd`` during
+  bundle creation), and ``4`` provider/system failures (systemd/nginx/TLS/tar
+  execution errors).
 
 Backups
 =======

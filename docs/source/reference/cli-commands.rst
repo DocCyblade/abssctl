@@ -218,7 +218,9 @@ System Diagnostics & Backups
    destination directory or explicit archive path, and ``--json`` emits the bundle
    metadata (path, checksum, algorithm, redaction mode, doctor summary). A built-in
    size cap (50 MB by default) guards against oversized log captures; exceeding the
-   limit aborts the command with actionable guidance.
+   limit or missing `tar`/`zstd` tooling aborts with exit code ``3`` (environment),
+   while tar execution failures bubble up as exit code ``4`` (provider), matching
+   ADR-013 expectations.
 
 ``abssctl backup create <instance> [--message TEXT] [--label LABELS] [--data-only] [--out-dir PATH] [--compression {auto,zstd,gzip,none}] [--compression-level N] [--json] [--dry-run]``
    Captures an instance snapshot beneath the configured backup root (defaults to
@@ -237,6 +239,8 @@ System Diagnostics & Backups
 ``abssctl backup list [--instance NAME] [--json]``
    Reads ``backups.json`` and displays the known backups in a table or JSON. Use
    ``--instance`` to filter for a specific instance.
+   Registry corruption or permission issues surface as exit code ``3`` so automation
+   can distinguish environment problems from validation errors.
 
 ``abssctl backup show <ID> [--json]``
    Prints detailed metadata for a single backup entry, including checksum information

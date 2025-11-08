@@ -73,6 +73,7 @@ from .doctor import (
 )
 from .doctor.repairs import RepairAction, plan_repairs
 from .doctor.utils import serialize_report
+from .exit_codes import ExitCode
 from .locking import LockManager
 from .logging import OperationScope, StructuredLogger
 from .node_compat import (
@@ -1459,13 +1460,14 @@ def _command_error(
     op: OperationScope,
     message: str,
     *,
-    rc: int = 2,
+    rc: int | ExitCode = ExitCode.VALIDATION,
     errors: Sequence[str] | None = None,
 ) -> NoReturn:
     """Emit a structured error and terminate the command."""
+    rc_value = int(rc)
     console.print(f"[red]{message}[/red]")
-    op.error(message, errors=list(errors or [message]), rc=rc)
-    raise typer.Exit(code=rc)
+    op.error(message, errors=list(errors or [message]), rc=rc_value)
+    raise typer.Exit(code=rc_value)
 
 
 def _dry_run_complete(
@@ -2075,10 +2077,11 @@ def support_bundle(
             result = builder.build(out_path=out, op=op)
         except SupportBundleError as exc:
             error_payload: dict[str, object] = {"error": str(exc)}
+            rc_value = int(getattr(exc, "exit_code", ExitCode.PROVIDER))
             op.error(
                 "Support bundle creation failed.",
                 errors=[str(exc)],
-                rc=4,
+                rc=rc_value,
             )
             if json_output:
                 console.print(
@@ -2088,7 +2091,7 @@ def support_bundle(
                 )
             else:
                 console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(code=4) from exc
+            raise typer.Exit(code=rc_value) from exc
 
         result_payload = {"result": result.to_payload()}
         op.success(
@@ -5627,16 +5630,18 @@ def backup_list(
             entries = runtime.backups.list_entries()
         except BackupRegistryError as exc:
             console.print(f"[red]Failed to read backup index: {exc}[/red]")
-            op.error("Failed to read backup index.", errors=[str(exc)], rc=2)
-            raise typer.Exit(code=2) from exc
+            rc_value = int(ExitCode.ENVIRONMENT)
+            op.error("Failed to read backup index.", errors=[str(exc)], rc=rc_value)
+            raise typer.Exit(code=rc_value) from exc
 
         if instance:
             try:
                 entries = runtime.backups.entries_for_instance(instance)
             except BackupRegistryError as exc:
                 console.print(f"[red]{exc}[/red]")
-                op.error(str(exc), errors=[str(exc)], rc=2)
-                raise typer.Exit(code=2) from exc
+                rc_value = int(ExitCode.ENVIRONMENT)
+                op.error(str(exc), errors=[str(exc)], rc=rc_value)
+                raise typer.Exit(code=rc_value) from exc
 
         entries.sort(key=lambda item: str(item.get("created_at", "")), reverse=True)
 
@@ -5689,8 +5694,9 @@ def backup_show(
             entry = runtime.backups.find_by_id(backup_id)
         except BackupRegistryError as exc:
             console.print(f"[red]{exc}[/red]")
-            op.error(str(exc), errors=[str(exc)], rc=2)
-            raise typer.Exit(code=2) from exc
+            rc_value = int(ExitCode.ENVIRONMENT)
+            op.error(str(exc), errors=[str(exc)], rc=rc_value)
+            raise typer.Exit(code=rc_value) from exc
 
         if entry is None:
             _command_error(op, f"Backup '{backup_id}' not found.", rc=2)
@@ -5755,8 +5761,9 @@ def backup_verify(
             entries = runtime.backups.list_entries()
         except BackupRegistryError as exc:
             console.print(f"[red]Failed to read backup index: {exc}[/red]")
-            op.error("Failed to read backup index.", errors=[str(exc)], rc=2)
-            raise typer.Exit(code=2) from exc
+            rc_value = int(ExitCode.ENVIRONMENT)
+            op.error("Failed to read backup index.", errors=[str(exc)], rc=rc_value)
+            raise typer.Exit(code=rc_value) from exc
 
         targets: Sequence[Mapping[str, object]]
         if all_backups:
@@ -5838,8 +5845,9 @@ def backup_reconcile(
             entries = runtime.backups.list_entries()
         except BackupRegistryError as exc:
             console.print(f"[red]{exc}[/red]")
-            op.error("Failed to read backup index.", errors=[str(exc)], rc=2)
-            raise typer.Exit(code=2) from exc
+            rc_value = int(ExitCode.ENVIRONMENT)
+            op.error("Failed to read backup index.", errors=[str(exc)], rc=rc_value)
+            raise typer.Exit(code=rc_value) from exc
 
         filtered_entries = [
             entry
@@ -6005,8 +6013,9 @@ def backup_prune(
                 raw_entries = runtime.backups.list_entries()
         except BackupRegistryError as exc:
             console.print(f"[red]{exc}[/red]")
-            op.error(str(exc), errors=[str(exc)], rc=2)
-            raise typer.Exit(code=2) from exc
+            rc_value = int(ExitCode.ENVIRONMENT)
+            op.error(str(exc), errors=[str(exc)], rc=rc_value)
+            raise typer.Exit(code=rc_value) from exc
 
         entries = [dict(entry) for entry in raw_entries]
 
@@ -6197,8 +6206,9 @@ def backup_restore(
             entry = runtime.backups.find_by_id(backup_id)
         except BackupRegistryError as exc:
             console.print(f"[red]{exc}[/red]")
-            op.error(str(exc), errors=[str(exc)], rc=2)
-            raise typer.Exit(code=2) from exc
+            rc_value = int(ExitCode.ENVIRONMENT)
+            op.error(str(exc), errors=[str(exc)], rc=rc_value)
+            raise typer.Exit(code=rc_value) from exc
 
         if entry is None:
             _command_error(op, f"Backup '{backup_id}' is not registered.", rc=2)

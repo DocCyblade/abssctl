@@ -1127,6 +1127,19 @@ def test_backup_show_missing(tmp_path: Path) -> None:
     assert result.exit_code == 2
 
 
+def test_backup_list_reports_index_errors_with_env_exit(tmp_path: Path) -> None:
+    """Corrupted backup index should surface rc=3 (environment)."""
+    env, _ = _prepare_environment(tmp_path)
+    backups_root = tmp_path / "backups"
+    backups_root.mkdir(parents=True, exist_ok=True)
+    (backups_root / "backups.json").write_text("{not-json", encoding="utf-8")
+
+    result = runner.invoke(app, ["backup", "list"], env=env)
+
+    assert result.exit_code == 3
+    assert "Failed to read backup index" in result.stdout
+
+
 def _create_backup_entry(
     registry: BackupsRegistry,
     *,
@@ -1840,8 +1853,60 @@ def test_support_bundle_aborts_when_size_limit_exceeded(
 
     result = runner.invoke(app, ["support-bundle"], env=env)
 
-    assert result.exit_code == 4
+    assert result.exit_code == 3
     assert "size limit" in result.stdout.lower()
+
+
+def test_support_bundle_reports_missing_tar_with_env_exit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing tar binary should yield rc=3 with a helpful message."""
+    env, _ = _prepare_environment(tmp_path)
+
+    def fake_which(binary: str) -> str | None:
+        if binary == "tar":
+            return None
+        return f"/usr/bin/{binary}"
+
+    monkeypatch.setattr("abssctl.archive.shutil.which", fake_which)
+
+    result = runner.invoke(app, ["support-bundle"], env=env)
+
+    assert result.exit_code == 3
+    assert "tar" in result.stdout.lower()
+
+
+def test_support_bundle_tar_failure_maps_to_provider_exit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Tar command failures should surface rc=4 provider errors."""
+    env, _ = _prepare_environment(tmp_path)
+
+    monkeypatch.setattr("abssctl.archive.shutil.which", lambda binary: "/usr/bin/tar")
+    monkeypatch.setattr("abssctl.archive.detect_zstd_support", lambda: False)
+
+    def fake_run(
+        cmd: list[str],
+        capture_output: bool,
+        text: bool,
+        env: dict[str, str],
+        check: bool,
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            cmd,
+            returncode=1,
+            stdout="",
+            stderr="tar failed",
+        )
+
+    monkeypatch.setattr("abssctl.archive.subprocess.run", fake_run)
+
+    result = runner.invoke(app, ["support-bundle"], env=env)
+
+    assert result.exit_code == 4
+    assert "tar failed" in result.stdout.lower()
 
 
 def test_version_check_updates_handles_remote_failure(
