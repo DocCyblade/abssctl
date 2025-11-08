@@ -39,10 +39,17 @@ Risks and Follow-ups
 Mutation Testing
 ================
 
-Mutation tests have not been executed yet. Suggested tooling: ``mutmut`` against
-``abssctl.cli`` and ``abssctl.providers.version_provider`` once the above
-coverage improvements land. Track runtime and actionable mutations before
-making this part of CI.
+Ongoing mutation testing is now scoped to the highest-risk subsystems only:
+
+1. ``abssctl.cli`` (backup helpers, doctor/doctor CLI payloads, support-bundle once added)
+2. ``abssctl.doctor.engine`` / ``abssctl.doctor.probes`` (probe orchestration, context assembly)
+3. ``abssctl.tls`` (inspector/validator)
+
+These modules are exercised with ``mutmut`` using the targeted configuration recorded
+in ``ops/mutation-results-raw.txt``. Mutation testing is **not** required for other
+modules; rely on statement/branch coverage and focused unit tests instead. Before CI
+integration, ensure the scoped suite runs under the timeout controls introduced via the
+``mutation_timeout`` marker.
 
 Next Steps
 ==========

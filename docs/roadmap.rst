@@ -10,100 +10,102 @@ abssctl v1.0. Items are grouped by the milestones defined in
 ``docs/requirements/abssctl-app-specs.txt`` and the project README. Move
 completed tasks into ``ops/session-log.txt`` when done.
 
-Planning
-========
-
-- No open TODOs for this milestone. (Spec document has already been drafted.)
-
-Pre-Alpha — Repo Bootstrap
-==========================
-
-- No open TODOs; scaffolding, packaging metadata, and CI skeletons are in place.
-
-Alpha 3 — Foundations
-=====================
-
-- No open TODOs; structured logging, locking, templating, and trusted dev publishing
-  capabilities are complete for this phase.
-
-Alpha 4 — Core Features 1
-=========================
-
-- No open TODOs; version lifecycle commands, registry helpers, and update checks
-  shipped as planned.
-
-Alpha 5 — Core Features 2
-=========================
-
-- No open TODOs; systemd/nginx providers, instance lifecycle commands, and ports
-  registry are fully delivered.
-
-Beta — Basic Functions
-======================
-
-- [x] Implement port allocation and collision detection backed by ``ports.yml``,
-  following ADR-015 (base port 5000, sequential strategy, locks).
-- [x] Implement TLS subcommands (``tls verify``, ``tls install``,
-  ``tls use-system``) including file validation, secure permissions, nginx
-  reloads, and Let’s Encrypt detection (ADR-031).
-- [x] Implement backup operations per §5.8 / ADR-012 / ADR-021 / ADR-022,
-  including ``backup restore`` and ``backup reconcile``; ``backup create`` /
-  ``list`` /
-  ``show`` /
-  ``verify`` /
-  ``prune`` are in place with checksum handling and prompts.
-- [x] Ensure all mutating commands honour ``--dry-run``, ``--yes``, backup
-  prompt inventory (ADR-016/ADR-025/ADR-026), and emit consistent exit codes
-  (ADR-013).
-- [x] Deliver the ``doctor`` command with the ADR-029 probe catalogue (env,
-  config, state, filesystem, ports, systemd, nginx, tls, app, disk), JSON
-  output, and state reconciliation guidance that recommends
-  ``abssctl system init --rebuild-state`` when mismatches are detected.
-- [x] Ship the ``system init`` bootstrap command (interactive wizard plus
-  unattended flags, discovery, and ``--rebuild-state`` support) so new or
-  existing hosts can be prepared consistently.
-- [x] Flesh out automated tests (unit/integration fakes) to cover the above
-  Beta features and guard idempotency.
-
-Release Candidate — Quality & Docs
-==================================
-
-- [ ] Extend ``doctor`` with ``--fix`` capabilities for safe migrations (state
-  dir moves, permission repair, stale lock cleanup) per ADR-029/ADR-024.
-- [ ] Implement the ``support-bundle`` command that collects configs, registry
-  snapshots, logs, and probe output with redaction per ADR-012/ADR-014/ADR-028.
-- [ ] Harden error handling and map failures to the formal exit-code taxonomy
-  (ADR-013), including rich user messaging.
-- [ ] Triage mutation-testing survivors (doctor helpers, CLI report pipelines,
-  TLS inspector, discovery warnings) and expand tests; address mutmut timeouts
-  before rolling the suite into CI.
-- [ ] Generate Sphinx man pages in CI, package them with the wheel/sdist, and
-  implement ``abssctl docs man install``/``path`` commands per ADR-002/ADR-019.
-- [ ] Implement shell completion management (``abssctl completion
-  show|install|uninstall``) leveraging Typer’s completion support per ADR-020.
-- [ ] Complete documentation sets: README, CHANGELOG, Admin Guide, Developer
-  Guide, sudoers examples, and support matrix automation per §7 of the spec.
-- [ ] Publish Manual Integration Test Protocol assets (scripts/checklists) and
-  wire them into CI where feasible (ADR-030).
-- [ ] Extend CI/CD to run packaging smoke tests, build support bundles, and
-  stage release artifacts (wheels, manpage tarballs, completion scripts).
-
-Release — v1.0.0
+Completed Phases
 ================
 
-- [ ] Execute the MITP on a fresh TurnKey Linux Node.js v18 appliance across the
-  current + 10 prior Actual releases, updating the support matrix.
-- [ ] Perform burn-in testing for the release candidate builds, verifying
-  upgrade/rollback, backups, TLS, and doctor/support-bundle across scenarios.
-- [ ] Finalise documentation sign-off and publish GA artifacts (PyPI release
-  from ``main``, tagged GitHub release with attachments, updated docs site).
-- [ ] Share a post-release checklist (communication, changelog highlights,
-  next-maintenance window) for operational hand-off.
+1. Planning — Spec draft and ADR set are stable; no additional scoping work
+   remains for pre-v1 milestones.
+2. Pre-Alpha — Repository scaffolding, packaging metadata, CI skeletons, and
+   automation baselines were delivered.
+3. Alpha 3–5 — Core features (structured logging, locking, templating,
+   providers, ports registry, lifecycle commands) are implemented and tested.
+4. Beta — Backup/TLS/doctor/system-init commands shipped together with
+   idempotent test coverage and CLI safety flags.
 
-Optional / Future Enhancements
-==============================
+Roadmap to v1.0.0
+=================
 
-- [ ] Explore automatic Let’s Encrypt certificate provisioning beyond v1 scope
-  for future consideration.
-- [ ] Investigate container-based distribution or alternative reverse proxy
-  support after v1.0.
+1. Doctor auto-remediation (``doctor --fix``)
+
+   a. Deliver safe repair actions (state-directory rebuilds, permission fixes,
+      stale-lock cleanup) with dry-run previews and telemetry.
+   b. Add regression tests + docs describing guardrails, logging, and rollback
+      expectations.
+
+2. Support-bundle command
+
+   a. Implement ``support-bundle create`` that collects configs, registries,
+      logs, and probe output with redaction and size limits.
+   b. Integrate bundles with doctor/support workflows and document secure
+      transfer guidance.
+
+3. Exit-code & error mapping hardening
+
+   a. Audit CLI/doctor/backups/TLS surfaces to map failures to ADR-013 exit
+      codes with consistent messaging.
+   b. Expand unit/integration tests for representative error paths and update
+      troubleshooting docs.
+
+4. Mutation reliability closure
+
+   a. Target the remaining TLS inspector/validator, doctor engine, and CLI
+      survivor clusters with focused coverage; document intentional exclusion
+      zones (e.g., direct OS calls) in ``docs/requirements/test-coverage-report.rst``.
+   b. Finish timeout mitigation so the scoped mutmut suite can run in CI, and
+      constrain mutation testing to the high-impact subsystems listed above.
+
+5. Documentation packaging pipeline
+
+   a. Generate Sphinx man pages in CI, ensure they ship in wheels/sdists, and
+      provide ``abssctl docs man install|path`` helpers.
+   b. Wire documentation builds into release artifacts (HTML/PDF/man) with
+      checksum verification.
+
+6. Shell completion management
+
+   a. Add ``abssctl completion show|install|uninstall`` leveraging Typer’s
+      completion hooks for bash/zsh/fish.
+   b. Package completion scripts in the distribution and add smoke tests covering
+      install/uninstall flows.
+
+7. Admin & developer documentation final pass
+
+   a. Finalise README, CHANGELOG, Admin Guide, Developer Guide, sudoers
+      examples, and support matrix automation.
+   b. Publish the release-notes template and update docs/requirements to reflect
+      the frozen v1 feature set.
+
+8. Manual Integration Test Protocol (MITP) publication
+
+   a. Publish MITP checklists + scripts, covering install, upgrade, backup,
+      TLS, doctor, and support-bundle scenarios.
+   b. Integrate critical MITP smoke tests into CI (or a nightly job) with
+      documented pass/fail gating.
+
+9. CI/CD release automation
+
+   a. Extend CI to run packaging smoke tests, build support bundles, and stage
+      release artifacts (wheel, sdist, manpage tarball, completion scripts).
+   b. Add automation to push signed artifacts to staging buckets and validate
+      installation on clean environments.
+
+10. System validation & MITP execution
+
+    a. Run the MITP on current TurnKey Linux Node.js appliances plus the ten
+       supported back versions, updating the support matrix.
+    b. Capture structured logs/support bundles for each run to aid future
+       troubleshooting.
+
+11. Release-candidate burn-in & rollback drills
+
+    a. Perform extended burn-in on RC builds covering upgrade/rollback,
+       backups, TLS, doctor, and support-bundle flows.
+    b. Document gating criteria and residual risks, feeding results back into
+       docs and CI dashboards.
+
+12. GA launch & communications
+
+    a. Final documentation sign-off, PyPI release from ``main``, tagged GitHub
+       release (with artifacts), and docs site refresh.
+    b. Execute the post-release communication plan: changelog highlights,
+       support announcements, and next-maintenance schedule.

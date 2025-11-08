@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import time
+from collections.abc import Callable
 from types import SimpleNamespace
 
 import pytest
@@ -262,6 +264,42 @@ def test_create_probe_context_defaults_options() -> None:
     assert context.options.max_concurrency == defaults.max_concurrency
 
 
+def test_create_probe_context_mirrors_all_runtime_fields() -> None:
+    """Every runtime dependency should be mirrored into the ProbeContext."""
+    runtime = RuntimeContext(
+        config="cfg",
+        registry="registry",
+        ports="ports",
+        version_provider="vp",
+        version_installer="vi",
+        instance_status_provider="status",
+        locks="locks",
+        logger="logger",
+        templates="templates",
+        systemd_provider="systemd",
+        nginx_provider="nginx",
+        backups="backups",
+        tls_inspector="inspector",
+        tls_validator="validator",
+    )
+    options = ProbeExecutorOptions(max_concurrency=5)
+    context = create_probe_context(runtime, options)
+    assert context.config == "cfg"
+    assert context.registry == "registry"
+    assert context.ports == "ports"
+    assert context.version_provider == "vp"
+    assert context.version_installer == "vi"
+    assert context.instance_status_provider == "status"
+    assert context.locks == "locks"
+    assert context.logger == "logger"
+    assert context.templates == "templates"
+    assert context.systemd_provider == "systemd"
+    assert context.nginx_provider == "nginx"
+    assert context.backups == "backups"
+    assert context.tls_inspector == "inspector"
+    assert context.tls_validator == "validator"
+    assert context.options is options
+
 
 def test_duration_ms_tracks_elapsed(monkeypatch: pytest.MonkeyPatch) -> None:
     """_duration_ms should convert perf_counter deltas to milliseconds."""
@@ -282,13 +320,22 @@ def test_unexpected_failure_wraps_exception() -> None:
             message="ok",
         ),
     )
-    result = _unexpected_failure(probe, RuntimeError("boom"), 42)
+    result: ProbeResult
+    exc: RuntimeError | None = None
+    try:
+        raise RuntimeError("boom")
+    except RuntimeError as caught:
+        exc = caught
+        result = _unexpected_failure(probe, caught, 42)
+    assert exc is not None
     assert result.status is ProbeStatus.RED
     assert result.impact is DoctorImpact.PROVIDER
-    assert "boom" in result.message
+    assert "failing" in result.message and "boom" in result.message
     assert result.duration_ms == 42
     assert result.warnings == ("unhandled-exception",)
-    assert isinstance(result.data, dict) and "traceback" in result.data
+    assert isinstance(result.data, dict)
+    assert result.data["exception"] == repr(exc)
+    assert "RuntimeError" in result.data["traceback"]
 
 
 def test_run_single_probe_coerces_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -327,3 +374,59 @@ def test_run_single_probe_handles_exceptions(monkeypatch: pytest.MonkeyPatch) ->
     assert result.status is ProbeStatus.RED
     assert result.impact is DoctorImpact.PROVIDER
     assert result.duration_ms == 50
+
+
+def test_run_probes_honours_max_workers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ThreadPoolExecutor should honour the configured max_concurrency."""
+    captured: dict[str, object] = {}
+
+    class FakeExecutor:
+        def __init__(self, max_workers: int) -> None:
+            captured["max_workers"] = max_workers
+            self._futures: list[concurrent.futures.Future] = []
+
+        def __enter__(self) -> FakeExecutor:
+            return self
+
+        def __exit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc: BaseException | None,
+            tb: BaseException | None,
+        ) -> bool:
+            return False
+
+        def submit(
+            self,
+            func: Callable[..., ProbeResult],
+            *args: object,
+            **kwargs: object,
+        ) -> concurrent.futures.Future:
+            future: concurrent.futures.Future = concurrent.futures.Future()
+            try:
+                result = func(*args, **kwargs)
+                future.set_result(result)
+            except Exception as exc:  # pragma: no cover - defensive
+                future.set_exception(exc)
+            self._futures.append(future)
+            return future
+
+    monkeypatch.setattr(concurrent.futures, "ThreadPoolExecutor", FakeExecutor)
+
+    options = ProbeExecutorOptions(max_concurrency=4)
+    context = _dummy_context(options)
+    probes = [
+        ProbeDefinition(
+            id="p1",
+            category="env",
+            run=lambda ctx: ProbeResult(
+                id="p1",
+                category="env",
+                status=ProbeStatus.GREEN,
+                impact=DoctorImpact.OK,
+                message="ok",
+            ),
+        )
+    ]
+    run_probes(context, probes)
+    assert captured["max_workers"] == 4
