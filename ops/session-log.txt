@@ -56,6 +56,8 @@
 - 11/08/2025 21:55:00: `make quick-tests` hit the sandbox timeout, so I ran the underlying `ruff check`, `mypy src`, and `pytest -m "not slow"` individually—everything passed on the refreshed support-bundle implementation.
 - 11/08/2025 22:15:00: Introduced `ExitCode` helpers, hardened backup list/show/verify/prune/restore to treat registry read failures as rc=3, and taught the support-bundle builder/CLI to distinguish env (size limit/tooling) vs provider (tar failure) exits per ADR-013.
 - 11/08/2025 22:40:00: Extended CLI tests (backup index corruption, support-bundle tar/tooling cases), updated docs/README to call out the clarified exit codes, and re-ran ruff/mypy/pytest (all green).
+- 11/08/2025 23:05:00: Added `make mutmut-{fast,full}` targets that wire up PYTHONPATH + pytest flags (fast skips mutation_timeout probes via `MUTANT_UNDER_TEST`, full runs everything) so the workflow is a single command.
+- 11/08/2025 23:10:00: Removed the temporary path bootstrap files (`sitecustomize.py`, root `conftest.py`, test package shims) now that the Makefile prepares the env, and re-ran quick-tests (ruff/mypy/pytest) to confirm everything stays green.
 
 ## Wrap up:
 - (in progress)
