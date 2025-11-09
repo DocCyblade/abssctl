@@ -84,13 +84,13 @@ type: $(TEST_VENV)/.installed
 ## mutmut-fast: Run mutation tests skipping long-running scenarios
 .PHONY: mutmut-fast
 mutmut-fast: $(DEV_VENV)/.installed
-	PYTHONPATH="$(PWD)/src" MUTANT_UNDER_TEST=1 PYTEST_ADDOPTS='-m "not slow"' \
+	PYTHONPATH="src" MUTANT_UNDER_TEST=1 \
 		$(DEV_VENV)/bin/mutmut run
 
 ## mutmut-full: Run full mutation suite (includes mutation_timeout tests)
 .PHONY: mutmut-full
 mutmut-full: $(DEV_VENV)/.installed
-	PYTHONPATH="$(PWD)/src" PYTEST_ADDOPTS='-m "not slow"' \
+	PYTHONPATH="src" \
 		$(DEV_VENV)/bin/mutmut run
 
 ## test: Run pytest suite via test venv
