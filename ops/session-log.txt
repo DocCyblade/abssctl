@@ -65,9 +65,9 @@
 -----------------------------------------
 
 # Next Steps / TODO:
-0. Close out targeted mutation survivors (CLI doctor helpers, doctor engine/probes, TLS inspector/validator) and keep the scoped mutmut suite stable.
+0. Close out targeted mutation survivors (logging helpers, backups utilities, config overrides, SupportBundle builder) and keep the scoped mutmut suite stable.
 1. Build the docs packaging pipeline: generate/publish man pages via CI and add ``abssctl docs man install|path`` helpers.
 2. Add shell completion management (show/install/uninstall for bash/zsh/fish) with packaged scripts and tests.
 
 # Next Session Primer
-- Shift focus to mutation reliability closure next (target the remaining doctor/TLS/CLI survivors and tighten the scoped mutmut suite), then move on to the docs packaging pipeline and completion helpers once the mutation work lands.
+- Pick up mutation reliability closure first (logging helper timeouts, backups helper tests, config override tests, SupportBundle builder coverage), then tackle docs packaging pipeline and shell completion helpers after the survivor counts drop.
