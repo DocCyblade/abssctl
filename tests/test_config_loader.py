@@ -5,7 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from abssctl.config import AppConfig, ConfigError, load_config
+from abssctl.config import (
+    AppConfig,
+    ConfigError,
+    _assign_nested,
+    _build_env_overrides,
+    load_config,
+)
 
 
 def test_load_config_defaults_when_file_missing(tmp_path: Path) -> None:
@@ -216,3 +222,84 @@ def test_invalid_backup_compression_algorithm_raises(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigError, match="Unsupported backup compression"):
         load_config(config_file=cfg, env={})
+
+
+def test_build_env_overrides_creates_nested_structure() -> None:
+    """Environment overrides should build nested dictionaries with coerced values."""
+    env = {
+        "ABSSCTL_TLS__ENABLED": "false",
+        "ABSSCTL_TLS__VALIDATION__WARN_EXPIRY_DAYS": "45",
+        "ABSSCTL_PORTS__ASSIGNMENTS__API": "6205",
+        "ABSSCTL_SKIP_NPM": "1",  # reserved, ignored
+        "IGNORED": "value",
+    }
+
+    overrides = _build_env_overrides(env)
+
+    assert overrides == {
+        "tls": {"enabled": False, "validation": {"warn_expiry_days": 45}},
+        "ports": {"assignments": {"api": 6205}},
+    }
+
+
+def test_assign_nested_creates_intermediate_mappings() -> None:
+    """_assign_nested should create nested dicts when missing."""
+    target: dict[str, object] = {}
+    _assign_nested(target, ["backups", "compression", "algorithm"], "gzip")
+
+    assert target == {"backups": {"compression": {"algorithm": "gzip"}}}
+
+
+def test_assign_nested_raises_on_scalar_conflict() -> None:
+    """Conflicting overrides should raise ConfigError."""
+    target: dict[str, object] = {"tls": {"enabled": True}}
+
+    with pytest.raises(ConfigError) as excinfo:
+        _assign_nested(target, ["tls", "enabled", "flag"], False)
+    assert (
+        str(excinfo.value)
+        == "Environment overrides conflict with existing scalar value at tls.enabled.flag"
+    )
+
+
+def test_assign_nested_reuses_existing_mapping() -> None:
+    """Assignments should reuse nested mappings instead of clobbering them."""
+    target: dict[str, object] = {"tls": {"validation": {"enabled": True}}}
+    _assign_nested(target, ["tls", "validation", "warn_expiry_days"], 30)
+
+    assert target["tls"] == {"validation": {"enabled": True, "warn_expiry_days": 30}}
+
+
+def test_assign_nested_overwrites_leaf_values() -> None:
+    """Subsequent assignments to the same path should override the previous value."""
+    target: dict[str, object] = {}
+    _assign_nested(target, ["ports", "base"], 6200)
+    _assign_nested(target, ["ports", "base"], 6400)
+
+    assert target["ports"]["base"] == 6400
+
+
+def test_assign_nested_updates_top_level_value() -> None:
+    """Single-segment paths should update the top-level key."""
+    target: dict[str, object] = {"service_user": "actual-sync"}
+    _assign_nested(target, ["service_user"], "admin")
+
+    assert target["service_user"] == "admin"
+
+
+def test_assign_nested_reuses_existing_mapping_identity() -> None:
+    """Existing mapping objects should be reused rather than replaced."""
+    validation: dict[str, object] = {}
+    target: dict[str, object] = {"tls": {"validation": validation}}
+    _assign_nested(target, ["tls", "validation", "warn_expiry_days"], 15)
+
+    assert target["tls"]["validation"] is validation
+    assert validation["warn_expiry_days"] == 15
+
+
+def test_assign_nested_conflict_when_parent_scalar() -> None:
+    """Attempting to assign below a scalar value should raise ConfigError."""
+    target: dict[str, object] = {"tls": "value"}
+
+    with pytest.raises(ConfigError, match="tls\\.validation"):
+        _assign_nested(target, ["tls", "validation", "warn_expiry_days"], 30)

@@ -23,7 +23,6 @@ import os
 from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
 
 try:  # PyYAML is a runtime dependency (declared in pyproject.toml).
     import yaml
@@ -651,7 +650,7 @@ def _assign_nested(tree: MutableMapping[str, object], path: list[str], value: ob
             current = new_child
             continue
         if isinstance(existing, MutableMapping):
-            current = cast(MutableMapping[str, object], existing)
+            current = existing
             continue
         raise ConfigError(
             "Environment overrides conflict with existing scalar value at "

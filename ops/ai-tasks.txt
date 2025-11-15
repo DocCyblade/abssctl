@@ -3,9 +3,3 @@
 #   file and try to recover where it was in the long task.
 #
 # - AI do not edit above this line! Keep this header!
-
-## Mutation Survivors/TODO (2025-11-08)
-1. Logging helper timeouts (`_iso_timestamp`, `_sanitize`, `_detect_actor`, StructuredLogger/OperationScope) – need fast deterministic unit tests or exclusions; current tests marked mutation_timeout but fast run still times out.
-2. Backups helpers (`_now_iso`, `_normalise_identifier`, `copy_into`) – add direct unit tests covering UTC formatting, identifier validation, and copy semantics.
-3. Config overrides (`_assign_nested` and related builders) – add unit tests for nested env overrides and conflict error paths.
-4. SupportBundleBuilder.build – add targeted unit tests (staged_bytes cap, algorithm detection, manifest contents, output path handling) using faked runtime/archive helpers.

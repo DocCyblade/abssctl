@@ -110,12 +110,80 @@ def test_operation_scope_error_defaults_error_list(tmp_path: Path) -> None:
     assert result["context"] == {"value": "{1, 2}"}
 
 
+def test_operation_scope_warning_default_lists(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Warnings without optional arguments should default to empty collections."""
+    logger = StructuredLogger(tmp_path / "logs")
+    captured: list[dict[str, object]] = []
+    monkeypatch.setattr(logger, "_write_operations_log", lambda payload: captured.append(payload))
+    monkeypatch.setattr(logger, "_write_human_log", lambda *_args, **_kwargs: None)
+
+    with logger.operation("demo") as op:
+        op.warning("attention")
+
+    payload = captured[-1]
+    result = payload["result"]
+    assert payload["rc"] == 0
+    assert result["warnings"] == []
+    assert result["errors"] == []
+    assert result["backups"] == []
+    assert "context" not in result
+
+
+def test_operation_scope_warning_respects_parameters(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Warnings should propagate rc/changed/backups/context fields."""
+    logger = StructuredLogger(tmp_path / "logs")
+    captured: list[dict[str, object]] = []
+    monkeypatch.setattr(logger, "_write_operations_log", lambda payload: captured.append(payload))
+    monkeypatch.setattr(logger, "_write_human_log", lambda *_args, **_kwargs: None)
+
+    with logger.operation("demo") as op:
+        op.warning(
+            "partial success",
+            warnings=("lag",),
+            errors=("retry",),
+            changed=3,
+            rc=5,
+            backups=("bundle.tar",),
+            context={"path": Path("/srv/app")},
+        )
+
+    payload = captured[-1]
+    assert payload["rc"] == 5
+    result = payload["result"]
+    assert result["status"] == "warning"
+    assert result["changed"] == 3
+    assert result["warnings"] == ["lag"]
+    assert result["errors"] == ["retry"]
+    assert result["backups"] == ["bundle.tar"]
+    assert result["context"]["path"] == "/srv/app"
+
+
 def test_iso_timestamp_is_utc() -> None:
     """Internal timestamp helper should always emit UTC with Z suffix."""
     ts = _iso_timestamp()
     assert ts.endswith("Z")
     parsed = datetime.fromisoformat(ts.replace("Z", "+00:00"))
     assert parsed.tzinfo == timezone.utc  # noqa: UP017 - python3.11 lacks datetime.UTC
+
+
+def test_iso_timestamp_uses_millisecond_precision(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Timestamp helper should request UTC now() and emit millisecond precision."""
+
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz: object | None = None) -> datetime:
+            if tz is None:
+                raise AssertionError("tz must be provided for UTC timestamps")
+            return cls(2024, 5, 6, 7, 8, 9, 654_321, tzinfo=tz)
+
+    monkeypatch.setattr("abssctl.logging.datetime", FixedDatetime)
+
+    assert _iso_timestamp() == "2024-05-06T07:08:09.654Z"
 
 
 def test_sanitize_handles_mappings_sequences_and_paths(tmp_path: Path) -> None:
@@ -138,6 +206,24 @@ def test_sanitize_handles_mappings_sequences_and_paths(tmp_path: Path) -> None:
     }
 
 
+def test_sanitize_handles_tuple_and_bytes(tmp_path: Path) -> None:
+    """Sanitise helper should convert tuples to lists and stringify bytes."""
+
+    class Custom:
+        def __str__(self) -> str:
+            return "<custom>"
+
+    payload = {
+        "tuple": (Path("child"), 1, Custom()),
+        "bytes": b"\x00abc",
+        "nested": {"values": (Path(tmp_path.name),)},
+    }
+    sanitised = _sanitize(payload)
+    assert sanitised["tuple"] == ["child", 1, "<custom>"]
+    assert sanitised["bytes"] == "b'\\x00abc'"
+    assert sanitised["nested"]["values"] == [tmp_path.name]
+
+
 def test_detect_actor_user_and_ci(monkeypatch: pytest.MonkeyPatch) -> None:
     """Actor detection should distinguish user sessions from CI."""
     monkeypatch.delenv("CI", raising=False)
@@ -154,6 +240,30 @@ def test_detect_actor_user_and_ci(monkeypatch: pytest.MonkeyPatch) -> None:
     ci_actor = _detect_actor()
     assert ci_actor["type"] == "ci"
     assert ci_actor["session"] == "42"
+
+
+def test_detect_actor_prefers_ttypath_when_missing_ssh_tty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Local actor detection should fall back to TTYPATH when needed."""
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("SSH_TTY", raising=False)
+    monkeypatch.setenv("TTYPATH", "/dev/pts/9")
+    monkeypatch.setattr("getpass.getuser", lambda: "terminal-user")
+
+    actor = _detect_actor()
+    assert actor == {"type": "user", "name": "terminal-user", "session": "/dev/pts/9"}
+
+
+def test_detect_actor_uses_ci_job_id_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CI actor detection should prefer GITHUB_RUN_ID but fall back to CI_JOB_ID."""
+    monkeypatch.setenv("CI", "1")
+    monkeypatch.delenv("GITHUB_RUN_ID", raising=False)
+    monkeypatch.setenv("CI_JOB_ID", "job-123")
+    monkeypatch.setattr("getpass.getuser", lambda: "ci-user")
+
+    actor = _detect_actor()
+    assert actor == {"type": "ci", "name": "ci-user", "session": "job-123"}
 
 
 @pytest.mark.mutation_timeout
@@ -173,3 +283,59 @@ def test_structured_logger_emits_human_and_json_logs(tmp_path: Path) -> None:
     assert record["command"] == "demo"
     assert record["args"] == {"foo": "bar"}
     assert record["result"]["status"] == "success"
+
+
+def test_operation_scope_captures_steps_and_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Structured logger should record steps, lock waits, and sanitised context."""
+    logger = StructuredLogger(tmp_path / "logs")
+    timestamps = iter(
+        [
+            "2024-01-01T00:00:00.000Z",
+            "2024-01-01T00:00:00.100Z",
+            "2024-01-01T00:00:00.200Z",
+        ]
+    )
+    monkeypatch.setattr("abssctl.logging._iso_timestamp", lambda: next(timestamps))
+
+    captured: list[dict[str, object]] = []
+    human_lines: list[str] = []
+    monkeypatch.setattr(logger, "_write_operations_log", lambda record: captured.append(record))
+    monkeypatch.setattr(logger, "_write_human_log", human_lines.append)
+
+    with logger.operation(
+        "demo",
+        args={"foo": "bar"},
+        target={"path": Path("/srv/data")},
+        planned_actions=[{"path": Path("/srv/data")}],
+        redactions=("token",),
+    ) as op:
+        op.set_lock_wait_ms(250)
+        op.add_step("phase-1", status="running", detail="syncing")
+        op.warning(
+            "completed with warnings",
+            warnings=("lag",),
+            errors=("retry",),
+            changed=1,
+            backups=("bundle.tar",),
+            context={"path": Path("/srv/data")},
+        )
+
+    assert captured, "operations log write should have been captured"
+    payload = captured[-1]
+    assert payload["lock_wait_ms"] == 250
+    assert payload["steps"] == [
+        {
+            "name": "phase-1",
+            "status": "running",
+            "detail": "syncing",
+            "ts": "2024-01-01T00:00:00.100Z",
+        }
+    ]
+    assert payload["planned_actions"] == [{"path": "/srv/data"}]
+    assert payload["redactions"] == ["token"]
+    assert payload["result"]["warnings"] == ["lag"]
+    assert payload["result"]["errors"] == ["retry"]
+    assert payload["context"]["path"] == "/srv/data"
+    assert human_lines and "demo" in human_lines[-1]

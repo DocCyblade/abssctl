@@ -31,7 +31,7 @@
 
 --------------- Session log starts below this line. Do not edit above this line ----------------------
 
-# 2025-11-08 1108 Sprint 1 (OPEN)
+# 2025-11-08 1108 Sprint 1 (CLOSED)
 - 11/08/2025 14:10:00: Session opened under the new directives; focus is finishing the v1.0.0 roadmap items (doctor --fix, support bundle, exit-code polish, mutation scope, docs packaging, completions).
 - 11/08/2025 14:15:00: Reviewed the latest scoped mutmut run (2,016 survivors; CLI 1,262 / doctor probes 623 / doctor engine/models 33 / TLS 166; 532 timeouts) and confirmed only those subsystems need mutation coverage; docs/roadmap/test-coverage report updated accordingly.
 - 11/08/2025 15:30:00: Re-read ops/ai-directives + ops/ai-tasks to recover context for 1108 Sprint 1, confirming outstanding mutation-testing follow-ups.
@@ -58,6 +58,25 @@
 - 11/08/2025 22:40:00: Extended CLI tests (backup index corruption, support-bundle tar/tooling cases), updated docs/README to call out the clarified exit codes, and re-ran ruff/mypy/pytest (all green).
 - 11/08/2025 23:05:00: Added `make mutmut-{fast,full}` targets that wire up PYTHONPATH + pytest flags (fast skips mutation_timeout probes via `MUTANT_UNDER_TEST`, full runs everything) so the workflow is a single command.
 - 11/08/2025 23:10:00: Removed the temporary path bootstrap files (`sitecustomize.py`, root `conftest.py`, test package shims) now that the Makefile prepares the env, and re-ran quick-tests (ruff/mypy/pytest) to confirm everything stays green.
+- 11/11/2025 08:32:37: Added fast deterministic logging-helper tests (_iso_timestamp precision, tuple/bytes sanitisation, TTYPATH/CI fallbacks, OperationScope step capture) and re-ran `make quick-tests` (ruff/mypy/pytest) successfully.
+- 11/11/2025 08:37:28: Covered backups helpers with `_now_iso` UTC precision, identifier normalisation validation, and `copy_into` directory/file handling tests plus a fresh `make quick-tests` run (ruff/mypy/pytest).
+- 11/11/2025 08:56:40: Added env override/unit tests for `_build_env_overrides` + `_assign_nested` (nested merges, scalar conflict errors) and verified `make quick-tests` (ruff/mypy/pytest) stay green.
+- 11/11/2025 10:48:39: Landed `tests/test_support_bundle.py` with fake runtime/archive helpers covering algorithm selection, staged-bytes cap, manifest redactions, and `_resolve_archive_path`, then re-ran `make quick-tests` (ruff/mypy/pytest) to confirm all green.
+- 11/13/2025 11:23:46: Added focused unit tests for logging warnings (default lists + rc propagation), backups `copy_into` (copytree/copy2 dispatch), config `_assign_nested` reuse/overwrites, and expanded support-bundle coverage (gzip fallback, archive size enforcement, init/classification), followed by `make quick-tests` (ruff/mypy/pytest).
+- 11/13/2025 14:46:30: Added mutation-mode StructuredLogger stubbing to speed mutmut, broadened backups/config/support-bundle tests (idempotent copy scenarios, top-level env overrides, log truncation/copy helpers, archive error wrapping), and re-ran `make quick-tests` (ruff/mypy/pytest).
+- 11/13/2025 17:12:05: Tightened mutation tests again (copy skips, assign_nested identity/conflict, support-bundle config summary/redaction cache) and revalidated with `make quick-tests` (ruff/mypy/pytest).
+- 11/13/2025 19:51:40: Further expanded support-bundle coverage (registry copies, manifest expectations, register_bytes guard) and re-ran `make quick-tests` (ruff/mypy/pytest).
+- 11/14/2025 12:03:56: Added deeper copy/nested parent tests, stricter `_assign_nested` message assertions, and more SupportBundleBuilder defaults/out-path/register tracking with another `make quick-tests` run (ruff/mypy/pytest).
+- 11/14/2025 15:37:20: Ensured `_assign_nested` no longer relies on runtime casts, plus added mkdir/mkdtemp/payload-root tests for support bundles; `make quick-tests` (ruff/mypy/pytest) stays green.
+- 11/15/2025 10:36:24: Added archive-dir chmod assertions, mkdtemp/op logging tests, and builder step coverage; re-ran `make quick-tests` (ruff/mypy/pytest) successfully.
+
+## Wrap up:
+- 11/15/2025 15:57:29: Session closed after refactoring the manual automation script + docs for Actual 25.11.0/Node 22, refreshing the compatibility matrix with the latest release requirements, and broadening the SupportBundleBuilder test suite (logs/config/manifest/steps) while keeping `make quick-tests` green.
+
+-----------------------------------------
+
+# 2025-11-15 1115 Sprint 1 (OPEN)
+- 11/15/2025 16:05:00: Session opened to continue SupportBundleBuilder mutation coverage, refresh compatibility data, and tackle pending roadmap items (docs packaging, shell completions).
 
 ## Wrap up:
 - (in progress)
@@ -65,9 +84,9 @@
 -----------------------------------------
 
 # Next Steps / TODO:
-0. Close out targeted mutation survivors (logging helpers, backups utilities, config overrides, SupportBundle builder) and keep the scoped mutmut suite stable.
+0. Finish killing the remaining SupportBundleBuilder mutmut survivors (log_step detail, register_bytes thresholds, collect_config/registry branches) using the new tests as a base.
 1. Build the docs packaging pipeline: generate/publish man pages via CI and add ``abssctl docs man install|path`` helpers.
 2. Add shell completion management (show/install/uninstall for bash/zsh/fish) with packaged scripts and tests.
 
 # Next Session Primer
-- Pick up mutation reliability closure first (logging helper timeouts, backups helper tests, config override tests, SupportBundle builder coverage), then tackle docs packaging pipeline and shell completion helpers after the survivor counts drop.
+- Kick off the next session by continuing SupportBundleBuilder mutation cleanup (log_step/detail, register_bytes, collect_config/registry) and re-running mutmut. Once those survivors drop, resume the docs packaging pipeline work and, after that, shell completion helpers per the roadmap.

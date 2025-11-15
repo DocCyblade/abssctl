@@ -2,84 +2,182 @@ schema_version: 1
 generated_at: '2025-11-08T18:20:45.139870+00:00'
 package: '@actual-app/sync-server'
 source: https://registry.npmjs.org/%40actual-app%2Fsync-server
-limit: 12
+limit: 20
 node_versions:
+- major: 22
+  min_patch: 22.0.0
+  status: supported
+  adr: null
+  notes: Actual 25.11.0 and newer require Node >= 22 (official release note).
+- major: 20
+  min_patch: 20.0.0
+  status: supported
+  adr: null
+  notes: Docker images switched to Node 20 during 25.6.x; 25.6.x-25.10.x expect Node 20 runtimes.
 - major: 18
   min_patch: 18.17.0
   status: supported
   adr: ADR-018
-  notes: TKL Node.js image ships Node 18; abssctl targets this baseline.
+  notes: TKL Node.js image ships Node 18; abssctl targets this baseline for 24.x and early 25.x.
 actual_versions:
 - version: 25.11.0
   release_date: '2025-11-03'
-  node_constraint: null
-  node_major: null
+  node_constraint: '>=22'
+  node_major: 22
   npm_dist_tags:
   - latest
-  status: untested
+  status: supported
   tested_at: null
-  notes: null
+  notes: Official release note drops Node < 22.
 - version: 25.10.0
   release_date: '2025-10-02'
-  node_constraint: null
-  node_major: null
+  node_constraint: '>=20'
+  node_major: 20
   npm_dist_tags: []
-  status: untested
+  status: historical
   tested_at: null
-  notes: null
+  notes: No explicit runtime note; follows Node 20 baseline.
 - version: 25.9.0
   release_date: '2025-09-03'
-  node_constraint: null
-  node_major: null
+  node_constraint: '>=20'
+  node_major: 20
   npm_dist_tags: []
-  status: untested
+  status: historical
   tested_at: null
-  notes: null
+  notes: Inherits Node 20 requirement from mid-2025 releases.
 - version: 25.8.0
   release_date: '2025-08-02'
-  node_constraint: null
-  node_major: null
+  node_constraint: '>=20'
+  node_major: 20
   npm_dist_tags: []
-  status: untested
+  status: historical
   tested_at: null
-  notes: null
+  notes: No runtime notes; Docker base already Node 20.
 - version: 25.7.1
-  release_date: '2025-07-03'
-  node_constraint: null
-  node_major: null
+  release_date: '2025-07-02'
+  node_constraint: '>=20'
+  node_major: 20
   npm_dist_tags: []
-  status: untested
+  status: historical
   tested_at: null
-  notes: null
+  notes: Nightly builds added; Node 20 baseline unchanged.
 - version: 25.7.0
   release_date: '2025-07-01'
-  node_constraint: null
-  node_major: null
+  node_constraint: '>=20'
+  node_major: 20
   npm_dist_tags: []
-  status: untested
+  status: historical
   tested_at: null
-  notes: null
-- version: 25.6.0
-  release_date: '2025-06-04'
-  node_constraint: null
-  node_major: null
-  npm_dist_tags: []
-  status: untested
-  tested_at: null
-  notes: null
+  notes: Same baseline as other summer 2025 releases.
 - version: 25.6.1
   release_date: '2025-06-04'
-  node_constraint: null
-  node_major: null
+  node_constraint: '>=20'
+  node_major: 20
   npm_dist_tags: []
-  status: untested
+  status: historical
   tested_at: null
-  notes: null
+  notes: Docker base image switched to Node 20.
+- version: 25.6.0
+  release_date: '2025-06-03'
+  node_constraint: '>=20'
+  node_major: 20
+  npm_dist_tags: []
+  status: historical
+  tested_at: null
+  notes: Embedded sync-server introduced; expects Node 20 era runtime.
 - version: 25.5.0
   release_date: '2025-05-03'
-  node_constraint: null
-  node_major: null
+  node_constraint: '>=18'
+  node_major: 18
   npm_dist_tags: []
-  status: untested
+  status: historical
   tested_at: null
-  notes: null
+  notes: Pre-Node 20 migration; Node 18 acceptable.
+- version: 25.4.0
+  release_date: '2025-04-03'
+  node_constraint: '>=18'
+  node_major: 18
+  npm_dist_tags: []
+  status: historical
+  tested_at: null
+  notes: Transitional builds before Docker switch.
+- version: 25.3.1
+  release_date: '2025-03-03'
+  node_constraint: '>=18'
+  node_major: 18
+  npm_dist_tags: []
+  status: historical
+  tested_at: null
+  notes: No Node warnings; pre-migration builds.
+- version: 25.3.0
+  release_date: '2025-03-01'
+  node_constraint: '>=18'
+  node_major: 18
+  npm_dist_tags: []
+  status: historical
+  tested_at: null
+  notes: Repo merge/TypeScript refactor begins; still on Node 18.
+- version: 25.2.0
+  release_date: '2025-02-01'
+  node_constraint: '>=18'
+  node_major: 18
+  npm_dist_tags: []
+  status: historical
+  tested_at: null
+  notes: No runtime callouts.
+- version: 25.1.0
+  release_date: '2025-01-03'
+  node_constraint: '>=18'
+  node_major: 18
+  npm_dist_tags: []
+  status: historical
+  tested_at: null
+  notes: Early 25.x release.
+- version: 25.0.0
+  release_date: '2025-01-01'
+  node_constraint: '>=18'
+  node_major: 18
+  npm_dist_tags: []
+  status: historical
+  tested_at: null
+  notes: First 25.x release; matches 24.x runtime expectation.
+- version: 24.12.0
+  release_date: '2024-12-03'
+  node_constraint: '>=18'
+  node_major: 18
+  npm_dist_tags: []
+  status: historical
+  tested_at: null
+  notes: Stable with Node 18 or 20.
+- version: 24.11.0
+  release_date: '2024-11-02'
+  node_constraint: '>=18'
+  node_major: 18
+  npm_dist_tags: []
+  status: historical
+  tested_at: null
+  notes: No major runtime notes; Node 18 baseline.
+- version: 24.10.0
+  release_date: '2024-10-01'
+  node_constraint: '>=18'
+  node_major: 18
+  npm_dist_tags: []
+  status: historical
+  tested_at: null
+  notes: Node 18 expectation.
+- version: 24.9.0
+  release_date: '2024-09-03'
+  node_constraint: '>=18'
+  node_major: 18
+  npm_dist_tags: []
+  status: historical
+  tested_at: null
+  notes: Node 18 baseline.
+- version: 24.8.0
+  release_date: '2024-08-02'
+  node_constraint: '>=18'
+  node_major: 18
+  npm_dist_tags: []
+  status: historical
+  tested_at: null
+  notes: Final 24.x release before 25.x cycle.
