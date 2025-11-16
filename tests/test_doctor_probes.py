@@ -143,7 +143,7 @@ def _discovered_instance(
     """Return a discovery record rooted under the tmp_path."""
     root = tmp_path / "instances" / name
     data_dir = root / "data"
-    config_path = data_dir / "config.json"
+    config_path = root / "config.json"
     return DiscoveredInstance(
         name=name,
         root=root,
@@ -190,7 +190,7 @@ def test_probe_state_reconcile_highlights_registry_mismatches(
     def _instance(name: str) -> DiscoveredInstance:
         root = tmp_path / "instances" / name
         data_dir = root / "data"
-        config_path = data_dir / "config.json"
+        config_path = root / "config.json"
         return DiscoveredInstance(name=name, root=root, data_dir=data_dir, config_path=config_path)
 
     report = DiscoveryReport(instances=[_instance("alpha"), _instance("gamma")])
@@ -276,8 +276,8 @@ def test_probe_state_reconcile_handles_discovery_warnings(
         name="alpha",
         root=tmp_path / "instances" / "alpha",
         data_dir=tmp_path / "instances" / "alpha" / "data",
-        config_path=tmp_path / "instances" / "alpha" / "data" / "config.json",
-        warnings=["config.json missing"],
+        config_path=tmp_path / "instances" / "alpha" / "config.json",
+        warnings=[f"config.json missing under {tmp_path / 'instances' / 'alpha'}."],
     )
     report = DiscoveryReport(instances=[alpha], warnings=["No instances discovered under ..."])
     monkeypatch.setattr(doctor_probes, "discover_instances", lambda *args, **kwargs: report)
@@ -295,8 +295,9 @@ def test_probe_state_reconcile_handles_discovery_warnings(
     assert result.status is ProbeStatus.YELLOW
     assert result.impact is DoctorImpact.OK
     assert result.warnings == tuple(report.warnings)
+    expected_warning = f"config.json missing under {tmp_path / 'instances' / 'alpha'}."
     assert result.data == {
-        "instance_warnings": {"alpha": ["config.json missing"]},
+        "instance_warnings": {"alpha": [expected_warning]},
     }
 
 
@@ -335,7 +336,7 @@ def test_probe_state_reconcile_green_when_registry_matches(
         name="alpha",
         root=tmp_path / "instances" / "alpha",
         data_dir=tmp_path / "instances" / "alpha" / "data",
-        config_path=tmp_path / "instances" / "alpha" / "data" / "config.json",
+        config_path=tmp_path / "instances" / "alpha" / "config.json",
     )
     report = DiscoveryReport(instances=[alpha])
     monkeypatch.setattr(doctor_probes, "discover_instances", lambda *args, **kwargs: report)

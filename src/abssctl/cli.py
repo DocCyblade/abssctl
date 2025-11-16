@@ -671,14 +671,14 @@ def _instance_paths_from_entry(
     paths_raw = entry.get("paths") if isinstance(entry, Mapping) else None
     root = _coerce_path(paths_raw, "root") if isinstance(paths_raw, Mapping) else None
     data_dir = _coerce_path(paths_raw, "data") if isinstance(paths_raw, Mapping) else None
-    config_path = _coerce_path(paths_raw, "config") if isinstance(paths_raw, Mapping) else None
+    config_path = None
     runtime_dir = _coerce_path(paths_raw, "runtime") if isinstance(paths_raw, Mapping) else None
     logs_dir = _coerce_path(paths_raw, "logs") if isinstance(paths_raw, Mapping) else None
     state_dir = _coerce_path(paths_raw, "state") if isinstance(paths_raw, Mapping) else None
 
     root = root or (config.instance_root / name)
     data_dir = data_dir or (root / "data")
-    config_path = config_path or (root / "config.json")
+    config_path = root / "config.json"
     runtime_dir = runtime_dir or (config.runtime_dir / "instances" / name)
     logs_dir = logs_dir or (config.logs_dir / name)
     state_dir = state_dir or (config.state_dir / "instances" / name)
@@ -1482,6 +1482,7 @@ def _build_systemd_context(
     domain: str,
     paths: InstancePaths,
     exec_path: Path,
+    config_path: Path,
     version: str,
 ) -> dict[str, object]:
     environment = [
@@ -1498,7 +1499,10 @@ def _build_systemd_context(
         f"ABSSCTL_DATA_DIR={paths.data}",
         f"ABSSCTL_VERSION={version}",
     ]
-    exec_command = f"{shlex.quote(str(NODE_WRAPPER_PATH))} {shlex.quote(str(exec_path))}"
+    exec_command = (
+        f"{shlex.quote(str(NODE_WRAPPER_PATH))} {shlex.quote(str(exec_path))} "
+        f"--config {shlex.quote(str(config_path))}"
+    )
     return {
         "instance_name": instance,
         "service_user": config.service_user,
@@ -1726,7 +1730,7 @@ def _determine_instance_paths(
     """Return the filesystem paths required for an instance."""
     root = config.instance_root / name
     data_dir = Path(data_dir_override).expanduser() if data_dir_override else (root / "data")
-    config_file = data_dir / "config.json"
+    config_file = root / "config.json"
     runtime_dir = config.runtime_dir / "instances" / name
     logs_dir = config.logs_dir / name
     state_dir = config.state_dir / "instances" / name
@@ -1742,35 +1746,67 @@ def _determine_instance_paths(
 
 def _build_instance_config(
     *,
-    name: str,
-    domain: str,
     port: int,
-    version: str,
     paths: InstancePaths,
-    created_at: datetime,
+    project_root: Path,
 ) -> dict[str, object]:
-    """Construct the default config.json payload for a new instance."""
+    """Construct the config.json payload for a new instance."""
+    server_files = paths.data / "server-files"
+    user_files = paths.data / "user-files"
+    for directory in (server_files, user_files):
+        directory.mkdir(parents=True, exist_ok=True)
+        os.chmod(directory, 0o750)
     return {
-        "schema": 1,
-        "instance": {
-            "name": name,
-            "domain": domain,
-            "created_at": created_at.isoformat(),
-        },
-        "server": {
-            "upstream": {
-                "host": "127.0.0.1",
-                "port": port,
-            },
-            "public_url": f"https://{domain}",
-            "version": version,
-        },
-        "paths": {
-            "root": str(paths.root),
-            "data": str(paths.data),
-            "config": str(paths.config_file),
+        "projectRoot": str(project_root),
+        "dataDir": str(paths.data),
+        "port": port,
+        "hostname": "127.0.0.1",
+        "serverFiles": str(server_files),
+        "userFiles": str(user_files),
+        "loginMethod": "password",
+        "upload": {
+            "fileSizeSyncLimitMB": 20,
+            "syncEncryptedFileSizeLimitMB": 50,
+            "fileSizeLimitMB": 20,
         },
     }
+
+
+def _build_instance_config_from_entry(
+    runtime: RuntimeContext,
+    entry: Mapping[str, object],
+    *,
+    paths: InstancePaths,
+    port: int,
+) -> dict[str, object]:
+    """Return a config payload based on registry entry metadata."""
+    version = str(entry.get("version") or runtime.config.default_version)
+    project_root = _project_root_for_version(runtime.config, version)
+    return _build_instance_config(port=port, paths=paths, project_root=project_root)
+
+
+def _install_version_dependencies(
+    *,
+    directory: Path,
+    op: OperationScope,
+) -> None:
+    """Install npm dependencies for a newly unpacked Actual release."""
+    cmd = ["npm", "install", "--omit=dev", "--no-save"]
+    result = subprocess.run(  # noqa: S603,S607
+        cmd,
+        check=False,
+        cwd=str(directory),
+        capture_output=True,
+        text=True,
+    )
+    detail = f"command={' '.join(cmd)} rc={result.returncode}"
+    if result.stdout:
+        detail += f" stdout={result.stdout.strip()}"
+    if result.stderr:
+        detail += f" stderr={result.stderr.strip()}"
+    if result.returncode != 0:
+        raise VersionInstallError("npm install failed")
+    op.add_step("npm.install", status="success", detail=detail)
 
 
 def _default_instance_domain(config: AppConfig, instance: str) -> str:
@@ -1838,7 +1874,15 @@ def _resolve_exec_path(runtime: RuntimeContext, version: str) -> Path:
             base = Path(str(entry["path"]))
         else:
             base = runtime.config.install_root / f"v{normalized}"
-    return base / "server.js"
+    return base / "build" / "bin" / "actual-server.js"
+
+
+def _project_root_for_version(config: AppConfig, version: str) -> Path:
+    """Return the install directory for *version*."""
+    normalized = version.strip() or config.default_version
+    if normalized == "current":
+        return config.install_root / "current"
+    return config.install_root / f"v{normalized}"
 
 
 def _register_instance(
@@ -3207,8 +3251,29 @@ def version_install(
                         "switch.pending",
                         status="info",
                         detail="--set-current deferred during dry-run",
-                    )
+                )
                 return
+
+            try:
+                _install_version_dependencies(directory=install_result.path, op=op)
+            except VersionInstallError as exc:
+                _command_error(
+                    op,
+                    f"Failed to install dependencies for version '{version}': {exc}",
+                    rc=4,
+                    errors=[str(exc)],
+                )
+
+            entrypoint = install_result.path / "build" / "bin" / "actual-server.js"
+            if not entrypoint.exists():
+                _command_error(
+                    op,
+                    (
+                        "Installation missing build/bin/actual-server.js; verify the npm package "
+                        "layout."
+                    ),
+                    rc=4,
+                )
 
             _record_installed_version(runtime, install_result, op)
             console.print(
@@ -4645,13 +4710,20 @@ def instance_create(
                     op.add_step(label, status="success", detail=str(path))
                     cleanup_dirs.append(path)
 
+                for label, path in [
+                    ("filesystem.mkdir.server_files", paths.data / "server-files"),
+                    ("filesystem.mkdir.user_files", paths.data / "user-files"),
+                ]:
+                    path.mkdir(parents=True, exist_ok=False)
+                    os.chmod(path, 0o750)
+                    op.add_step(label, status="success", detail=str(path))
+                    cleanup_dirs.append(path)
+
+                project_root = _project_root_for_version(runtime.config, version_value)
                 config_payload = _build_instance_config(
-                    name=name,
-                    domain=domain_value,
                     port=port_value,
-                    version=version_value,
                     paths=paths,
-                    created_at=created_at,
+                    project_root=project_root,
                 )
                 _write_instance_config(paths, config_payload)
                 op.add_step("config.write", status="success", detail=str(paths.config_file))
@@ -4697,6 +4769,7 @@ def instance_create(
                     domain=domain_value,
                     paths=paths,
                     exec_path=exec_path,
+                    config_path=paths.config_file,
                     version=version_value,
                 )
                 systemd_changed = runtime.systemd_provider.render_unit(name, systemd_context)
@@ -6765,10 +6838,6 @@ def instance_env(
 
         domain_value = str(entry.get("domain") or "").strip()
         if not domain_value:
-            instance_section = config_payload.get("instance")
-            if isinstance(instance_section, Mapping):
-                domain_value = str(instance_section.get("domain", "")).strip()
-        if not domain_value:
             domain_value = _default_instance_domain(runtime.config, name)
 
         version_value = (
@@ -6784,6 +6853,7 @@ def instance_env(
             domain=domain_value,
             paths=paths,
             exec_path=exec_path,
+            config_path=paths.config_file,
             version=version_value,
         )
         env_raw = systemd_context.get("environment", [])
@@ -6855,7 +6925,6 @@ def instance_set_fqdn(
                 return
 
             paths = _instance_paths_from_entry(runtime.config, name, entry)
-            config_payload = _read_instance_config(paths)
             port_value: object = entry.get("port")
             if port_value in (None, "", 0):
                 port_value = runtime.ports.get_port(name)
@@ -6882,28 +6951,12 @@ def instance_set_fqdn(
                 on_accept=lambda scope: None,
             )
 
-            instance_section = config_payload.setdefault("instance", {})
-            if not isinstance(instance_section, dict):
-                instance_section = {}
-                config_payload["instance"] = instance_section
-            instance_section["domain"] = new_domain
-
-            server_section = config_payload.setdefault("server", {})
-            if not isinstance(server_section, dict):
-                server_section = {}
-                config_payload["server"] = server_section
-            upstream = server_section.setdefault("upstream", {})
-            if not isinstance(upstream, dict):
-                upstream = {}
-                server_section["upstream"] = upstream
-            upstream["port"] = port_int
-            upstream.setdefault("host", "127.0.0.1")
-            server_section["public_url"] = f"https://{new_domain}"
-            server_section.setdefault(
-                "version",
-                entry.get("version", runtime.config.default_version),
+            config_payload = _build_instance_config_from_entry(
+                runtime,
+                entry,
+                paths=paths,
+                port=port_int,
             )
-
             _write_instance_config(paths, config_payload)
             op.add_step("config.write", status="success", detail=str(paths.config_file))
 
@@ -7029,7 +7082,6 @@ def instance_set_port(
                 _command_error(op, message, rc=2)
 
             paths = _instance_paths_from_entry(runtime.config, name, entry)
-            config_payload = _read_instance_config(paths)
             version_value = (
                 str(entry.get("version") or "").strip()
                 or runtime.config.default_version
@@ -7094,16 +7146,12 @@ def instance_set_port(
                     message = str(exc)
                     _command_error(op, message, rc=2)
 
-                server_section = config_payload.setdefault("server", {})
-                if not isinstance(server_section, dict):
-                    server_section = {}
-                    config_payload["server"] = server_section
-                upstream = server_section.setdefault("upstream", {})
-                if not isinstance(upstream, dict):
-                    upstream = {}
-                    server_section["upstream"] = upstream
-                upstream["port"] = port
-                upstream.setdefault("host", "127.0.0.1")
+                config_payload = _build_instance_config_from_entry(
+                    runtime,
+                    entry,
+                    paths=paths,
+                    port=port,
+                )
                 _write_instance_config(paths, config_payload)
                 op.add_step("config.write", status="success", detail=str(paths.config_file))
 
@@ -7115,6 +7163,7 @@ def instance_set_port(
                     domain=domain_value,
                     paths=paths,
                     exec_path=exec_path,
+                    config_path=paths.config_file,
                     version=version_value,
                 )
                 unit_changed = runtime.systemd_provider.render_unit(name, systemd_context)
@@ -7254,7 +7303,6 @@ def instance_set_version(
                     _command_error(op, f"Version '{normalized_version}' is not registered.", rc=2)
 
             paths = _instance_paths_from_entry(runtime.config, name, entry)
-            config_payload = _read_instance_config(paths)
             port_value: object = entry.get("port")
             if port_value in (None, "", 0):
                 port_value = runtime.ports.get_port(name)
@@ -7298,11 +7346,14 @@ def instance_set_version(
                 else:
                     op.add_step("systemd.stop", status="skipped", detail="not-running")
 
-                server_section = config_payload.setdefault("server", {})
-                if not isinstance(server_section, dict):
-                    server_section = {}
-                    config_payload["server"] = server_section
-                server_section["version"] = normalized_version
+                updated_entry = dict(entry)
+                updated_entry["version"] = normalized_version
+                config_payload = _build_instance_config_from_entry(
+                    runtime,
+                    updated_entry,
+                    paths=paths,
+                    port=port_int,
+                )
                 _write_instance_config(paths, config_payload)
                 op.add_step("config.write", status="success", detail=str(paths.config_file))
 
@@ -7314,6 +7365,7 @@ def instance_set_version(
                     domain=domain_value,
                     paths=paths,
                     exec_path=exec_path,
+                    config_path=paths.config_file,
                     version=normalized_version,
                 )
                 unit_changed = runtime.systemd_provider.render_unit(name, systemd_context)
@@ -7424,7 +7476,6 @@ def instance_rename(
                 )
                 _command_error(op, message, rc=2)
 
-            config_payload = _read_instance_config(paths)
             port_value: object = entry.get("port")
             if port_value in (None, "", 0):
                 port_value = runtime.ports.get_port(name)
@@ -7524,20 +7575,12 @@ def instance_rename(
                 if moved_paths:
                     op.add_step("filesystem.move", status="success", detail="; ".join(moved_paths))
 
-                instance_section = config_payload.setdefault("instance", {})
-                if not isinstance(instance_section, dict):
-                    instance_section = {}
-                    config_payload["instance"] = instance_section
-                instance_section["name"] = validated_new
-
-                paths_section = config_payload.setdefault("paths", {})
-                if not isinstance(paths_section, dict):
-                    paths_section = {}
-                    config_payload["paths"] = paths_section
-                paths_section["root"] = str(default_paths_new.root)
-                paths_section["data"] = str(default_paths_new.data)
-                paths_section["config"] = str(default_paths_new.config_file)
-
+                config_payload = _build_instance_config_from_entry(
+                    runtime,
+                    entry,
+                    paths=default_paths_new,
+                    port=port_int,
+                )
                 _write_instance_config(default_paths_new, config_payload)
                 op.add_step(
                     "config.write",
@@ -7553,6 +7596,7 @@ def instance_rename(
                     domain=domain_value,
                     paths=default_paths_new,
                     exec_path=exec_path,
+                    config_path=default_paths_new.config_file,
                     version=version_value,
                 )
                 runtime.systemd_provider.render_unit(validated_new, systemd_context)

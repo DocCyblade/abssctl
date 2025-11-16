@@ -54,7 +54,7 @@ def discover_instances(
             continue
         name = child.name
         data_dir = child / "data"
-        config_path = data_dir / "config.json"
+        config_path = child / "config.json"
         instance = DiscoveredInstance(
             name=name,
             root=child,
@@ -73,7 +73,7 @@ def discover_instances(
             instance.nginx_site = nginx_sites_available / f"{name}.conf"
 
         if not config_path.exists():
-            instance.warnings.append(f"config.json missing under {data_dir}.")
+            instance.warnings.append(f"config.json missing under {child}.")
             report.instances.append(instance)
             continue
 
@@ -89,8 +89,8 @@ def discover_instances(
             report.instances.append(instance)
             continue
 
-        instance.domain = _get_nested_str(payload, ["instance", "domain"])
-        port_value = _get_nested_value(payload, ["server", "upstream", "port"])
+        instance.domain = None
+        port_value = payload.get("port")
         if isinstance(port_value, int):
             instance.port = port_value
         elif isinstance(port_value, str):
@@ -98,27 +98,13 @@ def discover_instances(
                 instance.port = int(port_value)
             except ValueError:
                 instance.warnings.append(f"Upstream port value '{port_value}' is not numeric.")
-        instance.version = _get_nested_str(payload, ["server", "version"])
+        instance.version = None
 
         report.instances.append(instance)
 
     if not report.instances:
         report.warnings.append(f"No instances discovered under {instance_root}.")
     return report
-
-
-def _get_nested_value(payload: dict[str, object], path: list[str]) -> object | None:
-    current: object = payload
-    for key in path:
-        if not isinstance(current, dict):
-            return None
-        current = current.get(key)
-    return current
-
-
-def _get_nested_str(payload: dict[str, object], path: list[str]) -> str | None:
-    value = _get_nested_value(payload, path)
-    return value if isinstance(value, str) else None
 
 
 __all__ = ["DiscoveredInstance", "DiscoveryReport", "discover_instances"]

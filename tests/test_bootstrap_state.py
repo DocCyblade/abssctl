@@ -29,7 +29,7 @@ def test_rebuild_registry_from_discovery(tmp_path: Path) -> None:
         name="alpha",
         root=tmp_path / "srv" / "alpha",
         data_dir=tmp_path / "srv" / "alpha" / "data",
-        config_path=tmp_path / "srv" / "alpha" / "data" / "config.json",
+        config_path=tmp_path / "srv" / "alpha" / "config.json",
         runtime_dir=tmp_path / "run" / "abssctl" / "instances" / "alpha",
         logs_dir=tmp_path / "var" / "log" / "abssctl" / "alpha",
         state_dir=tmp_path / "var" / "lib" / "abssctl" / "instances" / "alpha",

@@ -45,22 +45,22 @@ def _setup_instance_assets(tmp_path: Path, name: str) -> None:
 
 def _write_instance_config(root: Path, name: str, port: int) -> None:
     """Write a minimal config.json for discovery to consume."""
-    config_path = root / name / "data" / "config.json"
-    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path = root / name / "config.json"
+    data_dir = root / name / "data"
+    (data_dir / "server-files").mkdir(parents=True, exist_ok=True)
+    (data_dir / "user-files").mkdir(parents=True, exist_ok=True)
     payload = {
-        "schema": 1,
-        "instance": {
-            "name": name,
-            "domain": f"{name}.example.com",
-        },
-        "server": {
-            "upstream": {"host": "127.0.0.1", "port": port},
-            "version": "v1.2.3",
-        },
-        "paths": {
-            "root": str(root / name),
-            "data": str(root / name / "data"),
-            "config": str(config_path),
+        "projectRoot": "/srv/app/current",
+        "dataDir": str(data_dir),
+        "port": port,
+        "hostname": "127.0.0.1",
+        "serverFiles": str(data_dir / "server-files"),
+        "userFiles": str(data_dir / "user-files"),
+        "loginMethod": "password",
+        "upload": {
+            "fileSizeSyncLimitMB": 20,
+            "syncEncryptedFileSizeLimitMB": 50,
+            "fileSizeLimitMB": 20,
         },
     }
     config_path.write_text(json.dumps(payload), encoding="utf-8")

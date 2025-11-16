@@ -7,22 +7,20 @@ from pathlib import Path
 from abssctl.bootstrap.discovery import discover_instances
 
 
-def _write_config(path: Path, domain: str, port: int, version: str) -> None:
+def _write_config(path: Path, port: int) -> None:
     """Write a minimal config.json payload for discovery fixtures."""
     payload = {
-        "schema": 1,
-        "instance": {
-            "name": path.parent.parent.name,
-            "domain": domain,
-        },
-        "server": {
-            "upstream": {"host": "127.0.0.1", "port": port},
-            "version": version,
-        },
-        "paths": {
-            "root": str(path.parent.parent),
-            "data": str(path.parent),
-            "config": str(path),
+        "projectRoot": "/srv/app/current",
+        "dataDir": str(path.parent / "data"),
+        "port": port,
+        "hostname": "127.0.0.1",
+        "serverFiles": str(path.parent / "data" / "server-files"),
+        "userFiles": str(path.parent / "data" / "user-files"),
+        "loginMethod": "password",
+        "upload": {
+            "fileSizeSyncLimitMB": 20,
+            "syncEncryptedFileSizeLimitMB": 50,
+            "fileSizeLimitMB": 20,
         },
     }
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -38,8 +36,8 @@ def test_discovery_reports_instances(tmp_path: Path) -> None:
     systemd_dir = tmp_path / "etc" / "systemd"
     nginx_sites = tmp_path / "etc" / "nginx" / "sites-available"
 
-    config_path = instance_root / "alpha" / "data" / "config.json"
-    _write_config(config_path, "alpha.example.com", 5555, "v1.2.3")
+    config_path = instance_root / "alpha" / "config.json"
+    _write_config(config_path, 5555)
 
     report = discover_instances(
         instance_root,
@@ -55,9 +53,9 @@ def test_discovery_reports_instances(tmp_path: Path) -> None:
     assert len(report.instances) == 1
     instance = report.instances[0]
     assert instance.name == "alpha"
-    assert instance.domain == "alpha.example.com"
+    assert instance.domain is None
     assert instance.port == 5555
-    assert instance.version == "v1.2.3"
+    assert instance.version is None
     assert instance.systemd_unit == systemd_dir / "abssctl-alpha.service"
     assert instance.nginx_site == nginx_sites / "alpha.conf"
 
@@ -65,14 +63,14 @@ def test_discovery_reports_instances(tmp_path: Path) -> None:
 def test_discovery_handles_missing_config(tmp_path: Path) -> None:
     """Discovery should capture warnings when config.json is absent."""
     instance_root = tmp_path / "srv"
-    (instance_root / "beta" / "data").mkdir(parents=True)
+    (instance_root / "beta").mkdir(parents=True)
 
     report = discover_instances(instance_root)
 
     assert len(report.instances) == 1
     beta = report.instances[0]
     assert beta.name == "beta"
-    assert beta.warnings == [f"config.json missing under {beta.data_dir}."]
+    assert beta.warnings == [f"config.json missing under {instance_root / 'beta'}."]
 
 
 def test_discovery_missing_root_emits_error(tmp_path: Path) -> None:
@@ -88,7 +86,7 @@ def test_discovery_missing_root_emits_error(tmp_path: Path) -> None:
 def test_discovery_handles_malformed_config(tmp_path: Path) -> None:
     """Malformed JSON should yield a warning for the affected instance."""
     instance_root = tmp_path / "srv"
-    config_path = instance_root / "gamma" / "data" / "config.json"
+    config_path = instance_root / "gamma" / "config.json"
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text("{]", encoding="utf-8")
 
@@ -100,15 +98,14 @@ def test_discovery_handles_malformed_config(tmp_path: Path) -> None:
 def test_discovery_parses_string_port_and_flags_invalid(tmp_path: Path) -> None:
     """String ports should be coerced when numeric and warned when invalid."""
     instance_root = tmp_path / "srv"
-    valid_path = instance_root / "alpha" / "data" / "config.json"
-    invalid_path = instance_root / "beta" / "data" / "config.json"
-    _write_config(valid_path, "alpha.example.com", 6000, "v1.0.0")
+    valid_path = instance_root / "alpha" / "config.json"
+    invalid_path = instance_root / "beta" / "config.json"
+    _write_config(valid_path, 6000)
 
     payload = {
-        "schema": 1,
-        "instance": {"name": "beta"},
-        "server": {"upstream": {"host": "127.0.0.1", "port": "not-a-port"}},
-        "paths": {},
+        "projectRoot": "/srv/app/current",
+        "dataDir": str(invalid_path.parent / "data"),
+        "port": "not-a-port",
     }
     invalid_path.parent.mkdir(parents=True, exist_ok=True)
     invalid_path.write_text(json.dumps(payload), encoding="utf-8")
@@ -124,7 +121,7 @@ def test_discovery_parses_string_port_and_flags_invalid(tmp_path: Path) -> None:
 def test_discovery_handles_non_mapping_payload(tmp_path: Path) -> None:
     """Non-mapping configs should report a warning."""
     instance_root = tmp_path / "srv"
-    config_path = instance_root / "alpha" / "data" / "config.json"
+    config_path = instance_root / "alpha" / "config.json"
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(json.dumps(["unexpected", "list"]), encoding="utf-8")
 

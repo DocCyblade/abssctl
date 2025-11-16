@@ -160,6 +160,13 @@ def _fake_completed(command: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess(command, returncode=0, stdout="", stderr="")
 
 
+def _ensure_entrypoint(directory: Path) -> None:
+    """Create the expected Actual CLI entrypoint for version directories."""
+    entrypoint = directory / "build" / "bin" / "actual-server.js"
+    entrypoint.parent.mkdir(parents=True, exist_ok=True)
+    entrypoint.write_text("console.log('stub');\n", encoding="utf-8")
+
+
 def _file_digest(path: Path) -> str | None:
     """Return the SHA256 digest of *path*, if it exists."""
     if not path.exists():
@@ -2181,6 +2188,7 @@ def test_version_install_records_registry(
     ) -> VersionInstallResult:
         target_dir.mkdir(parents=True, exist_ok=True)
         (target_dir / "node_modules").mkdir(parents=True, exist_ok=True)
+        _ensure_entrypoint(target_dir)
         return VersionInstallResult(
             version=version,
             path=target_dir,
@@ -2336,6 +2344,7 @@ def test_version_install_no_backup_records_skip(
     ) -> VersionInstallResult:
         target = install_root / f"v{version}"
         target.mkdir(parents=True, exist_ok=True)
+        _ensure_entrypoint(target)
         return VersionInstallResult(
             version=version,
             path=target,
@@ -2444,6 +2453,7 @@ def test_version_install_triggers_backup(
         target_dir = install_root / f"v{version}"
         target_dir.mkdir(parents=True, exist_ok=True)
         (target_dir / "node_modules").mkdir(parents=True, exist_ok=True)
+        _ensure_entrypoint(target_dir)
         return VersionInstallResult(
             version=version,
             path=target_dir,
@@ -2499,6 +2509,7 @@ def test_version_install_backup_prompt_records_step(
     ) -> VersionInstallResult:
         target = install_root / f"v{version}"
         target.mkdir(parents=True, exist_ok=True)
+        _ensure_entrypoint(target)
         return VersionInstallResult(
             version=version,
             path=target,
@@ -2548,6 +2559,7 @@ def test_version_install_with_set_current_switches_symlink(
         dry_run: bool = False,
     ) -> VersionInstallResult:
         target_dir.mkdir(parents=True, exist_ok=True)
+        _ensure_entrypoint(target_dir)
         return VersionInstallResult(
             version=version,
             path=target_dir,
@@ -2824,6 +2836,8 @@ def test_instance_create_acquires_lock(tmp_path: Path) -> None:
     assert runtime_instance_dir.exists()
     assert logs_instance_dir.exists()
     assert state_instance_dir.exists()
+    assert (data_dir / "server-files").exists()
+    assert (data_dir / "user-files").exists()
 
     systemd_unit = runtime_dir / "systemd" / "abssctl-alpha.service"
     assert systemd_unit.exists()
@@ -2878,13 +2892,14 @@ def test_instance_create_acquires_lock(tmp_path: Path) -> None:
     assert "nginx.validate" in steps_by_name
     assert "nginx.reload" in steps_by_name
 
-    config_payload = json.loads((data_dir / "config.json").read_text(encoding="utf-8"))
-    assert config_payload["instance"]["name"] == "alpha"
-    assert config_payload["instance"]["domain"] == "alpha.local"
-    assert config_payload["server"]["upstream"]["port"] == 5000
-    assert config_payload["server"]["version"] == "current"
-    assert config_payload["paths"]["root"] == str(instance_root)
-    assert config_payload["paths"]["data"] == str(data_dir)
+    config_path = instance_root / "config.json"
+    assert config_path.exists()
+    config_payload = json.loads(config_path.read_text(encoding="utf-8"))
+    assert config_payload["dataDir"] == str(data_dir)
+    assert config_payload["port"] == 5000
+    assert config_payload["serverFiles"] == str(data_dir / "server-files")
+    assert config_payload["userFiles"] == str(data_dir / "user-files")
+    assert config_payload["loginMethod"] == "password"
 
 
 def test_instance_create_rolls_back_on_systemd_failure(
@@ -3028,12 +3043,6 @@ def test_instance_set_fqdn_updates_registry(tmp_path: Path) -> None:
     assert history
     assert history[-1]["domain"] == "alpha.local"
 
-    config_path = tmp_path / "instances" / "alpha" / "data" / "config.json"
-    payload = json.loads(config_path.read_text(encoding="utf-8"))
-    assert payload["instance"]["domain"] == "alpha.example.com"
-    assert payload["server"]["public_url"] == "https://alpha.example.com"
-
-
 def test_instance_set_fqdn_rejects_invalid_domain(tmp_path: Path) -> None:
     """Invalid domains trigger a validation exit code."""
     env, _ = _prepare_environment(
@@ -3055,7 +3064,7 @@ def test_instance_set_port_updates_registry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`set-port` rewrites config, ports registry, and restarts service."""
+    """`set-port` updates the ports registry and restarts service."""
     env, state_dir = _prepare_environment(tmp_path)
     _create_instance(env)
 
@@ -3163,9 +3172,9 @@ def test_instance_set_version_updates_registry(
     metadata = entry["metadata"]
     assert metadata.get("version_changed_at")
 
-    config_path = tmp_path / "instances" / "alpha" / "data" / "config.json"
+    config_path = tmp_path / "instances" / "alpha" / "config.json"
     payload = json.loads(config_path.read_text(encoding="utf-8"))
-    assert payload["server"]["version"] == "25.9.0"
+    assert payload["projectRoot"] == str(install_root / "v25.9.0")
 
 
 @pytest.mark.mutation_timeout
