@@ -5,6 +5,9 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import cast
+
+import click
 
 SHELLS = ("bash", "zsh", "fish", "powershell")
 
@@ -53,6 +56,17 @@ def completion_dest(shell: str, *, system: bool, override: Path | None = None) -
     return home / ".config/abssctl/abssctl.ps1"
 
 
+def _click_command(command: object) -> click.Command:
+    """Return ``command`` as the public Click ``Command`` type.
+
+    Typer 0.20+ builds commands with a vendored Click. Those objects still
+    drive Click's public completion classes.
+    """
+    if isinstance(command, click.Command):
+        return command
+    return cast(click.Command, command)
+
+
 def render_completion(shell: str) -> str:
     """Return the Click completion script for *shell*."""
     import typer
@@ -64,7 +78,7 @@ def render_completion(shell: str) -> str:
     completion_cls = get_completion_class(chosen)
     if completion_cls is None:
         raise CompletionError(f"Click has no completion implementation for '{chosen}'.")
-    command = typer.main.get_command(app)
+    command = _click_command(typer.main.get_command(app))
     complete = completion_cls(command, {}, "abssctl", "_ABSSCTL_COMPLETE")
     source = complete.source()
     if not source.endswith("\n"):
