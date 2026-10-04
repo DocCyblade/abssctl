@@ -6,6 +6,7 @@ server {
     ssl_certificate_key {{ tls.certificate_key }};
 {% endif %}
     server_name {{ server_name }};
+    client_max_body_size 50M;
 
     access_log {{ access_log }};
     error_log {{ error_log }};
