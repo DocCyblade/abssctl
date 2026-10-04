@@ -593,9 +593,8 @@ app = typer.Typer(
         """
         Actual Budget Multi-Instance Sync Server Admin CLI.
 
-        This Pre-Alpha build ships with structural scaffolding only. Subcommands
-        communicate planned responsibilities and will be fully implemented
-        during the Alpha and Beta phases once the underlying APIs are ready.
+        Beta build. Subcommands install and operate Actual sync-server instances
+        (systemd, nginx, backups, TLS, and doctor). Actual 25.11+ needs Node 22.
         """
     ).strip(),
 )
@@ -1279,7 +1278,7 @@ def _root(  # noqa: D401 - Typer displays help for us, docstring optional.
             op.success("Reported CLI version.", changed=0)
         raise typer.Exit(code=0)
 
-    if ctx.invoked_subcommand == "system":
+    if ctx.invoked_subcommand in {"system", "completion", "docs"}:
         return
 
     _ensure_runtime(ctx, config_file, lock_timeout)
@@ -2530,6 +2529,10 @@ versions_app = typer.Typer(help="Manage installed Sync Server versions.")
 backups_app = typer.Typer(help="Create and reconcile instance backups.")
 config_app = typer.Typer(help="Inspect and manage global configuration.")
 tls_app = typer.Typer(help="Manage TLS certificates and validation.")
+docs_app = typer.Typer(help="Inspect packaged documentation artifacts.")
+man_app = typer.Typer(help="Locate and install the abssctl man page.")
+docs_app.add_typer(man_app, name="man")
+completion_app = typer.Typer(help="Show, install, or remove shell completion scripts.")
 
 app.add_typer(system_app, name="system")
 app.add_typer(node_app, name="node")
@@ -2539,6 +2542,150 @@ app.add_typer(versions_app, name="version")
 app.add_typer(backups_app, name="backup")
 app.add_typer(config_app, name="config")
 app.add_typer(tls_app, name="tls")
+app.add_typer(docs_app, name="docs")
+app.add_typer(completion_app, name="completion")
+
+
+COMPLETION_SHELL_OPTION = typer.Option(
+    None,
+    "--shell",
+    help="bash, zsh, fish, or powershell.",
+)
+COMPLETION_USER_OPTION = typer.Option(
+    False,
+    "--user",
+    help="Use the per-user completion path.",
+)
+COMPLETION_SYSTEM_OPTION = typer.Option(
+    False,
+    "--system",
+    help="Use the system completion path.",
+)
+COMPLETION_PATH_OPTION = typer.Option(
+    None,
+    "--path",
+    help="Write or remove this completion file instead of the default path.",
+)
+MAN_USER_OPTION = typer.Option(
+    False,
+    "--user",
+    help="Install under ~/.local/share/man/man1.",
+)
+MAN_SYSTEM_OPTION = typer.Option(
+    False,
+    "--system",
+    help="Install under /usr/local/share/man/man1.",
+)
+MAN_PREFIX_OPTION = typer.Option(
+    None,
+    "--prefix",
+    help="Install under PREFIX/share/man/man1.",
+)
+
+
+@completion_app.command("show")
+def completion_show(
+    shell: str | None = COMPLETION_SHELL_OPTION,
+) -> None:
+    """Print a shell completion script to stdout."""
+    from abssctl.completions import CompletionError, normalize_shell, render_completion
+
+    try:
+        chosen = normalize_shell(shell)
+        typer.echo(render_completion(chosen), nl=False)
+    except CompletionError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from exc
+
+
+@completion_app.command("install")
+def completion_install(
+    shell: str | None = COMPLETION_SHELL_OPTION,
+    user: bool = COMPLETION_USER_OPTION,
+    system: bool = COMPLETION_SYSTEM_OPTION,
+    path: Path | None = COMPLETION_PATH_OPTION,
+) -> None:
+    """Install a completion script. Does not edit shell rc files."""
+    from abssctl.completions import (
+        CompletionError,
+        install_completion,
+        install_hint,
+        normalize_shell,
+    )
+
+    if user and system:
+        console.print("[red]Pass only one of --user or --system.[/red]")
+        raise typer.Exit(code=2)
+    try:
+        chosen = normalize_shell(shell)
+        target = install_completion(chosen, system=system, dest=path)
+    except CompletionError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from exc
+    except OSError as exc:
+        console.print(f"[red]Could not write completion script: {exc}[/red]")
+        raise typer.Exit(code=3) from exc
+    console.print(f"[green]Installed {chosen} completion to {target}.[/green]")
+    console.print(install_hint(chosen, target))
+
+
+@completion_app.command("uninstall")
+def completion_uninstall(
+    shell: str | None = COMPLETION_SHELL_OPTION,
+    user: bool = COMPLETION_USER_OPTION,
+    system: bool = COMPLETION_SYSTEM_OPTION,
+    path: Path | None = COMPLETION_PATH_OPTION,
+) -> None:
+    """Remove an installed completion script."""
+    from abssctl.completions import CompletionError, normalize_shell, uninstall_completion
+
+    if user and system:
+        console.print("[red]Pass only one of --user or --system.[/red]")
+        raise typer.Exit(code=2) from None
+    try:
+        chosen = normalize_shell(shell)
+        target = uninstall_completion(chosen, system=system, dest=path)
+    except CompletionError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from exc
+    except OSError as exc:
+        console.print(f"[red]Could not remove completion script: {exc}[/red]")
+        raise typer.Exit(code=3) from exc
+    console.print(f"[green]Removed {chosen} completion ({target}).[/green]")
+
+
+@man_app.command("path")
+def docs_man_path() -> None:
+    """Print the packaged man page path."""
+    from abssctl.manpages import man_page_path
+
+    path = man_page_path()
+    if not path.is_file():
+        console.print(f"[red]Packaged man page is missing: {path}[/red]")
+        raise typer.Exit(code=3)
+    typer.echo(str(path))
+
+
+@man_app.command("install")
+def docs_man_install(
+    user: bool = MAN_USER_OPTION,
+    system: bool = MAN_SYSTEM_OPTION,
+    prefix: Path | None = MAN_PREFIX_OPTION,
+) -> None:
+    """Copy the packaged man page into a man1 directory."""
+    from abssctl.manpages import ManPageError, install_man_page
+
+    try:
+        target, note = install_man_page(system=system, user=user, prefix=prefix)
+    except ManPageError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from exc
+    except OSError as exc:
+        console.print(f"[red]Could not install man page: {exc}[/red]")
+        raise typer.Exit(code=3) from exc
+    console.print(f"[green]Installed man page to {target}.[/green]")
+    if note:
+        console.print(note)
 
 
 @node_app.command("ensure")

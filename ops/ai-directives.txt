@@ -1,3 +1,7 @@
+RETIRED 2026-10-04. Do not bootstrap new Cursor chats from this file.
+New chats start from AGENTS.md, docs/CURSOR_WORKFLOW.md, and docs/PATH_FORWARD.md.
+ops/session-log.txt is an archive. Do not open, append, or close sessions here.
+
 This file is used to help bootstrap AI help/chats to keep things consistent between chats and sessions please read this first and all files listed before starting. 
 
 All new chats I will start with the below text

@@ -2,16 +2,16 @@
 abssctl — Actual Sync Server Admin CLI
 ======================================
 
-.. image:: https://img.shields.io/badge/status-alpha-blue
-   :alt: Project maturity badge showing Alpha status
+.. image:: https://img.shields.io/badge/status-beta-blue
+   :alt: Project maturity badge showing Beta status
 
 ``abssctl`` is a batteries-included command line tool that installs and manages
 multiple Actual Budget Sync Server instances on the TurnKey Linux Node.js
-appliance. The CLI owns the full lifecycle today: provisioning new instances,
+appliance. The CLI owns the full lifecycle: provisioning new instances,
 performing upgrades or rollbacks, managing nginx and systemd integrations, and
-producing backup archives for operators. Alpha milestone efforts continue to
-iterate on the operational polish before Beta health checks and support bundles
-arrive.
+producing backup archives for operators. Beta builds include doctor, TLS,
+backup restore, and support bundles. Actual 25.11 and newer require Node.js 22,
+which ``abssctl node ensure`` installs. v1 still needs an appliance burn-in.
 
 Project Facts
 =============
@@ -19,10 +19,11 @@ Project Facts
 - **Project name:** Actual Budget Multi-Instance Sync Server Admin CLI.
 - **CLI executable:** ``abssctl`` (Actual Budget Sync Server ConTroL).
 
-The project is currently in the **Alpha (core features)** phase. The repository
-builds on the bootstrap work from Pre-Alpha and now includes structured logging,
-global/per-instance locking, templated systemd/nginx providers, a ports
-registry, full instance lifecycle commands, and end-to-end version management.
+The project is currently in the **Beta** phase. The repository includes
+structured logging, global/per-instance locking, templated systemd/nginx
+providers, a ports registry, full instance lifecycle commands, version
+management, doctor, TLS, backups, and support bundles. The preferred Node
+runtime for current Actual releases is 22 (see ADR-005).
 
 Key Objectives
 ==============
@@ -40,11 +41,10 @@ Quick Start (Alpha Foundations)
 ===============================
 
 .. note::
-   The CLI is still stabilising APIs during Alpha. All lifecycle commands are
-   available today (version install/switch/uninstall, instance
-   create/enable/start/stop/restart/delete, etc.), but production deployments
-   should continue to treat this release as a preview until the Beta hardening
-   work (doctor/support-bundle/TLS restore flows) lands.
+   Lifecycle, doctor, TLS, backup restore, and support-bundle commands are
+   available. Treat appliance use as beta until the manual integration
+   checklist in ``docs/source/guides/mitp.rst`` has been run for Actual 26.x
+   on Node 22.
 
 1. Create a Python 3.11 virtual environment stored in ``.venv`` with a prompt label ``dev`` and activate it::
 
@@ -174,8 +174,9 @@ Branch Strategy
 - ``main`` — production-ready releases tagged for PyPI.
 - ``dev`` — integration branch for upcoming development builds.
 - ``dev-<label>`` — milestone integration branches (``dev-alphaN``, ``dev-betaN``,
-  ``dev-1.2.0a1``); the current focus is ``dev-alpha5`` while we prepare the Beta
-  health-check and restore work.
+  ``dev-1.2.0a1``). Active work is on ``dev-beta1-redux``, cut from
+  ``dev-beta1``. ``dev`` stays the integration branch and is updated when a
+  redux slice is ready to promote.
 - Short-lived feature branches support focused working sessions.
 - Release preparation uses ``release/<version>`` branches before tagging.
 - Urgent fixes branch from ``main`` as ``hotfix/<version>`` (code) or
@@ -189,15 +190,13 @@ Roadmap Snapshot
 - **Alpha Builds — Foundations:** CLI skeleton beyond placeholders, config
   loader, logging, state/lock primitives, template engine, read-only commands,
   JSON output plumbing. Publish dev builds to PyPI from tags on ``dev``.
-- **Alpha Core Features (current):** Version install/switch/uninstall, ports
+- **Alpha Core Features (complete):** Version install/switch/uninstall, ports
   registry, systemd/nginx providers, instance lifecycle subcommands, structured
   rollback handling, and expanded test coverage.
-- **Beta Releases — Core Features:** TLS tooling, backup restore/reconcile, and
-  the doctor CLI harness (structured JSON output, filters, exit-code mapping),
-  plus support bundle groundwork. All updates become non-destructive or ship
-  with migration hooks.
-- **Release Candidate — Quality & Docs:** Support bundle, robust errors, man
-  pages & completion, full docs & examples, CI integration tests on TurnKey
-  Linux VMs. Automate PyPI release from GitHub actions.
+- **Beta Releases — Core Features (current):** TLS tooling, backup restore,
+  doctor (including ``--fix``), support bundles, Node 22 via ``node ensure``,
+  man pages, and shell completion. Appliance burn-in is still open.
+- **Release Candidate — Quality & Docs:** MITP execution on TurnKey, full docs
+  polish, and CI integration tests on TurnKey Linux VMs.
 - **Release — v1.0.0:** Burn-in testing across supported Actual versions,
   release on a green pipeline with documentation sign-off.

@@ -43,20 +43,23 @@ Roadmap to v1.0.0
    a. Target the remaining TLS inspector/validator, doctor engine, and CLI
       survivor clusters with focused coverage; document intentional exclusion
       zones (e.g., direct OS calls) in ``docs/requirements/test-coverage-report.rst``.
-   b. Finish timeout mitigation so the scoped mutmut suite can run in CI, and
-      constrain mutation testing to the high-impact subsystems listed above.
+   b. The full suite stays a local ``make mutmut-full`` job. CI runs a bounded
+      on-demand workflow (``.github/workflows/mutation.yml``) that mutates
+      ``src/abssctl/exit_codes.py`` only, with a 20 minute cap. Survivor hunting
+      is no longer the default next step.
 
 2. Documentation packaging pipeline
 
-   a. Generate Sphinx man pages in CI, ensure they ship in wheels/sdists, and
-      provide ``abssctl docs man install|path`` helpers.
+   a. Sphinx builds ``abssctl.1`` (``make docs-man``). CI checks the packaged
+      copy under ``src/abssctl/_man/``. ``abssctl docs man path|install`` copies
+      it into a man1 directory. HTML/PDF release artifacts are still open.
    b. Wire documentation builds into release artifacts (HTML/PDF/man) with
       checksum verification.
 
 3. Shell completion management
 
-   a. Add ``abssctl completion show|install|uninstall`` leveraging Typer’s
-      completion hooks for bash/zsh/fish.
+   a. ``abssctl completion show|install|uninstall`` covers bash, zsh, fish, and
+      PowerShell via Click. Install never edits shell rc files.
    b. Package completion scripts in the distribution and add smoke tests covering
       install/uninstall flows.
 
@@ -70,8 +73,9 @@ Roadmap to v1.0.0
 
 5. Manual Integration Test Protocol (MITP) publication
 
-   a. Publish MITP checklists + scripts, covering install, upgrade, backup,
-      TLS, doctor, and support-bundle scenarios.
+   a. Checklist published at ``docs/source/guides/mitp.rst`` (install, upgrade,
+      backup, TLS, doctor, support-bundle). Running it on an appliance is still
+      open.
    b. Integrate critical MITP smoke tests into CI (or a nightly job) with
       documented pass/fail gating.
 

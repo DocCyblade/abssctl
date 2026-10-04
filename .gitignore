@@ -129,5 +129,6 @@ dmypy.json
 # ── Local helper outputs from repo audits ─────────────────────────────────────
 *.patch
 tmp*
-mutants
+# mutmut working tree (never commit; a local dev checkpoint once included it)
+mutants/
 mutmut-*

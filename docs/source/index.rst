@@ -11,11 +11,11 @@ Actual Budget Sync Server Control CLI (abssctl) Documentation Overview
 Documentation version: |release|
 
 Welcome to the documentation for ``abssctl``— the Actual Budget Sync Server admin
-CLI. The Alpha core-features milestone now delivers full lifecycle management:
-configuration, registry inspection, structured logging, locking, templated
-providers, ports registry, version installs/switches, and instance
-provisioning/control. Upcoming Beta iterations will layer on doctor probes,
-support bundles, and restore workflows.
+CLI. The Beta milestone delivers lifecycle management: configuration, registry
+inspection, structured logging, locking, templated providers, ports, version
+installs, instance control, doctor, backups, TLS, and support bundles.
+Actual 25.11 and newer require Node.js 22. See the manual integration
+checklist before calling a build ready for an appliance.
 
 .. toctree::
    :maxdepth: 1
@@ -30,6 +30,7 @@ support bundles, and restore workflows.
 
    guides/quickstart
    guides/developer-guide
+   guides/mitp
 
 .. toctree::
    :maxdepth: 1
@@ -47,6 +48,7 @@ support bundles, and restore workflows.
    :caption: Reference
 
    reference/cli-commands
+   man/abssctl
    requirements/abssctl-app-specs
    support/actual-support-matrix
 

@@ -104,6 +104,14 @@ docs: $(DEV_VENV)/.installed
 	rm -rf docs/_build/html
 	$(DEV_VENV)/bin/python -m sphinx.cmd.build -b html docs/source docs/_build/html
 
+## docs-man: Build the man page and copy it into the package
+.PHONY: docs-man
+docs-man: $(DEV_VENV)/.installed
+	rm -rf docs/_build/man
+	$(DEV_VENV)/bin/python -m sphinx.cmd.build -b man docs/source docs/_build/man
+	mkdir -p src/abssctl/_man
+	cp docs/_build/man/abssctl.1 src/abssctl/_man/abssctl.1
+
 ## build: Build distributions via .venv-build (build env)
 .PHONY: build
 build: $(BUILD_VENV)/.installed

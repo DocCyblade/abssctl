@@ -44,6 +44,19 @@ html_context = {
 }
 html_title = f"{project} {release} Docs"
 
+# Keep the man page date stable so CI can compare the packaged copy.
+today = "Oct 04, 2026"
+
+man_pages = [
+    (
+        "man/abssctl",
+        "abssctl",
+        "Actual Budget sync-server admin CLI",
+        [author],
+        1,
+    )
+]
+
 napoleon_google_docstring = False
 napoleon_numpy_docstring = True
 napoleon_use_param = True

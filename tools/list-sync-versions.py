@@ -155,12 +155,29 @@ def _first_number(raw: str | None) -> int | None:
 def _default_node_versions() -> list[dict[str, Any]]:
     return [
         {
+            "major": 22,
+            "min_patch": "22.23.3",
+            "status": "recommended",
+            "adr": "ADR-005",
+            "notes": (
+                "Preferred runtime. Actual 25.11+ require Node >= 22. "
+                "Node 22.11.0 segfaults in better-sqlite3 13.0.3; 22.23.3 opens a database."
+            ),
+        },
+        {
+            "major": 20,
+            "min_patch": "20.0.0",
+            "status": "supported",
+            "adr": None,
+            "notes": "Historical runtime for Actual 25.6 through 25.10.",
+        },
+        {
             "major": 18,
             "min_patch": "18.17.0",
             "status": "supported",
             "adr": "ADR-018",
-            "notes": "TKL Node.js image ships Node 18; abssctl targets this baseline.",
-        }
+            "notes": "TurnKey image baseline. Not sufficient for Actual 25.11+.",
+        },
     ]
 
 
