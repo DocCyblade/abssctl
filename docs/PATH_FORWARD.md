@@ -15,7 +15,7 @@ Branch: `dev-beta1-redux` (cut from `dev-beta1`, not from `dev`)
 | **S** | One live Actual 26.10.0 install | Process smoke passed; no systemd/nginx on this Mac |
 | **N** | Node compatibility matrix through current npm releases | Done |
 | **Q** | v1 polish: bounded mutmut CI, man pages, completions, MITP, README/ADR-005 | Done |
-| **P** | TestPyPI pre-release of the current tree | Next |
+| **P** | TestPyPI pre-release of the current tree | Done (`0.1.5a4`) |
 
 ## Track W — Cursor workflow
 
@@ -47,4 +47,4 @@ Branch: `dev-beta1-redux` (cut from `dev-beta1`, not from `dev`)
 
 ## Track P — Publish
 
-- [ ] **P1** Tag `v0.1.5a4-dev` for TestPyPI. Earlier dev tags failed `make dist` before any upload. Do not republish `0.1.3a1`. Leave production PyPI alone.
+- [x] **P1** `v0.1.5a4-dev` is on TestPyPI as `0.1.5a4`. Earlier dev tags failed `make dist` before any upload. Production PyPI stays on `0.1.3a1`.
