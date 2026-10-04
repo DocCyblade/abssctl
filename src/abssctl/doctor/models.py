@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from ..tls import TLSInspector, TLSValidator
 
 
-class ProbeStatus(str, Enum):
+class ProbeStatus(StrEnum):
     """High-level outcome for a doctor probe."""
 
     GREEN = "green"

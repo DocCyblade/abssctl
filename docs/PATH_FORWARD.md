@@ -47,4 +47,4 @@ Branch: `dev-beta1-redux` (cut from `dev-beta1`, not from `dev`)
 
 ## Track P — Publish
 
-- [ ] **P1** After S is green, tag `v0.1.5a1-dev` for TestPyPI. Do not republish `0.1.3a1`. Leave production PyPI alone.
+- [ ] **P1** Tag `v0.1.5a2-dev` for TestPyPI. `v0.1.5a1-dev` failed `make dist` on Ruff UP042 before any upload. Do not republish `0.1.3a1`. Leave production PyPI alone.
