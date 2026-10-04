@@ -47,4 +47,4 @@ Branch: `dev-beta1-redux` (cut from `dev-beta1`, not from `dev`)
 
 ## Track P — Publish
 
-- [ ] **P1** Tag `v0.1.5a3-dev` for TestPyPI. Earlier dev tags failed `make dist` before any upload. Do not republish `0.1.3a1`. Leave production PyPI alone.
+- [ ] **P1** Tag `v0.1.5a4-dev` for TestPyPI. Earlier dev tags failed `make dist` before any upload. Do not republish `0.1.3a1`. Leave production PyPI alone.

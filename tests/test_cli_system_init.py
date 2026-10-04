@@ -158,9 +158,13 @@ def test_system_init_handles_filesystem_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Filesystem failures should surface with exit code 4."""
+
     def fail_directory_plan(plan: object, *, dry_run: bool = False) -> None:  # noqa: ARG001
         raise OSError("permission denied")
 
+    # Account creation runs first. On Linux, groupadd fails before the
+    # directory plan; stub it so this test reaches the filesystem error.
+    monkeypatch.setattr("abssctl.cli.apply_service_account_plan", lambda *_a, **_k: None)
     monkeypatch.setattr("abssctl.cli.apply_directory_plan", fail_directory_plan)
 
     args = _bootstrap_args(tmp_path) + ["--yes", "--allow-create-user"]
