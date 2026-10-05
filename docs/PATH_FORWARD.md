@@ -7,15 +7,32 @@ Branch: `dev-beta1-redux` (cut from `dev-beta1`, not from `dev`)
 
 `dev` is not the base. Its only unique local commit is a `mutants/` dump. Do not merge that commit. Promote this branch to `dev` with a squash only when a slice is ready.
 
+## Where we are (spec §13)
+
+`docs/requirements/abssctl-app-specs.txt` section 13, and the same list in `docs/roadmap.rst`:
+
+| Spec milestone | Position |
+|---|---|
+| Planning, Pre-Alpha, Alpha | Done. Scaffold, CLI foundations, and the PyPI project exist. |
+| Beta — core features | In the tree (version ops, instances, systemd/nginx, doctor). **Open gap:** `version install` does not produce the `/srv/app/v<version>` tree that `tmp-personal-server/000-manual-install.sh` produces and that the CLI entrypoint expects. |
+| RC — quality and docs | Support bundle, man pages, completions, and the MITP checklist are in. MITP on a TurnKey VM started on `nodeapp00` and stopped at version install. |
+| Release — v1.0.0 | Later. Burn-in across the current Actual release plus the ten prior versions, then GA. Production PyPI is still `0.1.3a1`. |
+
+Mutation survivor hunting is local/on-demand work. It is not the next slice.
+
 ## Status at a glance
 
 | Track | Goal | Status |
 |---|---|---|
 | **W** | Cursor workflow (replace the Albert / session-log ritual) | Done |
-| **S** | One live Actual 26.10.0 install | MITP started on nodeapp00; blocked at version install |
 | **N** | Node compatibility matrix through current npm releases | Done |
-| **Q** | v1 polish: bounded mutmut CI, man pages, completions, MITP, README/ADR-005 | Done |
+| **Q** | v1 polish: bounded mutmut CI, man pages, completions, MITP checklist, README/ADR-005 | Done |
 | **P** | TestPyPI pre-release of the current tree | Done (`0.1.5a4`) |
+| **S** | First MITP attempt for Actual 26.10.0 | Stopped at version install on `nodeapp00` |
+| **V** | `version install` matches `000-manual-install.sh` | **Next** |
+| **M** | One MITP on `nodeapp00` for Actual 26.10.0 | After V |
+
+Leave the production server and production PyPI alone. Snapshots `pre-mitp` and `clean-slate` stay as they are until track M. Do not merge the `mutants/` checkpoint on local `dev`.
 
 ## Track W — Cursor workflow
 
@@ -48,3 +65,28 @@ Branch: `dev-beta1-redux` (cut from `dev-beta1`, not from `dev`)
 ## Track P — Publish
 
 - [x] **P1** `v0.1.5a4-dev` is on TestPyPI as `0.1.5a4`. Earlier dev tags failed `make dist` before any upload. Production PyPI stays on `0.1.3a1`.
+
+## Track V — Version install matches the production layout
+
+`000-manual-install.sh` runs `npm pack`, extracts the tarball into `/srv/app/v<version>` (`--strip-components=1`), then `npm install --omit=dev --no-save` in that directory. The version root then has `package.json` and `build/bin/actual-server.js`.
+
+`VersionInstaller.install` runs `npm install <pkg>@<version> --prefix` and moves that prefix to `/srv/app/v<version>`. The package lands under `node_modules/@actual-app/sync-server/`. `_install_version_dependencies` then runs `npm install` in the version root, which has no `package.json`. `_resolve_exec_path` looks for `build/bin/actual-server.js` on the version root.
+
+- [ ] **V1** Declare `packaging` in `pyproject.toml`. `cli.py` imports `packaging.version`, and a clean `0.1.5a4` install exits before version install.
+- [ ] **V2** `version install` produces the same tree as `000-manual-install.sh`: `package.json` and `build/bin/actual-server.js` at `/srv/app/v<version>`, dependencies installed there.
+- [ ] **V3** Tests cover that layout. Keep the provider, registry, and command tree as they are.
+- [ ] **V4** `make quick-tests` green. A new TestPyPI upload only if Ken asks. Production PyPI stays on `0.1.3a1`. The real server stays on the manual script.
+
+## Track M — One MITP for Actual 26.10.0
+
+After V. One version, on `nodeapp00`. The current-plus-ten matrix is the spec Release milestone, later.
+
+- [ ] **M1** Restore `nodeapp00` from snapshot `clean-slate`.
+- [ ] **M2** Install the fixed build, run `system init`, ensure Node 22.23.3, `version install 26.10.0`, create one instance, and start systemd and nginx.
+- [ ] **M3** Record the result in `docs/requirements/node-compat.yaml` (and the shipped copy).
+
+## Later (spec Release, and local quality work)
+
+- Mutation survivor hunting beyond the bounded `exit_codes.py` CI job.
+- MITP on the current Actual release plus the ten prior versions.
+- RC burn-in, production PyPI publish, and GA.

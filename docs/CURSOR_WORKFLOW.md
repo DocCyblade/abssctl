@@ -17,6 +17,7 @@ Earlier chats bootstrapped from `ops/ai-directives.txt` (the "Albert" ritual) an
 | Product spec | `docs/requirements/abssctl-app-specs.txt` | Cite it; `@` only the section you are changing |
 | One decision | matching file under `docs/adrs/` | `@` that ADR |
 | Milestone list | `docs/roadmap.rst` | `@` when the slice changes the roadmap |
+| Design reading notes | `docs/reviews/` | `@` one review; these do not change the spec |
 | Always-on brief | `AGENTS.md` | Applied automatically; keep it short |
 
 Never paste the spec or a pile of ADRs into the prompt.
