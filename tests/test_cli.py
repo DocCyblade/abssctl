@@ -2208,6 +2208,59 @@ def test_version_install_records_registry(
     assert entry["path"] == str(target_dir)
 
 
+def test_version_install_npm_installs_dependencies_in_version_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Version install runs npm install --omit=dev --no-save in the version directory."""
+    install_root = tmp_path / "srv" / "app"
+    env, _state_dir = _prepare_environment(
+        tmp_path,
+        config_overrides={"install_root": str(install_root)},
+    )
+    target_dir = install_root / "v25.9.0"
+    seen: list[tuple[list[str], str | None]] = []
+
+    def fake_install(
+        self: VersionInstaller,
+        version: str,
+        *,
+        env: dict[str, str] | None = None,
+        dry_run: bool = False,
+    ) -> VersionInstallResult:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        (target_dir / "package.json").write_text(
+            '{"name":"@actual-app/sync-server"}\n',
+            encoding="utf-8",
+        )
+        _ensure_entrypoint(target_dir)
+        return VersionInstallResult(
+            version=version,
+            path=target_dir,
+            installed_at="2025-10-08T00:00:00Z",
+            metadata={"package": self.package_name},
+            integrity={},
+        )
+
+    def fake_run(
+        cmd: list[str],
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        cwd = kwargs.get("cwd")
+        seen.append((list(cmd), str(cwd) if cwd is not None else None))
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(VersionInstaller, "install", fake_install)
+    monkeypatch.setattr("abssctl.cli.subprocess.run", fake_run)
+
+    result = runner.invoke(app, ["version", "install", "25.9.0", "--no-backup"], env=env)
+
+    assert result.exit_code == 0, result.stdout
+    assert seen == [(["npm", "install", "--omit=dev", "--no-save"], str(target_dir))]
+    assert (target_dir / "package.json").is_file()
+    assert (target_dir / "build" / "bin" / "actual-server.js").is_file()
+
+
 def test_version_install_rejects_existing_version(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

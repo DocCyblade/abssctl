@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import subprocess
+import tarfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -15,32 +17,61 @@ FAKE_SHASUM = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 _FAKE_DIGEST_BYTES = bytes(range(64))
 FAKE_INTEGRITY = f"sha512-{base64.b64encode(_FAKE_DIGEST_BYTES).decode('ascii')}"
 FAKE_DIGEST_HEX = _FAKE_DIGEST_BYTES.hex()
+FAKE_TARBALL_NAME = "actual-app-sync-server-25.9.0.tgz"
 
 
-def _fake_successful_install(staging_dir: Path, package_name: str) -> None:
-    """Create a fake npm installation layout for testing."""
-    node_modules = staging_dir / "node_modules"
-    node_modules.mkdir(parents=True, exist_ok=True)
-    package_path = node_modules
-    for part in package_name.split("/"):
-        package_path /= part
-    package_path.mkdir(parents=True, exist_ok=True)
-    metadata = {
-        "name": "fake",
-        "_shasum": FAKE_SHASUM,
-        "_integrity": FAKE_INTEGRITY,
-        "dist": {"tarball": "https://example.invalid/fake.tgz"},
-    }
-    (package_path / "package.json").write_text(json.dumps(metadata), encoding="utf-8")
+def _pack_stdout(
+    filename: str,
+    *,
+    shasum: str | None = FAKE_SHASUM,
+    integrity: str | None = FAKE_INTEGRITY,
+) -> str:
+    """Return ``npm pack --json`` output for one packed tarball."""
+    payload: dict[str, object] = {"filename": filename}
+    if shasum is not None:
+        payload["shasum"] = shasum
+    if integrity is not None:
+        payload["integrity"] = integrity
+    return json.dumps([payload])
+
+
+def _add_tar_bytes(archive: tarfile.TarFile, name: str, payload: bytes) -> None:
+    """Add *payload* to *archive* as *name*."""
+    info = tarfile.TarInfo(name=name)
+    info.size = len(payload)
+    archive.addfile(info, io.BytesIO(payload))
+
+
+def _write_pack_tarball(
+    staging_dir: Path,
+    filename: str,
+    *,
+    package_json: Mapping[str, object] | None,
+    entrypoint: bytes | None = b"console.log('stub');\n",
+    extra: dict[str, bytes] | None = None,
+) -> None:
+    """Write an npm pack tarball whose members live under ``package/``."""
+    with tarfile.open(staging_dir / filename, "w:gz") as archive:
+        if package_json is not None:
+            _add_tar_bytes(
+                archive,
+                "package/package.json",
+                json.dumps(package_json).encode("utf-8"),
+            )
+        if entrypoint is not None:
+            _add_tar_bytes(archive, "package/build/bin/actual-server.js", entrypoint)
+        for name, payload in (extra or {}).items():
+            _add_tar_bytes(archive, name, payload)
 
 
 def test_install_success_creates_target_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Installer stages npm output then moves it to the version directory."""
+    """Pack extracts package.json and the server entrypoint at the version root."""
     install_root = tmp_path / "srv" / "app"
     installer = VersionInstaller(install_root=install_root, package_name="@actual-app/sync-server")
+    seen: dict[str, list[str]] = {}
 
     def fake_run(
         staging_dir: Path,
@@ -48,23 +79,43 @@ def test_install_success_creates_target_directory(
         *,
         env: Mapping[str, str],
     ) -> subprocess.CompletedProcess[str]:
-        _fake_successful_install(staging_dir, "@actual-app/sync-server")
-        return subprocess.CompletedProcess(cmd, 0, stdout="ok", stderr="")
+        seen["cmd"] = list(cmd)
+        _write_pack_tarball(
+            staging_dir,
+            FAKE_TARBALL_NAME,
+            package_json={"name": "@actual-app/sync-server", "version": "25.9.0"},
+        )
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout=_pack_stdout(FAKE_TARBALL_NAME),
+            stderr="",
+        )
 
     monkeypatch.setattr(installer, "_run_install_command", fake_run)
 
     result = installer.install("25.9.0")
 
+    assert seen["cmd"][:3] == ["npm", "pack", "@actual-app/sync-server@25.9.0"]
+    assert "--json" in seen["cmd"]
+    assert "--pack-destination" in seen["cmd"]
+    assert "--prefix" not in seen["cmd"]
     assert result.version == "25.9.0"
     assert result.path == install_root / "v25.9.0"
-    package_dir = result.path / "node_modules" / "@actual-app" / "sync-server"
-    assert package_dir.exists()
+    package_json = result.path / "package.json"
+    entrypoint = result.path / "build" / "bin" / "actual-server.js"
+    assert package_json.is_file()
+    assert json.loads(package_json.read_text(encoding="utf-8"))["name"] == "@actual-app/sync-server"
+    assert entrypoint.is_file()
+    assert entrypoint.read_text(encoding="utf-8") == "console.log('stub');\n"
+    assert not (result.path / "package").exists()
     assert result.metadata["package"] == "@actual-app/sync-server"
-    assert "package_json" in result.metadata
+    assert result.metadata["package_json"] == str(package_json)
     assert result.integrity["npm"]["shasum"] == FAKE_SHASUM
     assert result.integrity["npm"]["integrity"] == FAKE_INTEGRITY
     assert result.integrity["tarball"]["algorithm"] == "sha512"
     assert result.integrity["tarball"]["digest"] == FAKE_DIGEST_HEX
+    assert list(install_root.glob("abssctl-install-25.9.0-*")) == []
 
 
 def test_install_failure_cleans_up(
@@ -123,11 +174,11 @@ def test_install_rejects_existing_directory(tmp_path: Path) -> None:
         installer.install("1.2.3")
 
 
-def test_install_missing_package_directory_raises(
+def test_install_missing_tarball_raises(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Installer errors when npm succeeds but package directory is absent."""
+    """Installer errors when npm pack reports success but writes no tarball."""
     install_root = tmp_path / "srv" / "app"
     installer = VersionInstaller(install_root=install_root, package_name="@actual-app/sync-server")
 
@@ -137,16 +188,78 @@ def test_install_missing_package_directory_raises(
         *,
         env: Mapping[str, str],
     ) -> subprocess.CompletedProcess[str]:
-        (staging_dir / "node_modules").mkdir(parents=True, exist_ok=True)
-        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout=_pack_stdout("missing.tgz"),
+            stderr="",
+        )
 
     monkeypatch.setattr(installer, "_run_install_command", fake_run)
 
-    with pytest.raises(VersionInstallError):
+    with pytest.raises(VersionInstallError, match="tarball missing"):
         installer.install("30.0.0")
 
-    staging_dirs = list(install_root.glob("abssctl-install-30.0.0-*"))
-    assert staging_dirs == []
+    assert list(install_root.glob("abssctl-install-30.0.0-*")) == []
+    assert not (install_root / "v30.0.0").exists()
+
+
+def test_install_missing_package_json_raises(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Installer errors when the extracted tarball has no package.json."""
+    install_root = tmp_path / "srv" / "app"
+    installer = VersionInstaller(install_root=install_root, package_name="@actual-app/sync-server")
+
+    def fake_run(
+        staging_dir: Path,
+        cmd: Sequence[str],
+        *,
+        env: Mapping[str, str],
+    ) -> subprocess.CompletedProcess[str]:
+        _write_pack_tarball(staging_dir, "pkg.tgz", package_json=None, entrypoint=None)
+        return subprocess.CompletedProcess(cmd, 0, stdout=_pack_stdout("pkg.tgz"), stderr="")
+
+    monkeypatch.setattr(installer, "_run_install_command", fake_run)
+
+    with pytest.raises(VersionInstallError, match="package.json missing"):
+        installer.install("30.1.0")
+
+    assert list(install_root.glob("abssctl-install-30.1.0-*")) == []
+    assert not (install_root / "v30.1.0").exists()
+
+
+def test_install_rejects_tarball_path_traversal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Archive members that climb out of the version directory are refused."""
+    install_root = tmp_path / "srv" / "app"
+    installer = VersionInstaller(install_root=install_root, package_name="@actual-app/sync-server")
+
+    def fake_run(
+        staging_dir: Path,
+        cmd: Sequence[str],
+        *,
+        env: Mapping[str, str],
+    ) -> subprocess.CompletedProcess[str]:
+        _write_pack_tarball(
+            staging_dir,
+            "pkg.tgz",
+            package_json={"name": "@actual-app/sync-server"},
+            extra={"package/../../outside.txt": b"nope"},
+        )
+        return subprocess.CompletedProcess(cmd, 0, stdout=_pack_stdout("pkg.tgz"), stderr="")
+
+    monkeypatch.setattr(installer, "_run_install_command", fake_run)
+
+    with pytest.raises(VersionInstallError, match="Refusing to extract"):
+        installer.install("30.2.0")
+
+    assert not (install_root / "outside.txt").exists()
+    assert not (tmp_path / "outside.txt").exists()
+    assert not (install_root / "v30.2.0").exists()
 
 
 def test_install_propagates_custom_npm_args(
@@ -162,20 +275,28 @@ def test_install_propagates_custom_npm_args(
         npm_args=args,
     )
 
+    seen: dict[str, list[str]] = {}
+
     def fake_run(
         staging_dir: Path,
         cmd: Sequence[str],
         *,
         env: Mapping[str, str],
     ) -> subprocess.CompletedProcess[str]:
-        _fake_successful_install(staging_dir, "@actual-app/sync-server")
-        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        seen["cmd"] = list(cmd)
+        _write_pack_tarball(
+            staging_dir,
+            "pkg.tgz",
+            package_json={"name": "@actual-app/sync-server"},
+        )
+        return subprocess.CompletedProcess(cmd, 0, stdout=_pack_stdout("pkg.tgz"), stderr="")
 
     monkeypatch.setattr(installer, "_run_install_command", fake_run)
 
     result = installer.install("31.0.0")
 
     assert result.metadata["npm_args"] == args
+    assert seen["cmd"][-2:] == args
 
 
 def test_integrity_parsing_handles_malformed_strings(
@@ -193,15 +314,17 @@ def test_integrity_parsing_handles_malformed_strings(
         *,
         env: Mapping[str, str],
     ) -> subprocess.CompletedProcess[str]:
-        node_modules = staging_dir / "node_modules" / "@actual-app"
-        package_dir = node_modules / "sync-server"
-        package_dir.mkdir(parents=True, exist_ok=True)
-        metadata = {
-            "_integrity": invalid_integrity,
-            "_shasum": FAKE_SHASUM,
-        }
-        (package_dir / "package.json").write_text(json.dumps(metadata), encoding="utf-8")
-        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        _write_pack_tarball(
+            staging_dir,
+            "pkg.tgz",
+            package_json={"name": "@actual-app/sync-server"},
+        )
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout=_pack_stdout("pkg.tgz", integrity=invalid_integrity),
+            stderr="",
+        )
 
     monkeypatch.setattr(installer, "_run_install_command", fake_run)
 
@@ -209,3 +332,70 @@ def test_integrity_parsing_handles_malformed_strings(
 
     assert result.integrity["npm"]["integrity"] == invalid_integrity
     assert "tarball" not in result.integrity
+
+
+def test_integrity_falls_back_to_package_json(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """package.json integrity is recorded when npm pack JSON omits it."""
+    install_root = tmp_path / "srv" / "app"
+    installer = VersionInstaller(install_root=install_root, package_name="@actual-app/sync-server")
+
+    def fake_run(
+        staging_dir: Path,
+        cmd: Sequence[str],
+        *,
+        env: Mapping[str, str],
+    ) -> subprocess.CompletedProcess[str]:
+        _write_pack_tarball(
+            staging_dir,
+            "pkg.tgz",
+            package_json={
+                "name": "@actual-app/sync-server",
+                "_shasum": FAKE_SHASUM,
+                "_integrity": FAKE_INTEGRITY,
+            },
+        )
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout=_pack_stdout("pkg.tgz", shasum=None, integrity=None),
+            stderr="",
+        )
+
+    monkeypatch.setattr(installer, "_run_install_command", fake_run)
+
+    result = installer.install("32.1.0")
+
+    assert result.integrity["npm"]["shasum"] == FAKE_SHASUM
+    assert result.integrity["tarball"]["digest"] == FAKE_DIGEST_HEX
+
+
+def test_install_locates_single_tarball_without_filename(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A lone packed tarball is used when npm pack JSON has no filename."""
+    install_root = tmp_path / "srv" / "app"
+    installer = VersionInstaller(install_root=install_root, package_name="@actual-app/sync-server")
+
+    def fake_run(
+        staging_dir: Path,
+        cmd: Sequence[str],
+        *,
+        env: Mapping[str, str],
+    ) -> subprocess.CompletedProcess[str]:
+        _write_pack_tarball(
+            staging_dir,
+            "only.tgz",
+            package_json={"name": "@actual-app/sync-server"},
+        )
+        return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps([{}]), stderr="")
+
+    monkeypatch.setattr(installer, "_run_install_command", fake_run)
+
+    result = installer.install("33.0.0")
+
+    assert (result.path / "package.json").is_file()
+    assert (result.path / "build" / "bin" / "actual-server.js").is_file()

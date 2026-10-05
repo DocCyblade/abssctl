@@ -7,11 +7,12 @@ import json
 import os
 import shutil
 import subprocess
+import tarfile
 import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, cast
 
 
@@ -54,7 +55,13 @@ class VersionInstaller:
         env: Mapping[str, str] | None = None,
         dry_run: bool = False,
     ) -> VersionInstallResult:
-        """Install *version* of the configured npm package."""
+        """Install *version* by packing the npm tarball into the version directory.
+
+        Matches ``000-manual-install.sh``: ``npm pack``, extract into
+        ``<install_root>/v<version>`` with the leading ``package/`` directory
+        removed, then leave dependency installation to the caller
+        (``npm install --omit=dev --no-save`` in that directory).
+        """
         normalized_version = version.strip()
         if not normalized_version:
             raise VersionInstallError("Version identifier must be a non-empty string.")
@@ -87,60 +94,70 @@ class VersionInstaller:
         )
         cmd = [
             self.npm_bin,
-            "install",
+            "pack",
             f"{self.package_name}@{normalized_version}",
-            "--prefix",
+            "--json",
+            "--pack-destination",
             str(staging_dir),
         ]
         cmd.extend(self.npm_args)
-        cmd.extend(["--no-save", "--omit=dev"])
 
         env_vars = os.environ.copy()
         if env:
             env_vars.update(env)
 
-        staging_to_cleanup: Path | None = staging_dir
+        moved = False
+        success = False
         try:
             result = self._run_install_command(staging_dir, cmd, env=env_vars)
             if result.returncode != 0:
+                raise VersionInstallError("npm pack failed")
+
+            packed = _parse_pack_metadata(result.stdout)
+            tarball = _locate_packed_tarball(staging_dir, packed)
+            extract_dir = staging_dir / "unpack"
+            _extract_npm_tarball(tarball, extract_dir)
+            staged_package_json = extract_dir / "package.json"
+            if not staged_package_json.is_file():
                 raise VersionInstallError(
-                    "npm install failed",
+                    f"npm pack completed but package.json missing: {target_dir / 'package.json'}"
                 )
 
-            package_dir = _resolve_package_directory(staging_dir, self.package_name)
-            if not package_dir.exists():
-                raise VersionInstallError(
-                    f"npm install completed but package directory missing: {package_dir}"
-                )
+            shutil.move(str(extract_dir), str(target_dir))
+            moved = True
+            package_json = target_dir / "package.json"
+            integrity = _integrity_from_mapping(
+                {
+                    "_shasum": packed.get("shasum"),
+                    "_integrity": packed.get("integrity"),
+                }
+            )
+            if not integrity:
+                integrity = self._collect_integrity(package_json)
 
-            shutil.move(str(staging_dir), str(target_dir))
-            staging_to_cleanup = None
-            package_dir = _resolve_package_directory(target_dir, self.package_name)
+            metadata = cast(
+                dict[str, object],
+                {
+                    "package": self.package_name,
+                    "npm_args": list(self.npm_args),
+                    "package_json": str(package_json),
+                },
+            )
+            installed_at = datetime.now(tz=UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+            install_result = VersionInstallResult(
+                version=normalized_version,
+                path=target_dir,
+                installed_at=installed_at,
+                metadata=metadata,
+                integrity=integrity,
+            )
+            success = True
+            return install_result
         finally:
-            if staging_to_cleanup and staging_to_cleanup.exists():
-                shutil.rmtree(staging_to_cleanup, ignore_errors=True)
-
-        metadata = cast(
-            dict[str, object],
-            {
-                "package": self.package_name,
-                "npm_args": list(self.npm_args),
-            },
-        )
-        pkg_json = package_dir / "package.json"
-        integrity: dict[str, object] = {}
-        if pkg_json.exists():
-            metadata["package_json"] = str(pkg_json)
-            integrity = self._collect_integrity(pkg_json)
-
-        installed_at = datetime.now(tz=UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
-        return VersionInstallResult(
-            version=normalized_version,
-            path=target_dir,
-            installed_at=installed_at,
-            metadata=metadata,
-            integrity=integrity,
-        )
+            if moved and not success and target_dir.exists():
+                shutil.rmtree(target_dir, ignore_errors=True)
+            if staging_dir.exists():
+                shutil.rmtree(staging_dir, ignore_errors=True)
 
     def _run_install_command(
         self,
@@ -149,12 +166,13 @@ class VersionInstaller:
         *,
         env: Mapping[str, str],
     ) -> subprocess.CompletedProcess[str]:
-        """Execute npm install command (isolated for testing)."""
+        """Execute the npm pack command (isolated for testing)."""
         return subprocess.run(  # noqa: S603,S607
             cmd,
             check=False,
             capture_output=True,
             text=True,
+            cwd=str(staging_dir),
             env=dict(env),
         )
 
@@ -164,35 +182,132 @@ class VersionInstaller:
             payload = json.loads(package_json_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return {}
-
-        integrity: dict[str, object] = {}
-
-        npm_details: dict[str, object] = {}
-        shasum = _extract_shasum(payload)
-        if shasum:
-            npm_details["shasum"] = shasum
-
-        integrity_string = _extract_integrity_string(payload)
-        if integrity_string:
-            npm_details["integrity"] = integrity_string
-            parsed = _parse_integrity(integrity_string)
-            if parsed:
-                algorithm, digest_hex = parsed
-                integrity["tarball"] = {"algorithm": algorithm, "digest": digest_hex}
-
-        if npm_details:
-            integrity["npm"] = npm_details
-
-        return integrity
+        if not isinstance(payload, Mapping):
+            return {}
+        return _integrity_from_mapping(payload)
 
 
-def _resolve_package_directory(staging_dir: Path, package_name: str) -> Path:
-    """Return the expected package directory under an npm prefix."""
-    parts = package_name.split("/")
-    package_path = staging_dir / "node_modules"
-    for part in parts:
-        package_path /= part
-    return package_path
+def _integrity_from_mapping(data: Mapping[str, Any]) -> dict[str, object]:
+    """Extract npm shasum and tarball integrity from *data*."""
+    integrity: dict[str, object] = {}
+
+    npm_details: dict[str, object] = {}
+    shasum = _extract_shasum(data)
+    if shasum:
+        npm_details["shasum"] = shasum
+
+    integrity_string = _extract_integrity_string(data)
+    if integrity_string:
+        npm_details["integrity"] = integrity_string
+        parsed = _parse_integrity(integrity_string)
+        if parsed:
+            algorithm, digest_hex = parsed
+            integrity["tarball"] = {"algorithm": algorithm, "digest": digest_hex}
+
+    if npm_details:
+        integrity["npm"] = npm_details
+
+    return integrity
+
+
+def _parse_pack_metadata(stdout: str) -> dict[str, object]:
+    """Return the first object from ``npm pack --json`` output."""
+    text = stdout.strip()
+    starts = [index for index in (text.find("["), text.find("{")) if index != -1]
+    if not starts:
+        raise VersionInstallError("npm pack returned unreadable metadata")
+    payload_text = text[min(starts) :]
+    try:
+        data = json.loads(payload_text)
+    except json.JSONDecodeError as exc:
+        raise VersionInstallError("npm pack returned unreadable metadata") from exc
+    if isinstance(data, list):
+        first = data[0] if data else None
+        if not isinstance(first, Mapping):
+            raise VersionInstallError("npm pack returned unreadable metadata")
+        return {str(key): value for key, value in first.items()}
+    if isinstance(data, Mapping):
+        return {str(key): value for key, value in data.items()}
+    raise VersionInstallError("npm pack returned unreadable metadata")
+
+
+def _locate_packed_tarball(staging_dir: Path, packed: Mapping[str, object]) -> Path:
+    """Return the tarball ``npm pack`` wrote into *staging_dir*."""
+    filename = packed.get("filename")
+    if isinstance(filename, str) and filename.strip():
+        candidate = staging_dir / Path(filename).name
+        if candidate.is_file():
+            return candidate
+    matches = sorted(path for path in staging_dir.glob("*.tgz") if path.is_file())
+    if len(matches) == 1:
+        return matches[0]
+    raise VersionInstallError("npm pack completed but tarball missing")
+
+
+def _stripped_member_path(name: str) -> Path | None:
+    """Drop the leading ``package/`` component from an npm pack member name."""
+    normalized = name.replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    while normalized.startswith("/"):
+        normalized = normalized[1:]
+    if not normalized:
+        return None
+    parts = PurePosixPath(normalized).parts
+    if any(part == ".." for part in parts):
+        raise VersionInstallError(f"Refusing to extract tarball member: {name}")
+    if len(parts) <= 1:
+        return None
+    return Path(*parts[1:])
+
+
+def _extract_npm_tarball(tarball: Path, destination: Path) -> None:
+    """Extract *tarball* into *destination*, stripping the top-level directory."""
+    destination.mkdir(parents=True, exist_ok=True)
+    dest_root = destination.resolve()
+    try:
+        with tarfile.open(tarball, "r:*") as archive:
+            for member in archive.getmembers():
+                relative = _stripped_member_path(member.name)
+                if relative is None:
+                    continue
+                target = (dest_root / relative).resolve()
+                if dest_root != target and dest_root not in target.parents:
+                    raise VersionInstallError(
+                        f"Refusing to extract tarball member outside destination: {member.name}"
+                    )
+                if member.islnk():
+                    raise VersionInstallError(
+                        f"Refusing to extract tarball hard link: {member.name}"
+                    )
+                if member.issym():
+                    _extract_link(member, target)
+                    continue
+                if member.isdir():
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                if not member.isfile():
+                    continue
+                source = archive.extractfile(member)
+                if source is None:
+                    raise VersionInstallError(f"Unable to read tarball member: {member.name}")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with source, target.open("wb") as handle:
+                    shutil.copyfileobj(source, handle)
+    except tarfile.TarError as exc:
+        raise VersionInstallError(f"Unable to extract npm pack tarball: {exc}") from exc
+
+
+def _extract_link(member: tarfile.TarInfo, target: Path) -> None:
+    """Recreate a relative archive link that stays inside the extract tree."""
+    linkname = member.linkname
+    link_path = PurePosixPath(linkname)
+    if link_path.is_absolute() or ".." in link_path.parts:
+        raise VersionInstallError(f"Refusing to extract tarball link: {member.name}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists() or target.is_symlink():
+        target.unlink()
+    target.symlink_to(linkname)
 
 
 def _extract_shasum(data: Mapping[str, Any]) -> str | None:
