@@ -12,7 +12,7 @@ Branch: `dev-beta1-redux` (cut from `dev-beta1`, not from `dev`)
 | Track | Goal | Status |
 |---|---|---|
 | **W** | Cursor workflow (replace the Albert / session-log ritual) | Done |
-| **S** | One live Actual 26.10.0 install | Process smoke passed; no systemd/nginx on this Mac |
+| **S** | One live Actual 26.10.0 install | MITP started on nodeapp00; blocked at version install |
 | **N** | Node compatibility matrix through current npm releases | Done |
 | **Q** | v1 polish: bounded mutmut CI, man pages, completions, MITP, README/ADR-005 | Done |
 | **P** | TestPyPI pre-release of the current tree | Done (`0.1.5a4`) |
@@ -29,7 +29,7 @@ Branch: `dev-beta1-redux` (cut from `dev-beta1`, not from `dev`)
 - [x] **S1** Node >= 22 available. This Mac's `/usr/local/bin/node` is 22.11.0 and segfaults; Node 22.23.3 serves the UI. `n` is not installed here.
 - [x] **S2** `npm install @actual-app/sync-server@26.10.0` produced `build/bin/actual-server.js`.
 - [x] **S3** A `_build_instance_config` payload was loaded (`Loading config from …`) and `http://127.0.0.1:6016/` returned the Actual HTML on Node 22.23.3.
-- [ ] **S4** systemd and nginx are not installed on this Mac, so the unit and vhost were not started. Run `docs/source/guides/mitp.rst` on a TurnKey host.
+- [ ] **S4** MITP on `nodeapp00` (snapshot `clean-slate`) got through install, `system init`, and Node 22.23.3. `version install 26.10.0` stops before an instance: the tree is an npm prefix, and the follow-up `npm install` fails because `/srv/app/v26.10.0/package.json` is missing. `0.1.5a4` also imports `packaging`, which is not a declared dependency. systemd and nginx were not started.
 
 ## Track N — Compatibility matrix
 
