@@ -11,5 +11,6 @@ alwaysApply: true
 - One chat per PATH_FORWARD step. Hand off with the template in `docs/CURSOR_WORKFLOW.md`.
 - Acceptance gate is `make quick-tests`. Docs changes also run `make docs`.
 - Actual 25.11+ requires Node >= 22 via `abssctl node ensure`. The CLI installs `@actual-app/sync-server`, not `@actual-app/cli`.
+- Testing hosts: `docs/TESTING_ACCESS.md`. Only those three VMs. Production server and production PyPI stay untouched.
 - Commit only when asked. `ops/session-log.txt` and `ops/ai-directives.txt` are archived.
 - Ignore `mutants/` (local mutmut output).

@@ -25,6 +25,7 @@ Python 3.11 admin CLI that installs and operates multiple Actual Budget sync-ser
 
 ## Rules of the road
 
+- Testing hosts: `docs/TESTING_ACCESS.md`. Only those three VMs. Production server and production PyPI stay untouched.
 - One chat per PATH_FORWARD step. Prefer `@` files over pasting specs. Follow `docs/CURSOR_WORKFLOW.md`.
 - Commit only when asked. Do not push, and do not tag a release, unless asked.
 - Do not redesign the providers, registry, or command tree.

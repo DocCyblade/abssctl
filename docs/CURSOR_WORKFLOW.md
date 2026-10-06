@@ -19,6 +19,7 @@ Earlier chats bootstrapped from `ops/ai-directives.txt` (the "Albert" ritual) an
 | Milestone list | `docs/roadmap.rst` | `@` when the slice changes the roadmap |
 | Design reading notes | `docs/reviews/` | `@` one review; these do not change the spec |
 | Always-on brief | `AGENTS.md` | Applied automatically; keep it short |
+| Which VMs an agent may use | `docs/TESTING_ACCESS.md` | `@` when the task touches a host |
 
 Never paste the spec or a pile of ADRs into the prompt.
 

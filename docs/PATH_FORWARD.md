@@ -35,7 +35,7 @@ Mutation survivor hunting is local/on-demand work. It is not the next slice.
 | **V** | `version install` matches `000-manual-install.sh` | Done |
 | **M** | One MITP on `nodeapp00` for Actual 26.10.0 | Done |
 
-Leave the production server and production PyPI alone. Snapshots `pre-mitp` and `clean-slate` are still on VM 9011901; track M rolled the live disk back to `clean-slate` and did not delete either snapshot. Do not merge the `mutants/` checkpoint on local `dev`.
+Leave the production server and production PyPI alone. Test guests an agent may use are `docs/TESTING_ACCESS.md`. VM 9011901 (`nodeapp00`) is not in that set. Do not merge the `mutants/` checkpoint on local `dev`.
 
 ## Track W — Cursor workflow
 
