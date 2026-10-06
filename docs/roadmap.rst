@@ -68,9 +68,10 @@ Section 13 of ``docs/requirements/abssctl-app-specs.txt``:
 Near-term plan
 ==============
 
-These items match ``docs/PATH_FORWARD.md``. One chat per item. The docs
-reading, the version-install change, one MITP on ``nodeapp00``, and the
-host-layout fold-in are done.
+The finished near-term items below are archived in
+``docs/PATH_FORWARD_DONE.md``. ``docs/PATH_FORWARD.md`` is the living TODO.
+One chat per item. The docs reading, the version-install change, one MITP
+on ``nodeapp00``, and the host-layout fold-in are done.
 
 1. Check the published docs against the code and tests — read 2026-10-05
 

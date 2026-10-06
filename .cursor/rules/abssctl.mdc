@@ -6,7 +6,7 @@ alwaysApply: true
 # abssctl
 
 - Package lives under `src/abssctl/`. Version is `__version__` in `src/abssctl/__init__.py`.
-- Living TODO: `docs/PATH_FORWARD.md`. Cursor workflow: `docs/CURSOR_WORKFLOW.md`.
+- Living TODO: `docs/PATH_FORWARD.md`. Finished tracks: `docs/PATH_FORWARD_DONE.md`. Cursor workflow: `docs/CURSOR_WORKFLOW.md`.
 - Cite `docs/requirements/abssctl-app-specs.txt` and ADRs. Do not paste them into chat.
 - One chat per PATH_FORWARD step. Hand off with the template in `docs/CURSOR_WORKFLOW.md`.
 - Acceptance gate is `make quick-tests`. Docs changes also run `make docs`.

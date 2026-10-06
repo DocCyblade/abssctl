@@ -56,7 +56,7 @@ Use the test FQDNs below. Production names (the `*-budgetapp.krajr.net` set in `
 - Use any VM other than the three in the table. VM 9011901 (`nodeapp00`) is not in this token’s scope.
 - Delete snapshots, clone a guest, or roll back unless the task says so.
 - Run `tmp-personal-server/000-manual-install.sh` here. That script builds the production budget sites.
-- Run `tmp-personal-server/000-test-install.sh` unless the task says to. It is the test-guest copy (name, FQDN, and port arguments; nginx uses `/root/ssl/`). A later run belongs on `test-nodeapp02`. `test-nodeapp01` already has the family sites.
+- Run `tmp-personal-server/000-test-install.sh` again unless the task says to. It already ran on `test-nodeapp02` on 2026-10-06 (test1b, test2b, test3b on ports 5110–5112; Actual 25.11.0; Node 22.23.3). nginx uses `/root/ssl/`. Rolling that guest back to `base-tkl-nodejs-v18` removes that layout and the abssctl registry written afterward. `test-nodeapp01` already has the family sites.
 
 ## Observed at the snapshots (2026-10-06)
 
@@ -71,6 +71,8 @@ Use the test FQDNs below. Production names (the `*-budgetapp.krajr.net` set in `
 Node v22.0.0 on `test-nodeapp01` is not the runtime to serve Actual with: 22.11.0 segfaults in `better-sqlite3`, and 22.23.3 is the preferred Node. npm must be >= 10.9.9 before Actual 26.6.0. `test-nodeapp02` and `test-nodeapp03` are below that npm. `test-nodeapp03` has no Python 3.11 and no `n`.
 
 From this Mac on 2026-10-06, all nine `test*a` / `test*b` / `test*c` names resolve to the guest FQDN and the address in the table.
+
+`test-nodeapp02` is no longer at `base-tkl-nodejs-v18`. After the 2026-10-06 test install it is running with npm 10.9.9, Node 22.23.3 via `n`, and the three instances above. The local `0.1.5a4` wheel is installed at `/opt/abssctl` (`/usr/local/bin/abssctl`). `abssctl system init --rebuild-state` with `--instance-root /srv/instances` registered test1b, test2b, and test3b. The snapshot table is still the powered-off baseline.
 
 ## TLS
 

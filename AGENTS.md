@@ -4,7 +4,7 @@ Python 3.11 admin CLI that installs and operates multiple Actual Budget sync-ser
 
 ## Docs first
 
-- **Living TODO:** `docs/PATH_FORWARD.md` (check boxes as you finish)
+- **Living TODO:** `docs/PATH_FORWARD.md` (check boxes as you finish; finished tracks move to `docs/PATH_FORWARD_DONE.md`)
 - **Cursor chat workflow:** `docs/CURSOR_WORKFLOW.md` (when to new-chat, handoff template)
 - Spec: `docs/requirements/abssctl-app-specs.txt` — cite it; do not paste it
 - Decisions: `docs/adrs/` — a spec change needs a new ADR and Ken's approval

@@ -13,6 +13,7 @@ Earlier chats bootstrapped from `ops/ai-directives.txt` (the "Albert" ritual) an
 | Need | File | How to use in chat |
 |---|---|---|
 | Where we are / what’s next | `docs/PATH_FORWARD.md` | `@PATH_FORWARD.md` — checkboxes are the TODO list |
+| Finished tracks | `docs/PATH_FORWARD_DONE.md` | Open only when the slice needs that history |
 | This workflow | `docs/CURSOR_WORKFLOW.md` | `@` once per new chat if needed |
 | Product spec | `docs/requirements/abssctl-app-specs.txt` | Cite it; `@` only the section you are changing |
 | One decision | matching file under `docs/adrs/` | `@` that ADR |
@@ -69,5 +70,5 @@ When a step finishes, update PATH_FORWARD checkboxes in that chat, then open a n
 
 1. The slice matches the PATH_FORWARD boxes you claimed.
 2. `make quick-tests` passes. If docs changed, `make docs` passes.
-3. PATH_FORWARD checkboxes for that slice are updated.
+3. PATH_FORWARD checkboxes for that slice are updated. When every box in a track is checked, move the track to `docs/PATH_FORWARD_DONE.md`.
 4. Commit only when asked.
