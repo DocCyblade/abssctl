@@ -7,10 +7,12 @@ success code to keep automated smoke tests green.
 """
 from __future__ import annotations
 
+import grp
 import hashlib
 import json
 import logging
 import os
+import pwd
 import re
 import secrets
 import shlex
@@ -824,8 +826,21 @@ def _resolve_bootstrap_options(
     )
 
 
-def _collect_bootstrap_directory_specs(config: AppConfig) -> list[DirectorySpec]:
-    """Return DirectorySpec entries for required bootstrap directories."""
+def _collect_bootstrap_directory_specs(
+    config: AppConfig,
+    *,
+    service_group: str | None = None,
+) -> list[DirectorySpec]:
+    """Return DirectorySpec entries for required bootstrap directories.
+
+    ``instance_root`` and ``install_root`` stay mode 0750. Their group is the
+    service group so ``actual-sync`` can traverse ``/srv`` and the version tree
+    when the unit starts.
+    """
+    service_group_paths = {
+        config.install_root.expanduser(),
+        config.instance_root.expanduser(),
+    }
     candidates: list[tuple[Path, int]] = [
         (config.config_file.parent, 0o750),
         (config.install_root, 0o750),
@@ -851,7 +866,8 @@ def _collect_bootstrap_directory_specs(config: AppConfig) -> list[DirectorySpec]
         if resolved in seen:
             continue
         seen.add(resolved)
-        specs.append(DirectorySpec(path=resolved, mode=mode))
+        group = service_group if resolved in service_group_paths else None
+        specs.append(DirectorySpec(path=resolved, mode=mode, group=group))
     return specs
 
 
@@ -1179,7 +1195,7 @@ def _ensure_runtime(
     logger = StructuredLogger(config.logs_dir)
     templates = TemplateEngine.with_overrides(config.templates_dir)
     systemd_config = config.systemd
-    systemd_unit_dir = systemd_config.unit_dir or (config.runtime_dir / "systemd")
+    systemd_unit_dir = systemd_config.unit_dir or Path("/etc/systemd/system")
     ports_registry = PortsRegistry(
         registry=registry,
         base_port=config.ports.base,
@@ -1200,7 +1216,7 @@ def _ensure_runtime(
     nginx_provider = NginxProvider(
         templates=templates,
         sites_available=config.runtime_dir / "nginx" / "sites-available",
-        sites_enabled=config.runtime_dir / "nginx" / "sites-enabled",
+        sites_enabled=config.nginx.sites_enabled,
     )
     backups_registry = BackupsRegistry(config.backups.root, config.backups.index)
     backups_registry.ensure_root()
@@ -1522,6 +1538,25 @@ def _format_systemd_detail(result: subprocess.CompletedProcess[str], *, dry_run:
     return f"command={command} dry_run={dry_run} rc={result.returncode}"
 
 
+def _enable_and_reload_nginx(
+    provider: NginxProvider,
+    instance: str,
+) -> tuple[subprocess.CompletedProcess[str], subprocess.CompletedProcess[str]]:
+    """Link *instance* into sites-enabled, then test and reload nginx.
+
+    ``render_site`` reloads before the symlink exists. nginx only serves the
+    vhost after this second reload.
+    """
+    provider.enable(instance)
+    try:
+        validation = provider.test_config()
+        reload_result = provider.reload()
+    except NginxError:
+        provider.disable(instance)
+        raise
+    return validation, reload_result
+
+
 def _format_nginx_detail(result: subprocess.CompletedProcess[str]) -> str:
     args = result.args
     if isinstance(args, (list, tuple)):
@@ -1719,6 +1754,46 @@ def _validate_domain(value: str) -> str:
     if not re.fullmatch(r"[a-z0-9.-]+", normalised):
         raise ValueError("Domain may contain letters, numbers, dots, and hyphens.")
     return normalised
+
+
+def _service_group_name(service_user: str) -> str:
+    """Return the primary group name for *service_user*."""
+    try:
+        record = pwd.getpwnam(service_user)
+    except KeyError as exc:
+        raise OSError(f"Service user '{service_user}' does not exist.") from exc
+    try:
+        return grp.getgrgid(record.pw_gid).gr_name
+    except KeyError as exc:
+        raise OSError(
+            f"Primary group for service user '{service_user}' does not exist."
+        ) from exc
+
+
+def _grant_service_group(path: Path, group: str) -> None:
+    """Let *group* traverse *path* without changing its owner."""
+    if not path.is_dir():
+        return
+    try:
+        shutil.chown(path, group=group)
+    except LookupError as exc:
+        raise OSError(f"Cannot set group of {path} to {group}.") from exc
+
+
+def _own_instance_tree(path: Path, user: str, group: str) -> None:
+    """Give *user*:*group* ownership of *path* and its children.
+
+    The systemd unit runs as the service user and ``chdir``s to the instance
+    root. Mode 0750 created as root is not traversable by that user.
+    """
+    try:
+        shutil.chown(path, user=user, group=group)
+    except LookupError as exc:
+        raise OSError(f"Cannot set ownership of {path} to {user}:{group}.") from exc
+    if path.is_symlink() or not path.is_dir():
+        return
+    for child in path.iterdir():
+        _own_instance_tree(child, user, group)
 
 
 def _determine_instance_paths(
@@ -2327,7 +2402,9 @@ def system_init(
         create_group=group_value is not None,
     )
     service_plan = plan_service_account(service_spec)
-    directory_plan = plan_directories(_collect_bootstrap_directory_specs(options.config))
+    directory_plan = plan_directories(
+        _collect_bootstrap_directory_specs(options.config, service_group=group_value)
+    )
     plan = BootstrapPlan(service=service_plan, directories=directory_plan)
 
     requires_account = plan.requires_service_account_creation()
@@ -2352,7 +2429,7 @@ def system_init(
             runtime_root=options.config.runtime_dir,
             logs_root=options.config.logs_dir,
             state_root=options.config.state_dir,
-            systemd_dir=options.config.runtime_dir / "systemd",
+            systemd_dir=options.config.systemd.unit_dir or Path("/etc/systemd/system"),
             nginx_sites_available=options.config.runtime_dir / "nginx" / "sites-available",
         )
         if rebuild_state and discovery_report.errors:
@@ -4877,6 +4954,17 @@ def instance_create(
                 config_written = True
                 cleanup_files.append(paths.config_file)
 
+                service_user = runtime.config.service_user
+                service_group = _service_group_name(service_user)
+                _grant_service_group(runtime.config.instance_root, service_group)
+                _grant_service_group(runtime.config.install_root, service_group)
+                _own_instance_tree(paths.root, service_user, service_group)
+                op.add_step(
+                    "filesystem.chown",
+                    status="success",
+                    detail=f"{paths.root} owner={service_user}:{service_group}",
+                )
+
                 registry_entry = {
                     "name": name,
                     "domain": domain_value,
@@ -4989,11 +5077,23 @@ def instance_create(
                             status="success",
                             detail=_format_nginx_detail(nginx_result.reload),
                         )
-                runtime.nginx_provider.enable(name)
+                nginx_validation, nginx_reload = _enable_and_reload_nginx(
+                    runtime.nginx_provider, name
+                )
                 op.add_step(
                     "nginx.enable",
                     status="success",
                     detail=str(runtime.nginx_provider.enabled_path(name)),
+                )
+                op.add_step(
+                    "nginx.validate",
+                    status="success",
+                    detail=_format_nginx_detail(nginx_validation),
+                )
+                op.add_step(
+                    "nginx.reload",
+                    status="success",
+                    detail=_format_nginx_detail(nginx_reload),
                 )
                 nginx_enabled = True
 

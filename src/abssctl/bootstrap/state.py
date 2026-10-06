@@ -61,7 +61,8 @@ def _describe_instance(instance: DiscoveredInstance, config: AppConfig) -> Mappi
         "systemd_unit": str(
             instance.systemd_unit
             if instance.systemd_unit is not None
-            else config.runtime_dir / "systemd" / f"abssctl-{instance.name}.service"
+            else (config.systemd.unit_dir or Path("/etc/systemd/system"))
+            / f"abssctl-{instance.name}.service"
         ),
         "nginx_site": str(
             instance.nginx_site

@@ -34,6 +34,7 @@ Mutation survivor hunting is local/on-demand work. It is not the next slice.
 | **D** | Check published docs against the code and tests | Done |
 | **V** | `version install` matches `000-manual-install.sh` | Done |
 | **M** | One MITP on `nodeapp00` for Actual 26.10.0 | Done |
+| **H** | Host layout in the CLI (systemd, ownership, nginx link) | Done |
 
 Leave the production server and production PyPI alone. Test guests an agent may use are `docs/TESTING_ACCESS.md`. VM 9011901 (`nodeapp00`) is not in that set. Do not merge the `mutants/` checkpoint on local `dev`.
 
@@ -100,9 +101,17 @@ After V. One version, on `nodeapp00`. The current-plus-ten matrix is the spec Re
 
 Instance `mitp` (port 6000) is active on Node 22.23.3. nginx returns the Actual HTML for `Host: mitp.local`. The wheel was the local working tree, not TestPyPI. Three host adjustments were required: `systemd.unit_dir` is `/etc/systemd/system` (the default writes units under `/run/abssctl/systemd`); `/srv` is group `actual-sync` and the instance tree is owned by `actual-sync` (create leaves `root:root` mode `0750`); the vhost under `/run/abssctl/nginx` was symlinked into `/etc/nginx/sites-enabled`. Upgrade, backup, TLS verify, doctor, support bundle, and cleanup were not run.
 
+## Track H — Host layout in the CLI
+
+After M. The next instance should start on a TurnKey host without those three hand edits. `nodeapp00` still has `mitp` running; this slice does not touch that host, production PyPI, or the real server.
+
+- [x] **H1** systemd units default to `/etc/systemd/system`. `systemd.unit_dir: null` in an older config resolves to that path.
+- [x] **H2** `system init` sets the service group on `/srv` and `/srv/app` (mode stays `0750`). `instance create` owns the instance tree as the service user so the unit can `chdir`, and sets that group on the instance root and install root.
+- [x] **H3** nginx vhosts are still rendered under the runtime dir and linked from `/etc/nginx/sites-enabled` (`nginx.sites_enabled`). `instance create` reloads nginx after that link.
+- [x] **H4** `make quick-tests` green. No TestPyPI upload. Production PyPI stays on `0.1.3a1`.
+
 ## Later (spec Release, and local quality work)
 
-- Put the track M host adjustments into the CLI before the wider burn-in: systemd units in `/etc/systemd/system`, instance directories owned by `actual-sync`, and nginx vhosts linked from `/etc/nginx/sites-enabled`.
 - Mutation survivor hunting beyond the bounded `exit_codes.py` CI job.
-- MITP on the current Actual release plus the ten prior versions.
+- MITP on the current Actual release plus the ten prior versions. npm must be >= 10.9.9; Actual 26.6.0 does not install below that.
 - RC burn-in, production PyPI publish, and GA.

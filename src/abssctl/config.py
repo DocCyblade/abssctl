@@ -186,6 +186,17 @@ class SystemdConfig:
 
 
 @dataclass(frozen=True)
+class NginxConfig:
+    """Nginx integration configuration values."""
+
+    sites_enabled: Path = Path("/etc/nginx/sites-enabled")
+
+    def to_dict(self) -> dict[str, object]:
+        """Return a serialisable representation."""
+        return {"sites_enabled": str(self.sites_enabled)}
+
+
+@dataclass(frozen=True)
 class AppConfig:
     """Resolved configuration values for abssctl."""
 
@@ -206,6 +217,7 @@ class AppConfig:
     tls: TLSConfig
     backups: BackupConfig
     systemd: SystemdConfig
+    nginx: NginxConfig
     node_compat_file: Path | None
 
     def to_dict(self) -> dict[str, object]:
@@ -228,6 +240,7 @@ class AppConfig:
             "tls": self.tls.to_dict(),
             "backups": self.backups.to_dict(),
             "systemd": self.systemd.to_dict(),
+            "nginx": self.nginx.to_dict(),
             "node_compat_file": str(self.node_compat_file) if self.node_compat_file else None,
         }
 
@@ -278,9 +291,12 @@ DEFAULTS: dict[str, object] = {
         },
     },
     "systemd": {
-        "unit_dir": None,
+        "unit_dir": "/etc/systemd/system",
         "systemctl_bin": "systemctl",
         "journalctl_bin": "journalctl",
+    },
+    "nginx": {
+        "sites_enabled": "/etc/nginx/sites-enabled",
     },
     "node_compat_file": None,
 }
@@ -462,6 +478,14 @@ def _validate_structure(raw: Mapping[str, object]) -> None:
             joined = ", ".join(sorted(unknown))
             raise ConfigError(f"Unknown systemd configuration keys: {joined}.")
 
+    nginx = raw.get("nginx")
+    if nginx is not None:
+        nginx_map = _as_dict(nginx, "nginx")
+        unknown = set(nginx_map.keys()) - {"sites_enabled"}
+        if unknown:
+            joined = ", ".join(sorted(unknown))
+            raise ConfigError(f"Unknown nginx configuration keys: {joined}.")
+
 
 def _build_app_config(raw: Mapping[str, object]) -> AppConfig:
     config_file = _to_path(raw.get("config_file"))
@@ -595,13 +619,24 @@ def _build_app_config(raw: Mapping[str, object]) -> AppConfig:
     )
 
     systemd_mapping = _as_dict(raw.get("systemd"), "systemd")
-    unit_dir_value = systemd_mapping.get("unit_dir")
-    systemd_unit_dir = _to_path(unit_dir_value) if unit_dir_value else None
+    unit_dir_value = systemd_mapping.get("unit_dir", "/etc/systemd/system")
+    systemd_unit_dir = (
+        Path("/etc/systemd/system") if not unit_dir_value else _to_path(unit_dir_value)
+    )
     systemd = SystemdConfig(
         unit_dir=systemd_unit_dir,
         systemctl_bin=str(systemd_mapping.get("systemctl_bin", "systemctl")),
         journalctl_bin=str(systemd_mapping.get("journalctl_bin", "journalctl")),
     )
+
+    nginx_mapping = _as_dict(raw.get("nginx"), "nginx")
+    sites_enabled_value = nginx_mapping.get("sites_enabled", "/etc/nginx/sites-enabled")
+    sites_enabled = (
+        Path("/etc/nginx/sites-enabled")
+        if not sites_enabled_value
+        else _to_path(sites_enabled_value)
+    )
+    nginx = NginxConfig(sites_enabled=sites_enabled)
 
     return AppConfig(
         config_file=config_file,
@@ -621,6 +656,7 @@ def _build_app_config(raw: Mapping[str, object]) -> AppConfig:
         tls=tls,
         backups=backups,
         systemd=systemd,
+        nginx=nginx,
         node_compat_file=node_compat_file,
     )
 
@@ -844,6 +880,7 @@ __all__ = [
     "ConfigError",
     "BackupConfig",
     "PortsConfig",
+    "NginxConfig",
     "SystemdConfig",
     "TLSValidationConfig",
     "TLSPermissionSpec",

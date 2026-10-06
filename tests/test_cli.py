@@ -193,6 +193,7 @@ def _prepare_environment(
     state_dir = tmp_path / "state"
     logs_dir = tmp_path / "logs"
     runtime_dir = tmp_path / "run"
+    install_root = tmp_path / "app"
     templates_dir = tmp_path / "templates"
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
@@ -228,11 +229,16 @@ exit 0
         "runtime_dir": str(runtime_dir),
         "templates_dir": str(templates_dir),
         "service_user": owner,
+        "install_root": str(install_root),
         "instance_root": str(tmp_path / "instances"),
         "backups": {"root": str(tmp_path / "backups")},
         "systemd": {
+            "unit_dir": str(runtime_dir / "systemd"),
             "systemctl_bin": str(bin_dir / "systemctl"),
             "journalctl_bin": str(bin_dir / "journalctl"),
+        },
+        "nginx": {
+            "sites_enabled": str(runtime_dir / "nginx" / "sites-enabled"),
         },
         "tls": {
             "system": {
@@ -279,6 +285,7 @@ exit 0
         registry.write_ports(ports)
 
     (tmp_path / "instances").mkdir(parents=True, exist_ok=True)
+    install_root.mkdir(parents=True, exist_ok=True)
     (tmp_path / "backups").mkdir(parents=True, exist_ok=True)
     logs_dir.mkdir(parents=True, exist_ok=True)
     runtime_dir.mkdir(parents=True, exist_ok=True)
@@ -473,6 +480,54 @@ def test_config_show_json(tmp_path: Path) -> None:
     payload = _extract_json(result.stdout)
     assert payload["install_root"] == "/opt/abssctl"
     assert payload["state_dir"] == str(state_dir)
+
+
+def test_runtime_uses_host_systemd_and_nginx_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unset overrides write units to /etc/systemd/system and enable nginx there."""
+    env, _ = _prepare_environment(tmp_path)
+    config_path = Path(env["ABSSCTL_CONFIG_FILE"])
+    config_data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert isinstance(config_data, dict)
+    systemd_block = config_data.get("systemd")
+    if isinstance(systemd_block, dict):
+        systemd_block.pop("unit_dir", None)
+    config_data.pop("nginx", None)
+    config_path.write_text(yaml.safe_dump(config_data), encoding="utf-8")
+
+    captured: dict[str, Path] = {}
+    systemd_cls = SystemdProvider
+    nginx_cls = NginxProvider
+
+    def systemd_factory(**kwargs: object) -> SystemdProvider:
+        unit_dir = kwargs["systemd_dir"]
+        assert isinstance(unit_dir, Path)
+        captured["systemd_dir"] = unit_dir
+        return systemd_cls(**kwargs)  # type: ignore[arg-type]
+
+    def nginx_factory(**kwargs: object) -> NginxProvider:
+        sites_enabled = kwargs["sites_enabled"]
+        sites_available = kwargs["sites_available"]
+        assert isinstance(sites_enabled, Path)
+        assert isinstance(sites_available, Path)
+        captured["sites_enabled"] = sites_enabled
+        captured["sites_available"] = sites_available
+        return nginx_cls(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr("abssctl.cli.SystemdProvider", systemd_factory)
+    monkeypatch.setattr("abssctl.cli.NginxProvider", nginx_factory)
+
+    result = runner.invoke(app, ["config", "show", "--json"], env=env)
+
+    assert result.exit_code == 0
+    payload = _extract_json(result.stdout)
+    assert payload["systemd"]["unit_dir"] == "/etc/systemd/system"
+    assert payload["nginx"]["sites_enabled"] == "/etc/nginx/sites-enabled"
+    assert captured["systemd_dir"] == Path("/etc/systemd/system")
+    assert captured["sites_enabled"] == Path("/etc/nginx/sites-enabled")
+    assert captured["sites_available"] == tmp_path / "run" / "nginx" / "sites-available"
 
 
 def test_ports_list_reports_reservations(tmp_path: Path) -> None:
@@ -2910,12 +2965,26 @@ def test_instance_create_acquires_lock(tmp_path: Path) -> None:
     steps = record.get("steps", [])
     steps_by_name = {step.get("name"): step for step in steps}
     assert "filesystem.mkdir.root" in steps_by_name
+    assert "filesystem.chown" in steps_by_name
     assert "config.write" in steps_by_name
+    owner = pwd.getpwuid(os.getuid())
+    assert instance_root.stat().st_uid == owner.pw_uid
+    assert instance_root.stat().st_gid == owner.pw_gid
+    config_file = instance_root / "config.json"
+    assert config_file.stat().st_uid == owner.pw_uid
+    assert config_file.stat().st_gid == owner.pw_gid
+    assert (tmp_path / "instances").stat().st_gid == owner.pw_gid
+    assert (tmp_path / "app").stat().st_gid == owner.pw_gid
     assert "systemd.render_unit" in steps_by_name
     assert "systemd.enable" in steps_by_name
     assert steps_by_name["systemd.enable"]["status"] == "skipped"
     assert "nginx.render_site" in steps_by_name
     assert "nginx.enable" in steps_by_name
+    reload_steps = [step for step in steps if step.get("name") == "nginx.reload"]
+    assert len(reload_steps) == 2
+    nginx_enabled = runtime_dir / "nginx" / "sites-enabled" / "abssctl-alpha.conf"
+    assert nginx_enabled.is_symlink()
+    assert nginx_enabled.resolve() == nginx_site.resolve()
     assert "registry.write_instances" in steps_by_name
     assert "registry.update" in steps_by_name
 

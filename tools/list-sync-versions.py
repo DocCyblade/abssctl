@@ -161,7 +161,8 @@ def _default_node_versions() -> list[dict[str, Any]]:
             "adr": "ADR-005",
             "notes": (
                 "Preferred runtime. Actual 25.11+ require Node >= 22. "
-                "Node 22.11.0 segfaults in better-sqlite3 13.0.3; 22.23.3 opens a database."
+                "Node 22.11.0 segfaults in better-sqlite3 13.0.3; 22.23.3 opens a database. "
+                "npm must be >= 10.9.9. Actual 26.6.0 does not install on an older npm."
             ),
         },
         {

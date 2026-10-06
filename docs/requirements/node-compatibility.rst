@@ -26,7 +26,7 @@ Node Baseline
      - 22.23.3
      - recommended
      - ADR-005
-     - Preferred runtime. Actual 25.11+ require Node >= 22. Node 22.11.0 segfaults in better-sqlite3 13.0.3; 22.23.3 opens a database.
+     - Preferred runtime. Actual 25.11+ require Node >= 22. Node 22.11.0 segfaults in better-sqlite3 13.0.3; 22.23.3 opens a database. npm must be >= 10.9.9. Actual 26.6.0 does not install on an older npm.
 
    * - 20
      - 20.0.0
@@ -101,7 +101,7 @@ Actual Releases
      - 22
      - untested
      - N/A
-     - N/A
+     - Does not install when npm is older than 10.9.9.
 
    * - 26.5.1
      - 2026-05-08

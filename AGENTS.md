@@ -21,7 +21,7 @@ Python 3.11 admin CLI that installs and operates multiple Actual Budget sync-ser
 
 - `src/abssctl/` — Typer CLI and providers
 - Installs `@actual-app/sync-server` from npm (not a from-source build, not `@actual-app/cli`)
-- Actual 25.11+ needs Node >= 22. `abssctl node ensure` installs that Node via `n`. Do not assume the appliance Node 18 is enough.
+- Actual 25.11+ needs Node >= 22. `abssctl node ensure` installs that Node via `n`. Do not assume the appliance Node 18 is enough. npm must be >= 10.9.9. Actual 26.6.0 does not install on an older npm.
 
 ## Rules of the road
 

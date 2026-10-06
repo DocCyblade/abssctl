@@ -26,6 +26,8 @@ def test_load_config_defaults_when_file_missing(tmp_path: Path) -> None:
     assert config.backups.root == Path("/srv/backups")
     assert config.backups.index == Path("/srv/backups/backups.json")
     assert config.backups.compression == "auto"
+    assert config.systemd.unit_dir == Path("/etc/systemd/system")
+    assert config.nginx.sites_enabled == Path("/etc/nginx/sites-enabled")
     validation = config.tls.validation
     assert validation.warn_expiry_days == 30
     assert validation.key_permissions[0].mode == 0o640

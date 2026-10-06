@@ -41,7 +41,8 @@ Recently Completed Milestones
   local.
 - Node compatibility source of truth: ``docs/requirements/node-compat.yaml``
   and the shipped copy, rendered by ``tools/list-sync-versions.py``. Preferred
-  runtime for Actual 25.11+ and 26.x is Node 22.23.3.
+  runtime for Actual 25.11+ and 26.x is Node 22.23.3. npm must be >= 10.9.9;
+  Actual 26.6.0 does not install on an older npm.
 - TestPyPI ``0.1.5a4``. Production PyPI remains ``0.1.3a1``.
 
 Where the spec milestones stand
@@ -57,9 +58,10 @@ Section 13 of ``docs/requirements/abssctl-app-specs.txt``:
   The appliance run that proves that tree is track M.
 - RC quality work (support bundle, man pages, completion, MITP checklist) is
   in. One Actual 26.10.0 instance (``mitp``, port 6000) is running on
-  ``nodeapp00`` through systemd and nginx on Node 22.23.3. The unit directory,
-  instance ownership, and nginx include were set on the host; upgrade, backup,
-  TLS verify, doctor, support bundle, and cleanup were not run.
+  ``nodeapp00`` through systemd and nginx on Node 22.23.3. That run still
+  needed host edits for the unit directory, instance ownership, and the nginx
+  include. Track H puts those into the CLI. Upgrade, backup, TLS verify,
+  doctor, support bundle, and cleanup were not run.
 - The Release milestone (burn-in on the current Actual release plus the ten
   prior versions, then GA) comes after that single MITP.
 
@@ -67,7 +69,8 @@ Near-term plan
 ==============
 
 These items match ``docs/PATH_FORWARD.md``. One chat per item. The docs
-reading, the version-install change, and one MITP on ``nodeapp00`` are done.
+reading, the version-install change, one MITP on ``nodeapp00``, and the
+host-layout fold-in are done.
 
 1. Check the published docs against the code and tests — read 2026-10-05
 
@@ -127,9 +130,9 @@ Later
 
 8. System validation across the support window
 
-   a. Before that matrix, fold the ``nodeapp00`` host adjustments into the CLI:
-      systemd units in ``/etc/systemd/system``, instance directories owned by
-      ``actual-sync``, and nginx vhosts linked from ``/etc/nginx/sites-enabled``.
+   a. The ``nodeapp00`` host adjustments are in the CLI: systemd units in
+      ``/etc/systemd/system``, instance directories owned by ``actual-sync``,
+      and nginx vhosts linked from ``/etc/nginx/sites-enabled``.
    b. MITP on the current Actual release plus the ten prior versions, updating
       the support matrix.
    c. Structured logs and support bundles for each run.

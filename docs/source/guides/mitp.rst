@@ -15,6 +15,7 @@ Preconditions
 - ``python3.11``, ``make quick-tests`` already green on the commit under test.
 - ``nginx`` and ``systemd`` installed.
 - ``n`` available so ``abssctl node ensure`` can install Node 22+.
+- ``npm`` >= 10.9.9. Actual 26.6.0 does not install on an older npm.
 - Empty ``/srv/app`` and no leftover ``abssctl-*`` units from a prior attempt.
 
 Checklist

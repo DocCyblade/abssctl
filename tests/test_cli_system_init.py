@@ -67,6 +67,10 @@ def test_system_init_json_plan(tmp_path: Path) -> None:
     assert payload["dry_run"] is True
     assert payload["status"] == "dry-run"
     assert payload["service_account"]["actions"]
+    actions = payload["directories"]["actions"]
+    by_path = {item["path"]: item for item in actions}
+    assert by_path[str(tmp_path / "srv")]["group"] == "abssctl-test"
+    assert by_path[str(tmp_path / "srv" / "app")]["group"] == "abssctl-test"
 
 
 def test_system_init_discover_dry_run(tmp_path: Path) -> None:

@@ -437,6 +437,18 @@ def _probe_state_instances(context: ProbeContext) -> ProbeResult:
     )
 
 
+def _systemd_unit_dir(config: object) -> Path:
+    """Return the unit directory the CLI writes, falling back for partial configs."""
+    systemd = getattr(config, "systemd", None)
+    configured = getattr(systemd, "unit_dir", None) if systemd is not None else None
+    if configured:
+        return Path(configured)
+    runtime_dir = getattr(config, "runtime_dir", None)
+    if isinstance(runtime_dir, Path):
+        return runtime_dir / "systemd"
+    return Path("/etc/systemd/system")
+
+
 def _probe_state_reconcile(context: ProbeContext) -> ProbeResult:
     config = context.config
     report = discover_instances(
@@ -444,7 +456,7 @@ def _probe_state_reconcile(context: ProbeContext) -> ProbeResult:
         runtime_root=config.runtime_dir,
         logs_root=config.logs_dir,
         state_root=config.state_dir,
-        systemd_dir=config.runtime_dir / "systemd",
+        systemd_dir=_systemd_unit_dir(config),
         nginx_sites_available=config.runtime_dir / "nginx" / "sites-available",
     )
 
