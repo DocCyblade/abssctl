@@ -35,6 +35,7 @@ Mutation survivor hunting is local/on-demand work. It is not the next slice.
 | **V** | `version install` matches `000-manual-install.sh` | Done |
 | **M** | One MITP on `nodeapp00` for Actual 26.10.0 | Done |
 | **H** | Host layout in the CLI (systemd, ownership, nginx link) | Done |
+| **T** | Test copy of the manual install (name, FQDN, port) | Done |
 
 Leave the production server and production PyPI alone. Test guests an agent may use are `docs/TESTING_ACCESS.md`. VM 9011901 (`nodeapp00`) is not in that set. Do not merge the `mutants/` checkpoint on local `dev`.
 
@@ -109,6 +110,18 @@ After M. The next instance should start on a TurnKey host without those three ha
 - [x] **H2** `system init` sets the service group on `/srv` and `/srv/app` (mode stays `0750`). `instance create` owns the instance tree as the service user so the unit can `chdir`, and sets that group on the instance root and install root.
 - [x] **H3** nginx vhosts are still rendered under the runtime dir and linked from `/etc/nginx/sites-enabled` (`nginx.sites_enabled`). `instance create` reloads nginx after that link.
 - [x] **H4** `make quick-tests` green. No TestPyPI upload. Production PyPI stays on `0.1.3a1`.
+
+## Track T — Test copy of the manual install
+
+After H. A test guest can be laid out the same way as production. This is not the version matrix. `000-manual-install.sh` is unchanged. The script was not run, and abssctl was not installed. A later run belongs on `test-nodeapp02` unless Ken says otherwise. `test-nodeapp01` already has the family sites from the production clone.
+
+- [x] **T1** `tmp-personal-server/000-test-install.sh` copies the manual install. `000-manual-install.sh` is unchanged.
+- [x] **T2** The copy takes one or more instances as name, FQDN, and port. It has no production instance names.
+- [x] **T3** Layout stays `npm pack`, extract into `/srv/app/v<version>`, `npm install --omit=dev --no-save`, `actual-sync`, `config.json`, systemd unit, nginx site.
+- [x] **T4** Default Node is 22.23.3. `NODE` and `ACTUAL_VERSION` are overridable (`REQUIRED_NODE` is used when `NODE` is unset). npm older than 10.9.9 is refused, and the script tells you to upgrade.
+- [x] **T5** nginx uses `/root/ssl/star.krajr.net.pem` and `/root/ssl/star.krajr.net.key`.
+
+The script lives under `tmp*` (gitignored), same as `000-manual-install.sh`.
 
 ## Later (spec Release, and local quality work)
 

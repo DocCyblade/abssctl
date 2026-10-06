@@ -56,6 +56,7 @@ Use the test FQDNs below. Production names (the `*-budgetapp.krajr.net` set in `
 - Use any VM other than the three in the table. VM 9011901 (`nodeapp00`) is not in this token’s scope.
 - Delete snapshots, clone a guest, or roll back unless the task says so.
 - Run `tmp-personal-server/000-manual-install.sh` here. That script builds the production budget sites.
+- Run `tmp-personal-server/000-test-install.sh` unless the task says to. It is the test-guest copy (name, FQDN, and port arguments; nginx uses `/root/ssl/`). A later run belongs on `test-nodeapp02`. `test-nodeapp01` already has the family sites.
 
 ## Observed at the snapshots (2026-10-06)
 
@@ -80,4 +81,4 @@ Each guest has the wildcard certificate in `/root/ssl/`:
 
 Subject `CN=*.krajr.net`, SAN `*.krajr.net` and `krajr.net`, valid through 2026-12-16. That covers the test FQDNs. Do not copy the key into the repo or into chat.
 
-TurnKey nginx reads `/etc/ssl/private/cert.pem` and `/etc/ssl/private/cert.key` (`/etc/nginx/snippets/ssl.conf`). On `test-nodeapp01` those paths are the wildcard certificate. On `test-nodeapp02` and `test-nodeapp03` they are still the appliance self-signed `nodejs` certificate. Use the files in `/root/ssl/` when a test site needs the public wildcard.
+TurnKey nginx reads `/etc/ssl/private/cert.pem` and `/etc/ssl/private/cert.key` (`/etc/nginx/snippets/ssl.conf`). On `test-nodeapp01` those paths are the wildcard certificate. On `test-nodeapp02` and `test-nodeapp03` they are still the appliance self-signed `nodejs` certificate. Use the files in `/root/ssl/` when a test site needs the public wildcard. `tmp-personal-server/000-test-install.sh` points its nginx sites at those two files.
