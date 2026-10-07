@@ -455,6 +455,55 @@ def test_invocation_without_subcommand_shows_help(tmp_path: Path) -> None:
     assert "Actual Budget Multi-Instance Sync Server Admin CLI" in result.stdout
 
 
+@pytest.mark.parametrize(
+    ("args", "help_text"),
+    [
+        (["system"], "Manage system bootstrap and recovery tasks."),
+        (["node"], "Manage Node runtime compatibility tasks."),
+        (["instance"], "Manage Actual Budget Sync Server instances."),
+        (["ports"], "Inspect and manage port reservations."),
+        (["version"], "Manage installed Sync Server versions."),
+        (["backup"], "Create and reconcile instance backups."),
+        (["config"], "Inspect and manage global configuration."),
+        (["tls"], "Manage TLS certificates and validation."),
+        (["docs"], "Inspect packaged documentation artifacts."),
+        (["docs", "man"], "Locate and install the abssctl man page."),
+        (["completion"], "Show, install, or remove shell completion scripts."),
+    ],
+)
+def test_group_without_subcommand_shows_help(
+    tmp_path: Path,
+    args: list[str],
+    help_text: str,
+) -> None:
+    """A command group with no further tokens prints its help and exits 0."""
+    env, _ = _prepare_environment(tmp_path)
+    result = runner.invoke(app, args, env=env)
+
+    assert result.exit_code == 0, result.output
+    assert help_text in result.stdout
+
+
+def test_required_argument_command_without_args_shows_help(tmp_path: Path) -> None:
+    """A command that requires an argument prints help when none is given."""
+    env, _ = _prepare_environment(tmp_path)
+    result = runner.invoke(app, ["instance", "show"], env=env)
+
+    assert result.exit_code == 0, result.output
+    assert "NAME" in result.stdout
+    assert "Missing argument" not in result.output
+
+
+def test_zero_arg_command_still_runs(tmp_path: Path) -> None:
+    """Commands with no required arguments still run when invoked alone."""
+    env, state_dir = _prepare_environment(tmp_path)
+    result = runner.invoke(app, ["config", "show"], env=env)
+
+    assert result.exit_code == 0, result.output
+    assert "state_dir" in result.stdout
+    assert state_dir.name in result.stdout
+
+
 def test_config_show_renders_table(tmp_path: Path) -> None:
     """`config show` prints the merged configuration in a table."""
     env, state_dir = _prepare_environment(tmp_path)

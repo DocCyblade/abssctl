@@ -28,6 +28,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, NoReturn, cast
 
+import click
 import typer
 from packaging.version import InvalidVersion, Version
 from rich.console import Console
@@ -589,8 +590,32 @@ def _render_doctor_report(report: DoctorReport) -> None:
         if result.duration_ms is not None:
             console.print(f"  duration: {result.duration_ms} ms")
 
+class _HelpOnNoArgsGroup(typer.core.TyperGroup):
+    """Print help and exit 0 when no arguments are passed.
+
+    Click 8.2 and later raise ``NoArgsIsHelpError`` for ``no_args_is_help``,
+    which exits 2. This group prints that same help on stdout and exits 0,
+    including nested groups and commands whose error bubbles up here.
+    """
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        if not args and self.no_args_is_help and not ctx.resilient_parsing:
+            click.echo(ctx.get_help())
+            ctx.exit(0)
+        return super().parse_args(ctx, args)
+
+    def invoke(self, ctx: click.Context) -> object:
+        try:
+            return super().invoke(ctx)
+        except click.exceptions.NoArgsIsHelpError as exc:
+            click.echo(exc.format_message())
+            ctx.exit(0)
+
+
 app = typer.Typer(
+    cls=_HelpOnNoArgsGroup,
     add_completion=False,
+    no_args_is_help=True,
     help=textwrap.dedent(
         """
         Actual Budget Multi-Instance Sync Server Admin CLI.
@@ -1298,10 +1323,6 @@ def _root(  # noqa: D401 - Typer displays help for us, docstring optional.
         return
 
     _ensure_runtime(ctx, config_file, lock_timeout)
-
-    if ctx.invoked_subcommand is None:
-        console.print(ctx.get_help())
-        raise typer.Exit(code=0)
 
 
 def _placeholder(message: str) -> None:
@@ -2330,8 +2351,14 @@ def support_bundle(
             )
 
 
-system_app = typer.Typer(help="Manage system bootstrap and recovery tasks.")
-node_app = typer.Typer(help="Manage Node runtime compatibility tasks.")
+system_app = typer.Typer(
+    no_args_is_help=True,
+    help="Manage system bootstrap and recovery tasks.",
+)
+node_app = typer.Typer(
+    no_args_is_help=True,
+    help="Manage Node runtime compatibility tasks.",
+)
 
 
 @system_app.command("init")
@@ -2600,16 +2627,43 @@ def system_init(
         console.print("[green]Bootstrap completed successfully.[/green]")
 
 
-instances_app = typer.Typer(help="Manage Actual Budget Sync Server instances.")
-ports_app = typer.Typer(help="Inspect and manage port reservations.")
-versions_app = typer.Typer(help="Manage installed Sync Server versions.")
-backups_app = typer.Typer(help="Create and reconcile instance backups.")
-config_app = typer.Typer(help="Inspect and manage global configuration.")
-tls_app = typer.Typer(help="Manage TLS certificates and validation.")
-docs_app = typer.Typer(help="Inspect packaged documentation artifacts.")
-man_app = typer.Typer(help="Locate and install the abssctl man page.")
+instances_app = typer.Typer(
+    no_args_is_help=True,
+    help="Manage Actual Budget Sync Server instances.",
+)
+ports_app = typer.Typer(
+    no_args_is_help=True,
+    help="Inspect and manage port reservations.",
+)
+versions_app = typer.Typer(
+    no_args_is_help=True,
+    help="Manage installed Sync Server versions.",
+)
+backups_app = typer.Typer(
+    no_args_is_help=True,
+    help="Create and reconcile instance backups.",
+)
+config_app = typer.Typer(
+    no_args_is_help=True,
+    help="Inspect and manage global configuration.",
+)
+tls_app = typer.Typer(
+    no_args_is_help=True,
+    help="Manage TLS certificates and validation.",
+)
+docs_app = typer.Typer(
+    no_args_is_help=True,
+    help="Inspect packaged documentation artifacts.",
+)
+man_app = typer.Typer(
+    no_args_is_help=True,
+    help="Locate and install the abssctl man page.",
+)
 docs_app.add_typer(man_app, name="man")
-completion_app = typer.Typer(help="Show, install, or remove shell completion scripts.")
+completion_app = typer.Typer(
+    no_args_is_help=True,
+    help="Show, install, or remove shell completion scripts.",
+)
 
 app.add_typer(system_app, name="system")
 app.add_typer(node_app, name="node")
@@ -2939,7 +2993,7 @@ def tls_verify(
             _command_error(op, str(exc), rc=2)
 
 
-@tls_app.command("install")
+@tls_app.command("install", no_args_is_help=True)
 def tls_install(
     ctx: typer.Context,
     instance: str = typer.Argument(..., help="Instance to install TLS assets for."),
@@ -3193,7 +3247,7 @@ def tls_install(
             )
 
 
-@tls_app.command("use-system")
+@tls_app.command("use-system", no_args_is_help=True)
 def tls_use_system(
     ctx: typer.Context,
     instance: str = typer.Argument(..., help="Instance to switch back to system TLS."),
@@ -3377,7 +3431,7 @@ def ports_list(
         op.success("Reported port reservations.", changed=0)
 
 
-@versions_app.command("install")
+@versions_app.command("install", no_args_is_help=True)
 def version_install(
     ctx: typer.Context,
     version: str = typer.Argument(..., help="Actual Sync Server version to install (X.Y.Z)."),
@@ -3517,7 +3571,7 @@ def version_install(
             )
 
 
-@versions_app.command("switch")
+@versions_app.command("switch", no_args_is_help=True)
 def version_switch(
     ctx: typer.Context,
     version: str = typer.Argument(..., help="Installed version to activate as current."),
@@ -3613,7 +3667,7 @@ def version_switch(
             op.success("Version switch completed.", changed=2, backups=backup_ids)
 
 
-@versions_app.command("uninstall")
+@versions_app.command("uninstall", no_args_is_help=True)
 def version_uninstall(
     ctx: typer.Context,
     version: str = typer.Argument(..., help="Installed version to remove."),
@@ -4750,7 +4804,7 @@ def instance_list(
         op.success("Reported instance list.", changed=0)
 
 
-@instances_app.command("show")
+@instances_app.command("show", no_args_is_help=True)
 def instance_show(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Name of the instance to display."),
@@ -4803,7 +4857,7 @@ def instance_show(
         op.success("Displayed instance details.", changed=0)
 
 
-@instances_app.command("create")
+@instances_app.command("create", no_args_is_help=True)
 def instance_create(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Name of the instance to create."),
@@ -5180,7 +5234,7 @@ def instance_create(
                 _command_error(op, message, rc=3)
 
 
-@instances_app.command("enable")
+@instances_app.command("enable", no_args_is_help=True)
 def instance_enable(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Name of the instance to enable."),
@@ -5235,7 +5289,7 @@ def instance_enable(
             op.success("Instance enabled.", changed=3)
 
 
-@instances_app.command("disable")
+@instances_app.command("disable", no_args_is_help=True)
 def instance_disable(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Name of the instance to disable."),
@@ -5291,7 +5345,7 @@ def instance_disable(
             op.success("Instance disabled.", changed=3)
 
 
-@instances_app.command("start")
+@instances_app.command("start", no_args_is_help=True)
 def instance_start(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Name of the instance to start."),
@@ -5341,7 +5395,7 @@ def instance_start(
             op.success("Instance started.", changed=2)
 
 
-@instances_app.command("stop")
+@instances_app.command("stop", no_args_is_help=True)
 def instance_stop(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Name of the instance to stop."),
@@ -5391,7 +5445,7 @@ def instance_stop(
             op.success("Instance stopped.", changed=2)
 
 
-@instances_app.command("restart")
+@instances_app.command("restart", no_args_is_help=True)
 def instance_restart(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Name of the instance to restart."),
@@ -5448,7 +5502,7 @@ def instance_restart(
             op.success("Instance restarted.", changed=3)
 
 
-@instances_app.command("status")
+@instances_app.command("status", no_args_is_help=True)
 def instance_status_command(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Name of the instance to query."),
@@ -5537,7 +5591,7 @@ def instance_status_command(
         op.success("Reported instance status.", changed=0)
 
 
-@instances_app.command("delete")
+@instances_app.command("delete", no_args_is_help=True)
 def instance_delete(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Name of the instance to delete."),
@@ -5849,7 +5903,7 @@ def version_check_updates(
         op.success("Reported update status.", changed=0)
 
 
-@backups_app.command("create")
+@backups_app.command("create", no_args_is_help=True)
 def backup_create(
     ctx: typer.Context,
     instance: str = typer.Argument(..., help="Instance name to back up."),
@@ -6080,7 +6134,7 @@ def backup_list(
         op.success("Reported backup list.", changed=0)
 
 
-@backups_app.command("show")
+@backups_app.command("show", no_args_is_help=True)
 def backup_show(
     ctx: typer.Context,
     backup_id: str = typer.Argument(..., help="Backup identifier to inspect."),
@@ -6562,7 +6616,7 @@ def backup_prune(
         )
 
 
-@backups_app.command("restore")
+@backups_app.command("restore", no_args_is_help=True)
 def backup_restore(
     ctx: typer.Context,
     backup_id: str = typer.Argument(..., help="Backup identifier to restore."),
@@ -7000,7 +7054,7 @@ def backup_restore(
             console.print(f"[red]Unexpected restore failure: {exc}[/red]")
             op.error("Backup restore failed unexpectedly.", errors=[str(exc)], rc=4)
             raise typer.Exit(code=4) from exc
-@instances_app.command("logs")
+@instances_app.command("logs", no_args_is_help=True)
 def instance_logs(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Name of the instance to read logs for."),
@@ -7056,7 +7110,7 @@ def instance_logs(
         )
 
         op.success("Fetched instance logs.", changed=0)
-@instances_app.command("env")
+@instances_app.command("env", no_args_is_help=True)
 def instance_env(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Instance to describe."),
@@ -7123,7 +7177,7 @@ def instance_env(
         op.success("Reported instance environment variables.", changed=0)
 
 
-@instances_app.command("set-fqdn")
+@instances_app.command("set-fqdn", no_args_is_help=True)
 def instance_set_fqdn(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Instance to update."),
@@ -7264,7 +7318,7 @@ def instance_set_fqdn(
                 f"[green]Updated domain for instance '{name}' to {new_domain}.[/green]"
             )
             op.success("Instance domain updated.", changed=3)
-@instances_app.command("set-port")
+@instances_app.command("set-port", no_args_is_help=True)
 def instance_set_port(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Instance to update."),
@@ -7492,7 +7546,7 @@ def instance_set_port(
                 op.success("Instance port updated.", changed=6 if was_running else 5)
             except (SystemdError, NginxError, TLSConfigurationError) as exc:
                 _provider_error(op, f"Port update failed: {exc}")
-@instances_app.command("set-version")
+@instances_app.command("set-version", no_args_is_help=True)
 def instance_set_version(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Instance to update."),
@@ -7659,7 +7713,7 @@ def instance_set_version(
                 _provider_error(op, f"systemd operation failed: {exc}")
 
 
-@instances_app.command("rename")
+@instances_app.command("rename", no_args_is_help=True)
 def instance_rename(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Current instance name."),
