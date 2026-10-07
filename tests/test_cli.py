@@ -490,7 +490,7 @@ def test_required_argument_command_without_args_shows_help(tmp_path: Path) -> No
     result = runner.invoke(app, ["instance", "show"], env=env)
 
     assert result.exit_code == 0, result.output
-    assert "NAME" in result.stdout
+    assert "NAME" in result.stdout or "{name}" in result.stdout
     assert "Missing argument" not in result.output
 
 

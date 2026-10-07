@@ -26,6 +26,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import ModuleType
 from typing import Any, NoReturn, cast
 
 import click
@@ -590,6 +591,18 @@ def _render_doctor_report(report: DoctorReport) -> None:
         if result.duration_ms is not None:
             console.print(f"  duration: {result.duration_ms} ms")
 
+def _typer_click() -> ModuleType:
+    """Return the Click implementation Typer actually calls.
+
+    Typer 0.27 vendors Click as ``typer._click``. Catching the standalone
+    ``click`` exception misses ``NoArgsIsHelpError`` from that copy.
+    """
+    vendored = getattr(typer, "_click", None)
+    if isinstance(vendored, ModuleType):
+        return vendored
+    return click
+
+
 class _HelpOnNoArgsGroup(typer.core.TyperGroup):
     """Print help and exit 0 when no arguments are passed.
 
@@ -598,18 +611,22 @@ class _HelpOnNoArgsGroup(typer.core.TyperGroup):
     including nested groups and commands whose error bubbles up here.
     """
 
-    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+    def parse_args(self, ctx: Any, args: list[str]) -> list[str]:  # noqa: ANN401
+        click_mod = _typer_click()
         if not args and self.no_args_is_help and not ctx.resilient_parsing:
-            click.echo(ctx.get_help())
+            click_mod.echo(ctx.get_help())
             ctx.exit(0)
+            raise SystemExit(0)
         return super().parse_args(ctx, args)
 
-    def invoke(self, ctx: click.Context) -> object:
+    def invoke(self, ctx: Any) -> object:  # noqa: ANN401
+        click_mod = _typer_click()
         try:
             return super().invoke(ctx)
-        except click.exceptions.NoArgsIsHelpError as exc:
-            click.echo(exc.format_message())
+        except click_mod.exceptions.NoArgsIsHelpError as exc:
+            click_mod.echo(exc.format_message())
             ctx.exit(0)
+            raise SystemExit(0) from None
 
 
 app = typer.Typer(
