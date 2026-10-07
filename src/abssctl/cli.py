@@ -29,7 +29,6 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, NoReturn, cast
 
-import click
 import typer
 from packaging.version import InvalidVersion, Version
 from rich.console import Console
@@ -600,6 +599,8 @@ def _typer_click() -> ModuleType:
     vendored = getattr(typer, "_click", None)
     if isinstance(vendored, ModuleType):
         return vendored
+    import click
+
     return click
 
 
