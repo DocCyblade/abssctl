@@ -1,9 +1,10 @@
-# abssctl path forward (living TODO)
+# abssctl path forward (milestone story)
 
-Version: 1.0.0
+Version: 1.1.0
 Date: 2026-10-06
 Branch: `dev-beta1-redux` (cut from `dev-beta1`, not from `dev`)
-**How to use:** Check boxes as work finishes. Start each Cursor chat from [`CURSOR_WORKFLOW.md`](CURSOR_WORKFLOW.md). When a track is finished, move its section to [`PATH_FORWARD_DONE.md`](PATH_FORWARD_DONE.md).
+
+GitHub Issues are the queue. [`NEXT_STEPS.md`](NEXT_STEPS.md) is the catch-up snapshot of the next three. This file is the milestone story, not a second checkbox list. Start a chat from [`CURSOR_WORKFLOW.md`](CURSOR_WORKFLOW.md). Finished tracks stay in [`PATH_FORWARD_DONE.md`](PATH_FORWARD_DONE.md) as history.
 
 `dev` is not the base. Its only unique local commit is a `mutants/` dump. Do not merge that commit. Promote this branch to `dev` with a squash only when a slice is ready.
 
