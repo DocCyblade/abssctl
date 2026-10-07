@@ -72,7 +72,13 @@ Node v22.0.0 on `test-nodeapp01` is not the runtime to serve Actual with: 22.11.
 
 From this Mac on 2026-10-06, all nine `test*a` / `test*b` / `test*c` names resolve to the guest FQDN and the address in the table.
 
-`test-nodeapp02` is no longer at `base-tkl-nodejs-v18`. After the 2026-10-06 test install it is running with npm 10.9.9, Node 22.23.3 via `n`, and the three instances above. The local `0.1.5a4` wheel is installed at `/opt/abssctl` (`/usr/local/bin/abssctl`). `abssctl system init --rebuild-state` with `--instance-root /srv/instances` registered test1b, test2b, and test3b. The snapshot table is still the powered-off baseline.
+The three guests were rolled back to the snapshots above on 2026-10-07 and left running with TestPyPI `abssctl` 0.1.5a6 at `/opt/abssctl` (`/usr/local/bin/abssctl`). Each needed `python3-venv` before `python3 -m venv` would succeed. `0.1.5a5` is also on TestPyPI and does not start (`import click` fails under Typer 0.27).
+
+- `test-nodeapp01`: family instances andrew, julia, robinson, and test were backed up under `/srv/backups` and deleted. `test1a`, `test2a`, and `test3a` are running on ports 5110–5112 (Node 22.23.3, Actual 25.11.0 at `/srv/app/current`) and nginx returns HTTP 200 for their `test*a-abssctl-test.krajr.net` names.
+- `test-nodeapp02`: `system init --allow-create-user`, `node ensure` (Node 22.23.3, npm 10.9.9), and `version install 26.10.0` succeeded. `test1b` was created on port 5110 at `/srv/test1b` (default instance root `/srv`). The unit crash-loops with `203/EXEC` because `/usr/local/bin/abssctl-node-run` is not installed. nginx returns HTTP 502. `doctor` exits 4.
+- `test-nodeapp03`: `system init --allow-create-user` succeeded. `node ensure` exits 3 because `n` is not on PATH. No Actual version or instance was created.
+
+The snapshot table above is still the powered-off baseline.
 
 ## TLS
 
