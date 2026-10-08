@@ -55,7 +55,46 @@ def test_system_init_dry_run_outputs_plan(tmp_path: Path) -> None:
     result = runner.invoke(app, args)
     assert result.exit_code == 0
     assert "Service account" in result.stdout
+    assert "Config" in result.stdout
+    assert "Would create" in result.stdout
     assert "Dry run only" in result.stdout
+    assert not (tmp_path / "etc" / "abssctl" / "config.yml").exists()
+
+
+def test_system_init_writes_config_without_rebuild_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-interactive init must write config.yml without --rebuild-state."""
+    monkeypatch.setattr("abssctl.cli.apply_service_account_plan", lambda *_a, **_k: None)
+    monkeypatch.setattr("abssctl.cli.apply_directory_plan", lambda *_a, **_k: None)
+    monkeypatch.setattr("abssctl.cli.wrapper_needs_install", lambda *_a, **_k: False)
+    monkeypatch.setattr("abssctl.cli.install_node_wrapper", lambda *_a, **_k: False)
+
+    config_path = tmp_path / "etc" / "abssctl" / "config.yml"
+    assert not config_path.exists()
+
+    args = _bootstrap_args(tmp_path) + ["--defaults", "--yes", "--allow-create-user"]
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0, result.stdout
+    assert config_path.exists()
+    assert "Wrote config file" in result.stdout
+
+    from abssctl.config import load_config
+
+    loaded = load_config(config_file=config_path)
+    assert loaded.config_file == config_path
+    assert loaded.install_root == tmp_path / "srv" / "app"
+
+
+def test_system_init_json_reports_config_create(tmp_path: Path) -> None:
+    """JSON dry-run payload should mark a missing config.yml for creation."""
+    args = _bootstrap_args(tmp_path) + ["--yes", "--dry-run", "--json"]
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["config"]["action"] == "create"
+    assert payload["config"]["path"] == str(tmp_path / "etc" / "abssctl" / "config.yml")
 
 
 def test_system_init_json_plan(tmp_path: Path) -> None:
