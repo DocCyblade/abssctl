@@ -457,7 +457,7 @@ def _probe_state_reconcile(context: ProbeContext) -> ProbeResult:
         logs_root=config.logs_dir,
         state_root=config.state_dir,
         systemd_dir=_systemd_unit_dir(config),
-        nginx_sites_available=config.runtime_dir / "nginx" / "sites-available",
+        nginx_sites_available=config.nginx.sites_available,
     )
 
     registry_entries = _iter_instance_entries(context)

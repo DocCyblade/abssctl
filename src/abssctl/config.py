@@ -190,11 +190,15 @@ class SystemdConfig:
 class NginxConfig:
     """Nginx integration configuration values."""
 
+    sites_available: Path = Path("/etc/nginx/sites-available")
     sites_enabled: Path = Path("/etc/nginx/sites-enabled")
 
     def to_dict(self) -> dict[str, object]:
         """Return a serialisable representation."""
-        return {"sites_enabled": str(self.sites_enabled)}
+        return {
+            "sites_available": str(self.sites_available),
+            "sites_enabled": str(self.sites_enabled),
+        }
 
 
 @dataclass(frozen=True)
@@ -297,6 +301,7 @@ DEFAULTS: dict[str, object] = {
         "journalctl_bin": "journalctl",
     },
     "nginx": {
+        "sites_available": "/etc/nginx/sites-available",
         "sites_enabled": "/etc/nginx/sites-enabled",
     },
     "node_compat_file": None,
@@ -482,7 +487,7 @@ def _validate_structure(raw: Mapping[str, object]) -> None:
     nginx = raw.get("nginx")
     if nginx is not None:
         nginx_map = _as_dict(nginx, "nginx")
-        unknown = set(nginx_map.keys()) - {"sites_enabled"}
+        unknown = set(nginx_map.keys()) - {"sites_available", "sites_enabled"}
         if unknown:
             joined = ", ".join(sorted(unknown))
             raise ConfigError(f"Unknown nginx configuration keys: {joined}.")
@@ -631,13 +636,25 @@ def _build_app_config(raw: Mapping[str, object]) -> AppConfig:
     )
 
     nginx_mapping = _as_dict(raw.get("nginx"), "nginx")
+    sites_available_value = nginx_mapping.get(
+        "sites_available",
+        "/etc/nginx/sites-available",
+    )
+    sites_available = (
+        Path("/etc/nginx/sites-available")
+        if not sites_available_value
+        else _to_path(sites_available_value)
+    )
     sites_enabled_value = nginx_mapping.get("sites_enabled", "/etc/nginx/sites-enabled")
     sites_enabled = (
         Path("/etc/nginx/sites-enabled")
         if not sites_enabled_value
         else _to_path(sites_enabled_value)
     )
-    nginx = NginxConfig(sites_enabled=sites_enabled)
+    nginx = NginxConfig(
+        sites_available=sites_available,
+        sites_enabled=sites_enabled,
+    )
 
     return AppConfig(
         config_file=config_file,

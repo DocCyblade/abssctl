@@ -67,7 +67,8 @@ def _describe_instance(instance: DiscoveredInstance, config: AppConfig) -> Mappi
         "nginx_site": str(
             instance.nginx_site
             if instance.nginx_site is not None
-            else config.runtime_dir / "nginx" / "sites-available" / f"{instance.name}.conf"
+            else config.nginx.sites_available
+            / f"abssctl-{instance.name.replace('/', '-')}.conf"
         ),
     }
     entry = {

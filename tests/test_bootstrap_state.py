@@ -34,7 +34,7 @@ def test_rebuild_registry_from_discovery(tmp_path: Path) -> None:
         logs_dir=tmp_path / "var" / "log" / "abssctl" / "alpha",
         state_dir=tmp_path / "var" / "lib" / "abssctl" / "instances" / "alpha",
         systemd_unit=tmp_path / "etc" / "systemd" / "abssctl-alpha.service",
-        nginx_site=tmp_path / "etc" / "nginx" / "sites-available" / "alpha.conf",
+        nginx_site=tmp_path / "etc" / "nginx" / "sites-available" / "abssctl-alpha.conf",
         port=5555,
         domain="alpha.example.com",
         version="v1.2.3",

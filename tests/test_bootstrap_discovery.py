@@ -57,7 +57,7 @@ def test_discovery_reports_instances(tmp_path: Path) -> None:
     assert instance.port == 5555
     assert instance.version is None
     assert instance.systemd_unit == systemd_dir / "abssctl-alpha.service"
-    assert instance.nginx_site == nginx_sites / "alpha.conf"
+    assert instance.nginx_site == nginx_sites / "abssctl-alpha.conf"
 
 
 def test_discovery_handles_missing_config(tmp_path: Path) -> None:
