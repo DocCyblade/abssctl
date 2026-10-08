@@ -20,9 +20,11 @@ Repository Standards
 Coding Workflow
 ---------------
 
-1. Fork the repository or create a feature branch from the active milestone
-   integration branch (currently ``dev-alpha5``; check ``ops/session-log.txt`` for
-   the latest session information).
+1. Create an issue branch from the tip of the active milestone branch
+   (currently ``dev-beta1-redux``). See
+   ``docs/adrs/ADR-034-repo-management-and-branching.md`` and
+   ``docs/CURSOR_WORKFLOW.md``. Do not open casual pull requests against
+   ``main``.
 2. Create a Python 3.11 virtual environment stored in ``.venv`` with a prompt label ``dev`` and activate it::
 
       python3.11 -m venv .venv --prompt dev
@@ -44,7 +46,8 @@ Coding Workflow
    executes the full lint/type/test/build pipeline used in CI.
 
 6. Open a pull request targeting the same milestone branch you started from
-   (``dev-alpha5`` at the moment) and request review.
+   (``dev-beta1-redux`` at the moment). Prefer squash-merge into that branch.
+   ``main`` is only reached via ``release/*``, ``hotfix/*``, or ``docfix/*``.
 
 Testing Registry Data
 ---------------------
