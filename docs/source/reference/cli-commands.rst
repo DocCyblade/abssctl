@@ -39,7 +39,8 @@ System Commands
    launches an interactive wizard that confirms the service user/group,
    previews the directory scaffold (config, install root, instance root,
    state/registry, logs, runtime, templates, backups), and applies the plan
-   once approved. ``--yes`` / ``--defaults`` enable unattended execution,
+   once approved. A successful run creates ``/etc/abssctl/config.yml`` when that
+   file is missing. ``--yes`` / ``--defaults`` enable unattended execution,
    ``--dry-run`` reports the plan without touching the filesystem, and the
    optional ``--json`` flag emits a machine-readable summary. ``--discover``
    scans the filesystem for existing Actual instances, while

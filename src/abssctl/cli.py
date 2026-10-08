@@ -2507,6 +2507,7 @@ def system_init(
     if rebuild_state:
         rebuild_preview = _planned_rebuild_outputs(options.config)
 
+    config_missing = not options.config.config_file.exists()
     wrapper_path = resolve_wrapper_path()
     try:
         wrapper_pending = wrapper_needs_install(wrapper_path)
@@ -2522,11 +2523,19 @@ def system_init(
             "path": str(wrapper_path),
             "action": "install" if wrapper_pending else "unchanged",
         }
+        plan_payload["config"] = {
+            "path": str(options.config.config_file),
+            "action": "create" if config_missing else "unchanged",
+        }
 
     if not json_output:
         console.rule("[bold]Bootstrap Plan[/bold]")
         _render_bootstrap_plan(plan)
         console.print()
+        if config_missing and rebuild_preview is None:
+            action = "Would create" if dry_run else "Create"
+            console.print(f"[bold]Config[/bold]: {action} {options.config.config_file}")
+            console.print()
         if wrapper_pending:
             action = "Would install" if dry_run else "Install"
             console.print(f"[bold]Node wrapper[/bold]: {action} {wrapper_path}")
@@ -2550,7 +2559,7 @@ def system_init(
                 )
             console.print()
 
-    if not plan.has_changes() and not rebuild_state and not wrapper_pending:
+    if not plan.has_changes() and not rebuild_state and not wrapper_pending and not config_missing:
         if json_output:
             plan_payload = plan_payload or {}
             plan_payload["applied"] = False
@@ -2634,6 +2643,8 @@ def system_init(
                     "written": config_written_path is not None,
                 },
             }
+        elif not options.config.config_file.exists():
+            config_written_path = write_config_file(options.config)
         wrapper_installed = install_node_wrapper(wrapper_path)
     except subprocess.CalledProcessError as exc:
         console.print(
@@ -2651,6 +2662,10 @@ def system_init(
         plan_payload["node_wrapper"] = {
             "path": str(wrapper_path),
             "action": "installed" if wrapper_installed else "unchanged",
+        }
+        plan_payload["config"] = {
+            "path": str(options.config.config_file),
+            "written": config_written_path is not None,
         }
         if rebuild_result is not None and rebuild_preview is not None:
             plan_payload["rebuild"] = {
@@ -2673,6 +2688,8 @@ def system_init(
             if bool(config_info.get("written")):
                 console.print(f"  • Wrote config file {config_info['path']}")
             console.print()
+        elif config_written_path is not None:
+            console.print(f"[green]Wrote config file {config_written_path}.[/green]")
         if wrapper_installed:
             console.print(f"[green]Installed node wrapper to {wrapper_path}.[/green]")
         console.print("[green]Bootstrap completed successfully.[/green]")
