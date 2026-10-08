@@ -2,7 +2,7 @@
 
 Version: 1.0.0
 Audience: core devs
-Companion: [`PATH_FORWARD.md`](PATH_FORWARD.md) (milestone story), [`NEXT_STEPS.md`](NEXT_STEPS.md) (catch-up snapshot)
+Companion: [`PATH_FORWARD.md`](PATH_FORWARD.md) (milestone story), [`NEXT_STEPS.md`](NEXT_STEPS.md) (catch-up snapshot), [`FUNCTIONAL_TESTS.md`](FUNCTIONAL_TESTS.md) (guest passes and Dev final review)
 
 GitHub Issues on `DocCyblade/abssctl` are the queue. PATH_FORWARD explains the milestones. NEXT_STEPS is a snapshot of the next three issues and a prompt for the first. If NEXT_STEPS and GitHub disagree, GitHub wins and the agent rewrites NEXT_STEPS.
 
@@ -34,9 +34,9 @@ Core devs move the cards. The agent does not.
 | `v1.0.0rc1` | The MITP checklist has been run. Operator docs match the CLI. |
 | `v1.0.0` | Current Actual release plus the ten before it, then GA. Production PyPI stays `0.1.3a1` until then. |
 
-Each milestone ends with an issue titled `Dev final review: <milestone>`. Core devs own that issue. It is a full manual pass using [`FUNCTIONAL_TESTS.md`](FUNCTIONAL_TESTS.md) once that file exists. It stays in Backlog until the other issues in the milestone are Done. An agent does not implement it and does not close it. A failure during the pass becomes a new Backlog issue. The review issue closes only when a core dev says the pass succeeded.
+Each milestone ends with an issue titled `Dev final review: <milestone>`. Core devs own that issue. It is a full manual pass using [`FUNCTIONAL_TESTS.md`](FUNCTIONAL_TESTS.md). It stays in Backlog until the other issues in the milestone are Done. An agent does not implement it and does not close it. A failure during the pass becomes a new Backlog issue. The review issue closes only when a core dev says the pass succeeded.
 
-The first `v0.2.0a1` issue is `Write the functional test procedure`. That chat writes `docs/FUNCTIONAL_TESTS.md` and does not change product code.
+Bounded guest passes (agents or core devs) also follow [`FUNCTIONAL_TESTS.md`](FUNCTIONAL_TESTS.md). File each failure as a Backlog issue with the milestone a core dev names.
 
 ## Remembering work that is not this chat
 
