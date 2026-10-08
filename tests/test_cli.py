@@ -298,6 +298,7 @@ exit 0
     env = {
         "ABSSCTL_CONFIG_FILE": str(config_file),
         "PATH": f"{bin_dir}:{os.environ.get('PATH', '')}",
+        "ABSSCTL_NODE_WRAPPER_PATH": str(bin_dir / "abssctl-node-run"),
     }
     if remote_versions is not None:
         cache_file = tmp_path / "remote.json"

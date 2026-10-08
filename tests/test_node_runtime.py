@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from abssctl.node_runtime import NodeRuntimeError, NodeRuntimeManager
+from abssctl.node_wrapper import packaged_wrapper_path
 
 
 def test_detect_version_handles_missing_binary(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -45,7 +46,12 @@ def test_ensure_version_installs_when_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """ensure_version should invoke n install when the version is absent."""
-    manager = NodeRuntimeManager(env_file=tmp_path / "abssctl-node", node_bin="node")
+    wrapper = tmp_path / "bin" / "abssctl-node-run"
+    manager = NodeRuntimeManager(
+        env_file=tmp_path / "abssctl-node",
+        wrapper_path=wrapper,
+        node_bin="node",
+    )
     calls: dict[str, int] = {"install": 0, "which": 0}
 
     state = {"installed": False}
@@ -75,6 +81,9 @@ def test_ensure_version_installs_when_missing(
     assert result.installed is True
     assert result.installation_performed is True
     assert result.env_changed is True
+    assert result.wrapper_changed is True
+    assert wrapper.is_file()
+    assert wrapper.read_bytes() == packaged_wrapper_path().read_bytes()
     assert calls["install"] == 1
     assert calls["which"] >= 2  # initial check + post-install confirmation
     contents = manager.env_file.read_text(encoding="utf-8")
@@ -86,7 +95,11 @@ def test_ensure_version_dry_run_skips_mutations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Dry-run ensure should report planned changes without touching disk."""
-    manager = NodeRuntimeManager(env_file=tmp_path / "abssctl-node")
+    wrapper = tmp_path / "bin" / "abssctl-node-run"
+    manager = NodeRuntimeManager(
+        env_file=tmp_path / "abssctl-node",
+        wrapper_path=wrapper,
+    )
     monkeypatch.setattr(NodeRuntimeManager, "_assert_n_available", lambda self: None)
     monkeypatch.setattr(NodeRuntimeManager, "_which_version", lambda self, version: None)
 
@@ -97,7 +110,9 @@ def test_ensure_version_dry_run_skips_mutations(
     result = manager.ensure_version("18.17.0", dry_run=True)
     assert result.dry_run is True
     assert result.env_changed is True
+    assert result.wrapper_changed is True
     assert not manager.env_file.exists()
+    assert not wrapper.exists()
 
 
 def test_ensure_version_errors_when_n_missing(monkeypatch: pytest.MonkeyPatch) -> None:
