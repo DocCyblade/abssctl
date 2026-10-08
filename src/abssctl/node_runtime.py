@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .logging import StructuredLogger
+from .node_wrapper import DEFAULT_WRAPPER_PATH, NodeWrapperError, install_node_wrapper
 
 LOGGER = logging.getLogger(__name__)
 
@@ -38,6 +39,8 @@ class NodeEnsureResult:
     installation_performed: bool
     env_file: Path
     env_changed: bool
+    wrapper_path: Path
+    wrapper_changed: bool
     node_path: Path | None
     dry_run: bool
 
@@ -48,6 +51,7 @@ class NodeRuntimeManager:
 
     logger: StructuredLogger | None = None
     env_file: Path = Path("/etc/default/abssctl-node")
+    wrapper_path: Path = DEFAULT_WRAPPER_PATH
     n_bin: str = "n"
     node_bin: str = "node"
 
@@ -97,6 +101,11 @@ class NodeRuntimeManager:
         if update_env:
             env_changed = self._write_env_file(normalized, dry_run=dry_run)
 
+        try:
+            wrapper_changed = install_node_wrapper(self.wrapper_path, dry_run=dry_run)
+        except NodeWrapperError as exc:
+            raise NodeRuntimeError(str(exc)) from exc
+
         self._log(
             f"Node ensure completed for {normalized}: "
             f"installed={node_path is not None} dry_run={dry_run}"
@@ -107,6 +116,8 @@ class NodeRuntimeManager:
             installation_performed=installation_performed,
             env_file=self.env_file,
             env_changed=env_changed,
+            wrapper_path=self.wrapper_path,
+            wrapper_changed=wrapper_changed,
             node_path=node_path,
             dry_run=dry_run,
         )

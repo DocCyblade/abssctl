@@ -85,6 +85,13 @@ from .node_compat import (
     load_node_compatibility,
 )
 from .node_runtime import NodeRuntimeError, NodeRuntimeManager
+from .node_wrapper import (
+    DEFAULT_WRAPPER_PATH,
+    NodeWrapperError,
+    install_node_wrapper,
+    resolve_wrapper_path,
+    wrapper_needs_install,
+)
 from .ports import PortsRegistry, PortsRegistryError
 from .providers import (
     InstanceStatusProvider,
@@ -198,7 +205,7 @@ if _archive_helpers is None:  # pragma: no cover - fallback for mutation/build c
 
 console = Console()
 
-NODE_WRAPPER_PATH = Path("/usr/local/bin/abssctl-node-run")
+NODE_WRAPPER_PATH = DEFAULT_WRAPPER_PATH
 NODE_ENV_FILE_PATH = Path("/etc/default/abssctl-node")
 
 CONFIG_FILE_OPTION = typer.Option(
@@ -1265,7 +1272,10 @@ def _ensure_runtime(
     backups_registry.ensure_root()
     tls_inspector = TLSInspector(config)
     tls_validator = TLSValidator(config.tls.validation)
-    node_runtime = NodeRuntimeManager(logger=logger)
+    node_runtime = NodeRuntimeManager(
+        logger=logger,
+        wrapper_path=resolve_wrapper_path(),
+    )
     compat_override = os.environ.get(NODE_COMPAT_ENV_VAR)
     compat_path: Path | None = None
     if compat_override:
@@ -1460,6 +1470,7 @@ def _resolve_node_manager(
     return NodeRuntimeManager(
         logger=runtime.logger,
         env_file=env_file or base.env_file,
+        wrapper_path=base.wrapper_path,
         n_bin=n_bin or base.n_bin,
         node_bin=base.node_bin,
     )
@@ -1554,7 +1565,7 @@ def _build_systemd_context(
         f"ABSSCTL_VERSION={version}",
     ]
     exec_command = (
-        f"{shlex.quote(str(NODE_WRAPPER_PATH))} {shlex.quote(str(exec_path))} "
+        f"{shlex.quote(str(resolve_wrapper_path()))} {shlex.quote(str(exec_path))} "
         f"--config {shlex.quote(str(config_path))}"
     )
     return {
@@ -2499,14 +2510,30 @@ def system_init(
     if rebuild_state:
         rebuild_preview = _planned_rebuild_outputs(options.config)
 
+    wrapper_path = resolve_wrapper_path()
+    try:
+        wrapper_pending = wrapper_needs_install(wrapper_path)
+    except NodeWrapperError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=4) from exc
+
     plan_payload = _bootstrap_plan_to_json(plan, options, dry_run=dry_run) if json_output else None
     if plan_payload is not None and discovery_payload is not None:
         plan_payload["discovery"] = discovery_payload
+    if plan_payload is not None:
+        plan_payload["node_wrapper"] = {
+            "path": str(wrapper_path),
+            "action": "install" if wrapper_pending else "unchanged",
+        }
 
     if not json_output:
         console.rule("[bold]Bootstrap Plan[/bold]")
         _render_bootstrap_plan(plan)
         console.print()
+        if wrapper_pending:
+            action = "Would install" if dry_run else "Install"
+            console.print(f"[bold]Node wrapper[/bold]: {action} {wrapper_path}")
+            console.print()
         if discovery_report is not None:
             _render_discovery_report(discovery_report)
             console.print()
@@ -2526,7 +2553,7 @@ def system_init(
                 )
             console.print()
 
-    if not plan.has_changes() and not rebuild_state:
+    if not plan.has_changes() and not rebuild_state and not wrapper_pending:
         if json_output:
             plan_payload = plan_payload or {}
             plan_payload["applied"] = False
@@ -2587,9 +2614,11 @@ def system_init(
             console.print("[yellow]Aborted; no changes were made.[/yellow]")
         return
 
+    wrapper_installed = False
     try:
-        apply_service_account_plan(plan.service)
-        apply_directory_plan(plan.directories)
+        if plan.has_changes():
+            apply_service_account_plan(plan.service)
+            apply_directory_plan(plan.directories)
         if rebuild_state:
             assert discovery_report is not None
             registry = StateRegistry(options.config.registry_dir)
@@ -2608,12 +2637,13 @@ def system_init(
                     "written": config_written_path is not None,
                 },
             }
+        wrapper_installed = install_node_wrapper(wrapper_path)
     except subprocess.CalledProcessError as exc:
         console.print(
             f"[red]Command '{' '.join(str(token) for token in exc.cmd)}' failed: {exc}[/red]"
         )
         raise typer.Exit(code=4) from exc
-    except OSError as exc:
+    except (OSError, NodeWrapperError) as exc:
         console.print(f"[red]Filesystem operation failed: {exc}[/red]")
         raise typer.Exit(code=4) from exc
 
@@ -2621,6 +2651,10 @@ def system_init(
         plan_payload = plan_payload or {}
         plan_payload["applied"] = True
         plan_payload["status"] = "applied"
+        plan_payload["node_wrapper"] = {
+            "path": str(wrapper_path),
+            "action": "installed" if wrapper_installed else "unchanged",
+        }
         if rebuild_result is not None and rebuild_preview is not None:
             plan_payload["rebuild"] = {
                 "planned": rebuild_preview,
@@ -2642,6 +2676,8 @@ def system_init(
             if bool(config_info.get("written")):
                 console.print(f"  • Wrote config file {config_info['path']}")
             console.print()
+        if wrapper_installed:
+            console.print(f"[green]Installed node wrapper to {wrapper_path}.[/green]")
         console.print("[green]Bootstrap completed successfully.[/green]")
 
 
@@ -2886,22 +2922,30 @@ def node_ensure(
             "installation_performed": result.installation_performed,
             "env_changed": result.env_changed,
             "env_file": str(result.env_file),
+            "wrapper_path": str(result.wrapper_path),
+            "wrapper_changed": result.wrapper_changed,
             "dry_run": dry_run,
         }
         status = "planned" if dry_run else "success"
         op.add_step("node.ensure", status=status, detail=json.dumps(detail, sort_keys=True))
 
-        changed = int(result.installation_performed) + int(result.env_changed)
+        changed = (
+            int(result.installation_performed)
+            + int(result.env_changed)
+            + int(result.wrapper_changed)
+        )
         if dry_run:
             console.print(
                 f"[yellow]Would ensure Node {required_version}; env file {result.env_file} "
-                "would be updated.[/yellow]"
+                f"and wrapper {result.wrapper_path} would be updated.[/yellow]"
             )
             op.success("Planned Node ensure run.", changed=0)
         else:
             console.print(
                 f"[green]Node {required_version} ready; env file {result.env_file} "
-                f"{'updated' if result.env_changed else 'unchanged'}.[/green]"
+                f"{'updated' if result.env_changed else 'unchanged'}; "
+                f"wrapper {result.wrapper_path} "
+                f"{'installed' if result.wrapper_changed else 'unchanged'}.[/green]"
             )
             op.success("Node ensure completed.", changed=changed)
 
