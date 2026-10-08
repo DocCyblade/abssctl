@@ -1,17 +1,30 @@
 # GitHub workflow for abssctl
 
-Version: 1.0.0
+Version: 1.1.0
 Audience: core devs
-Companion: [`PATH_FORWARD.md`](PATH_FORWARD.md) (milestone story), [`NEXT_STEPS.md`](NEXT_STEPS.md) (catch-up snapshot), [`FUNCTIONAL_TESTS.md`](FUNCTIONAL_TESTS.md) (guest passes and Dev final review)
+Companion: [`PATH_FORWARD.md`](PATH_FORWARD.md) (milestone story), [`NEXT_STEPS.md`](NEXT_STEPS.md) (catch-up snapshot), [`FUNCTIONAL_TESTS.md`](FUNCTIONAL_TESTS.md) (guest passes and Dev final review), [`adrs/ADR-034-repo-management-and-branching.md`](adrs/ADR-034-repo-management-and-branching.md) (branching)
 
 GitHub Issues on `DocCyblade/abssctl` are the queue. PATH_FORWARD explains the milestones. NEXT_STEPS is a snapshot of the next three issues and a prompt for the first. If NEXT_STEPS and GitHub disagree, GitHub wins and the agent rewrites NEXT_STEPS.
+
+## Branching and pull requests
+
+ADR-034 is the policy. Until the `v0.2.0a1` clean-`dev` squash ([#22](https://github.com/DocCyblade/abssctl/issues/22)):
+
+| Rule | Practice |
+|---|---|
+| Active tip | `dev-beta1-redux` |
+| Issue branches | Off the tip of that milestone branch (e.g. `issue/N-<slug>`) |
+| PR base | The same milestone branch. Never a casual PR to `main`. |
+| Merge into milestone | Prefer squash |
+| Into cleaned `dev` | Only at slice or milestone boundaries (#22) |
+| Into `main` | Only via `release/*`, `hotfix/*`, or `docfix/*` |
 
 ## Day-to-day loop
 
 1. A test failure becomes an issue. Title is the bug. Body has what was run, the exit code, and an evidence path if one exists. No keys, no tokens. Labels: `bug`, `docs`, `release`, or `todo`. The milestone is the version target.
 2. A core dev reviews it. If it is wrong, close it. If it is right, it stays in the milestone and on the board in Backlog until a core dev moves it to Ready. Ready is the signal to start work. No agent starts from an issue that is still in Backlog.
 3. A core dev opens a new Agent chat and pastes the handoff from [`CURSOR_WORKFLOW.md`](CURSOR_WORKFLOW.md). One chat, one issue.
-4. The agent edits code, runs `make quick-tests` (and `make docs` when Sphinx docs change), and stops. Commit, push, and a pull request only when the core dev in that chat asks. The pull request body contains `Fixes #N`.
+4. The agent branches off `dev-beta1-redux`, edits, runs `make quick-tests` (and `make docs` when Sphinx docs change), and stops. Commit, push, and a pull request only when the core dev in that chat asks. The PR base is `dev-beta1-redux`. The body contains `Fixes #N`. Prefer squash-merge into the milestone branch.
 5. A core dev merges. GitHub closes the issue.
 6. That chat rewrites [`NEXT_STEPS.md`](NEXT_STEPS.md) from the board before it stops.
 

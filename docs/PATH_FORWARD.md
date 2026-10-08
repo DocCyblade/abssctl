@@ -1,10 +1,12 @@
 # abssctl path forward (milestone story)
 
-Version: 1.1.0
-Date: 2026-10-06
+Version: 1.2.0
+Date: 2026-10-08
 Branch: `dev-beta1-redux` (cut from `dev-beta1`, not from `dev`)
 
 GitHub Issues are the queue. [`NEXT_STEPS.md`](NEXT_STEPS.md) is the catch-up snapshot of the next three. This file is the milestone story, not a second checkbox list. Start a chat from [`CURSOR_WORKFLOW.md`](CURSOR_WORKFLOW.md). Finished tracks stay in [`PATH_FORWARD_DONE.md`](PATH_FORWARD_DONE.md) as history.
+
+The working tip stays `dev-beta1-redux` until the clean-`dev` squash at the end of `v0.2.0a1` ([#22](https://github.com/DocCyblade/abssctl/issues/22)). Issue branches and PRs target that milestone branch, not `main` ([#23](https://github.com/DocCyblade/abssctl/issues/23), ADR-034).
 
 `dev` is not the base. Its only unique local commit is a `mutants/` dump. Do not merge that commit. Promote this branch to `dev` with a squash only when a slice is ready.
 
