@@ -901,9 +901,6 @@ def _collect_bootstrap_directory_specs(
         (config.runtime_dir, 0o750),
         (config.runtime_dir / "instances", 0o750),
         (config.runtime_dir / "systemd", 0o750),
-        (config.runtime_dir / "nginx", 0o750),
-        (config.runtime_dir / "nginx" / "sites-available", 0o750),
-        (config.runtime_dir / "nginx" / "sites-enabled", 0o750),
         (config.templates_dir, 0o755),
         (config.backups.root, 0o750),
         (config.backups.index.parent, 0o750),
@@ -1265,7 +1262,7 @@ def _ensure_runtime(
     )
     nginx_provider = NginxProvider(
         templates=templates,
-        sites_available=config.runtime_dir / "nginx" / "sites-available",
+        sites_available=config.nginx.sites_available,
         sites_enabled=config.nginx.sites_enabled,
     )
     backups_registry = BackupsRegistry(config.backups.root, config.backups.index)
@@ -2486,7 +2483,7 @@ def system_init(
             logs_root=options.config.logs_dir,
             state_root=options.config.state_dir,
             systemd_dir=options.config.systemd.unit_dir or Path("/etc/systemd/system"),
-            nginx_sites_available=options.config.runtime_dir / "nginx" / "sites-available",
+            nginx_sites_available=options.config.nginx.sites_available,
         )
         if rebuild_state and discovery_report.errors:
             message = (

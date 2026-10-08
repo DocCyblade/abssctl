@@ -32,8 +32,8 @@ def _setup_instance_assets(tmp_path: Path, name: str) -> None:
     unit_path.write_text("[Unit]\nDescription=Stub\n", encoding="utf-8")
     unit_path.chmod(0o644)
 
-    sites_available = runtime_dir / "nginx" / "sites-available"
-    sites_enabled = runtime_dir / "nginx" / "sites-enabled"
+    sites_available = tmp_path / "etc" / "nginx" / "sites-available"
+    sites_enabled = tmp_path / "etc" / "nginx" / "sites-enabled"
     sites_available.mkdir(parents=True, exist_ok=True)
     sites_enabled.mkdir(parents=True, exist_ok=True)
     site_path = sites_available / f"abssctl-{name}.conf"

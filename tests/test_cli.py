@@ -238,7 +238,8 @@ exit 0
             "journalctl_bin": str(bin_dir / "journalctl"),
         },
         "nginx": {
-            "sites_enabled": str(runtime_dir / "nginx" / "sites-enabled"),
+            "sites_available": str(tmp_path / "etc" / "nginx" / "sites-available"),
+            "sites_enabled": str(tmp_path / "etc" / "nginx" / "sites-enabled"),
         },
         "tls": {
             "system": {
@@ -290,8 +291,8 @@ exit 0
     logs_dir.mkdir(parents=True, exist_ok=True)
     runtime_dir.mkdir(parents=True, exist_ok=True)
     (runtime_dir / "systemd").mkdir(parents=True, exist_ok=True)
-    (runtime_dir / "nginx" / "sites-available").mkdir(parents=True, exist_ok=True)
-    (runtime_dir / "nginx" / "sites-enabled").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "etc" / "nginx" / "sites-available").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "etc" / "nginx" / "sites-enabled").mkdir(parents=True, exist_ok=True)
     templates_dir.mkdir(parents=True, exist_ok=True)
     state_dir.mkdir(parents=True, exist_ok=True)
 
@@ -363,7 +364,9 @@ def _capture_tls_snapshot(
     operations_lines = operations_path.read_text(encoding="utf-8").splitlines()
     last_operation = json.loads(operations_lines[-1]) if operations_lines else None
 
-    site_path = tmp_path / "run" / "nginx" / "sites-available" / f"abssctl-{instance}.conf"
+    site_path = (
+        tmp_path / "etc" / "nginx" / "sites-available" / f"abssctl-{instance}.conf"
+    )
     site_contents = site_path.read_text(encoding="utf-8") if site_path.exists() else None
 
     return {
@@ -574,10 +577,11 @@ def test_runtime_uses_host_systemd_and_nginx_paths(
     assert result.exit_code == 0
     payload = _extract_json(result.stdout)
     assert payload["systemd"]["unit_dir"] == "/etc/systemd/system"
+    assert payload["nginx"]["sites_available"] == "/etc/nginx/sites-available"
     assert payload["nginx"]["sites_enabled"] == "/etc/nginx/sites-enabled"
     assert captured["systemd_dir"] == Path("/etc/systemd/system")
     assert captured["sites_enabled"] == Path("/etc/nginx/sites-enabled")
-    assert captured["sites_available"] == tmp_path / "run" / "nginx" / "sites-available"
+    assert captured["sites_available"] == Path("/etc/nginx/sites-available")
 
 
 def test_ports_list_reports_reservations(tmp_path: Path) -> None:
@@ -763,8 +767,7 @@ def test_tls_install_updates_registry(tmp_path: Path) -> None:
     assert Path(str(tls_block.get("cert"))).exists()
     assert Path(str(tls_block.get("key"))).exists()
 
-    runtime_dir = tmp_path / "run"
-    site_path = runtime_dir / "nginx" / "sites-available" / "abssctl-alpha.conf"
+    site_path = tmp_path / "etc" / "nginx" / "sites-available" / "abssctl-alpha.conf"
     assert site_path.exists()
     contents = site_path.read_text(encoding="utf-8")
     assert f"ssl_certificate {tls_block['cert']};" in contents
@@ -800,8 +803,7 @@ def test_tls_use_system_switches_source(tmp_path: Path) -> None:
     assert entry is not None
     tls_block = entry.get("tls", {})
     assert tls_block.get("source") == "system"
-    runtime_dir = tmp_path / "run"
-    site_path = runtime_dir / "nginx" / "sites-available" / "abssctl-alpha.conf"
+    site_path = tmp_path / "etc" / "nginx" / "sites-available" / "abssctl-alpha.conf"
     contents = site_path.read_text(encoding="utf-8")
     assert f"ssl_certificate {tls_block['cert']};" in contents
     assert f"ssl_certificate_key {tls_block['key']};" in contents
@@ -1084,11 +1086,11 @@ def test_backup_create_generates_archive(tmp_path: Path) -> None:
     systemd_path.parent.mkdir(parents=True, exist_ok=True)
     systemd_path.write_text("[Unit]\nDescription=alpha\n", encoding="utf-8")
 
-    nginx_site = runtime_dir / "nginx" / "sites-available" / "abssctl-alpha.conf"
+    nginx_site = tmp_path / "etc" / "nginx" / "sites-available" / "abssctl-alpha.conf"
     nginx_site.parent.mkdir(parents=True, exist_ok=True)
     nginx_site.write_text("server { }\n", encoding="utf-8")
 
-    nginx_enabled = runtime_dir / "nginx" / "sites-enabled" / "abssctl-alpha.conf"
+    nginx_enabled = tmp_path / "etc" / "nginx" / "sites-enabled" / "abssctl-alpha.conf"
     nginx_enabled.parent.mkdir(parents=True, exist_ok=True)
     try:
         nginx_enabled.symlink_to(nginx_site)
@@ -1720,8 +1722,8 @@ def test_instance_delete_triggers_backup(tmp_path: Path, monkeypatch: pytest.Mon
 
     runtime_dir = tmp_path / "run"
     (runtime_dir / "systemd").mkdir(parents=True, exist_ok=True)
-    (runtime_dir / "nginx" / "sites-available").mkdir(parents=True, exist_ok=True)
-    (runtime_dir / "nginx" / "sites-enabled").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "etc" / "nginx" / "sites-available").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "etc" / "nginx" / "sites-enabled").mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(
         SystemdProvider,
@@ -2597,7 +2599,7 @@ def test_version_install_triggers_backup(
     systemd_path.parent.mkdir(parents=True, exist_ok=True)
     systemd_path.write_text("[Unit]\nDescription=alpha\n", encoding="utf-8")
 
-    nginx_site = runtime_dir / "nginx" / "sites-available" / "abssctl-alpha.conf"
+    nginx_site = tmp_path / "etc" / "nginx" / "sites-available" / "abssctl-alpha.conf"
     nginx_site.parent.mkdir(parents=True, exist_ok=True)
     nginx_site.write_text("server { }\n", encoding="utf-8")
 
@@ -3001,7 +3003,7 @@ def test_instance_create_acquires_lock(tmp_path: Path) -> None:
     assert systemd_unit.exists()
     assert "Actual Budget Sync Server" in systemd_unit.read_text(encoding="utf-8")
 
-    nginx_site = runtime_dir / "nginx" / "sites-available" / "abssctl-alpha.conf"
+    nginx_site = tmp_path / "etc" / "nginx" / "sites-available" / "abssctl-alpha.conf"
     assert nginx_site.exists()
     assert "server_name alpha.local" in nginx_site.read_text(encoding="utf-8")
 
@@ -3032,7 +3034,7 @@ def test_instance_create_acquires_lock(tmp_path: Path) -> None:
     assert "nginx.enable" in steps_by_name
     reload_steps = [step for step in steps if step.get("name") == "nginx.reload"]
     assert len(reload_steps) == 2
-    nginx_enabled = runtime_dir / "nginx" / "sites-enabled" / "abssctl-alpha.conf"
+    nginx_enabled = tmp_path / "etc" / "nginx" / "sites-enabled" / "abssctl-alpha.conf"
     assert nginx_enabled.is_symlink()
     assert nginx_enabled.resolve() == nginx_site.resolve()
     assert "registry.write_instances" in steps_by_name
@@ -3099,7 +3101,9 @@ def test_instance_create_rolls_back_on_systemd_failure(
 
     runtime_dir = tmp_path / "run"
     assert not (runtime_dir / "systemd" / "abssctl-alpha.service").exists()
-    assert not (runtime_dir / "nginx" / "sites-available" / "abssctl-alpha.conf").exists()
+    assert not (
+        tmp_path / "etc" / "nginx" / "sites-available" / "abssctl-alpha.conf"
+    ).exists()
 
     registry_instances = _registry_instances(state_dir)
     assert all(item.get("name") != "alpha" for item in registry_instances)
@@ -4440,8 +4444,8 @@ def test_instance_delete_cleans_files_and_releases_port(
     logs_instance_dir = tmp_path / "logs" / "alpha"
     state_instance_dir = state_dir / "instances" / "alpha"
     systemd_unit = runtime_dir / "systemd" / "abssctl-alpha.service"
-    nginx_site = runtime_dir / "nginx" / "sites-available" / "abssctl-alpha.conf"
-    nginx_enabled = runtime_dir / "nginx" / "sites-enabled" / "abssctl-alpha.conf"
+    nginx_site = tmp_path / "etc" / "nginx" / "sites-available" / "abssctl-alpha.conf"
+    nginx_enabled = tmp_path / "etc" / "nginx" / "sites-enabled" / "abssctl-alpha.conf"
 
     assert systemd_unit.exists()
     assert nginx_site.exists()

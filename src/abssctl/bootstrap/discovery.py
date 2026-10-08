@@ -70,7 +70,8 @@ def discover_instances(
         if systemd_dir is not None:
             instance.systemd_unit = systemd_dir / f"abssctl-{name}.service"
         if nginx_sites_available is not None:
-            instance.nginx_site = nginx_sites_available / f"{name}.conf"
+            safe = name.replace("/", "-")
+            instance.nginx_site = nginx_sites_available / f"abssctl-{safe}.conf"
 
         if not config_path.exists():
             instance.warnings.append(f"config.json missing under {child}.")

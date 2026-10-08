@@ -41,6 +41,5 @@ No track is in progress. Mutation survivor hunting stays local and on demand.
 
 The `test-nodeapp02` takeover is done. Doctor still exits 4. The write-up is track R in [`PATH_FORWARD_DONE.md`](PATH_FORWARD_DONE.md).
 
-- `nginx-sites` is red. The provider looks for `/run/abssctl/nginx/sites-available/abssctl-<name>.conf`. The live sites are `/etc/nginx/sites-available/abssctl-<name>.conf`.
 - `tls-system-cert` is red. `/etc/ssl/private/cert.pem` and `cert.key` are mode `0400`. The test sites use `/root/ssl/`.
 - `app-instance-status` is yellow. Discovery left the domain unset, and `versions.yml` is empty.

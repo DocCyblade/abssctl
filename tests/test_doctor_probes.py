@@ -171,6 +171,7 @@ def test_probe_state_reconcile_reports_discovery_errors(
         runtime_dir=tmp_path / "run",
         logs_dir=tmp_path / "logs",
         state_dir=tmp_path / "state",
+        nginx=SimpleNamespace(sites_available=tmp_path / "etc" / "nginx" / "sites-available"),
     )
     context = _build_context(config=config, registry=DummyRegistry([]))
 
@@ -202,6 +203,7 @@ def test_probe_state_reconcile_highlights_registry_mismatches(
         runtime_dir=tmp_path / "run",
         logs_dir=tmp_path / "logs",
         state_dir=tmp_path / "state",
+        nginx=SimpleNamespace(sites_available=tmp_path / "etc" / "nginx" / "sites-available"),
     )
     context = _build_context(config=config, registry=registry)
 
@@ -234,6 +236,7 @@ def test_probe_state_reconcile_reports_filesystem_only_mismatch(
         runtime_dir=tmp_path / "run",
         logs_dir=tmp_path / "logs",
         state_dir=tmp_path / "state",
+        nginx=SimpleNamespace(sites_available=tmp_path / "etc" / "nginx" / "sites-available"),
     )
     context = _build_context(config=config, registry=registry)
 
@@ -257,6 +260,7 @@ def test_probe_state_reconcile_reports_registry_only_mismatch(
         runtime_dir=tmp_path / "run",
         logs_dir=tmp_path / "logs",
         state_dir=tmp_path / "state",
+        nginx=SimpleNamespace(sites_available=tmp_path / "etc" / "nginx" / "sites-available"),
     )
     context = _build_context(config=config, registry=registry)
 
@@ -288,6 +292,7 @@ def test_probe_state_reconcile_handles_discovery_warnings(
         runtime_dir=tmp_path / "run",
         logs_dir=tmp_path / "logs",
         state_dir=tmp_path / "state",
+        nginx=SimpleNamespace(sites_available=tmp_path / "etc" / "nginx" / "sites-available"),
     )
     context = _build_context(config=config, registry=registry)
 
@@ -318,6 +323,7 @@ def test_probe_state_reconcile_warns_on_instance_only_warnings(
         runtime_dir=tmp_path / "run",
         logs_dir=tmp_path / "logs",
         state_dir=tmp_path / "state",
+        nginx=SimpleNamespace(sites_available=tmp_path / "etc" / "nginx" / "sites-available"),
     )
     context = _build_context(config=config, registry=registry)
 
@@ -347,6 +353,7 @@ def test_probe_state_reconcile_green_when_registry_matches(
         runtime_dir=tmp_path / "run",
         logs_dir=tmp_path / "logs",
         state_dir=tmp_path / "state",
+        nginx=SimpleNamespace(sites_available=tmp_path / "etc" / "nginx" / "sites-available"),
     )
     context = _build_context(config=config, registry=registry)
 
@@ -369,6 +376,7 @@ def test_probe_state_reconcile_when_no_instances(
         runtime_dir=tmp_path / "run",
         logs_dir=tmp_path / "logs",
         state_dir=tmp_path / "state",
+        nginx=SimpleNamespace(sites_available=tmp_path / "etc" / "nginx" / "sites-available"),
     )
     context = _build_context(config=config, registry=registry)
 
